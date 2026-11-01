@@ -95,7 +95,7 @@ class AdGroups
     {
         $ids = $bad = [];
         foreach (preg_split('/[\s,;]+/u', $text, -1, PREG_SPLIT_NO_EMPTY) as $t) {
-            if (preg_match('/^\d{1,64}$/', $t)) $ids[$t] = true;
+            if (preg_match('/^\d{1,64}\z/', $t)) $ids[$t] = true;
             else $bad[$t] = true;
         }
 
@@ -201,7 +201,7 @@ class AdGroups
      */
     private function match(string $page, ?string $ad, bool $lookup): array
     {
-        if ($ad === null || !preg_match('/^\d{1,64}$/', $ad)) return [null, null, false];
+        if ($ad === null || !preg_match('/^\d{1,64}\z/', $ad)) return [null, null, false];
         $index = $this->index($page);
         if (isset($index[$ad])) return [$index[$ad], null, false];
         if (!$index) return [null, null, false];
@@ -235,7 +235,7 @@ class AdGroups
     {
         $v = is_scalar($v) ? trim((string) $v) : '';
 
-        return preg_match('/^\d{1,64}$/', $v) ? $v : null;
+        return preg_match('/^\d{1,64}\z/', $v) ? $v : null;
     }
 
     /** @return ?array{adset: ?string, campaign: ?string} */
@@ -281,7 +281,10 @@ class AdGroups
                 return ['note' => 'Ad lookup for ' . $ad . ' still running: page values', 'unresolved' => true];
             }
             try {
+                // Ang naunang may lock ay maaaring nakatapos na (nakita, wala, o pumalya): walang pangalawang tawag.
                 if (is_array($p = Cache::get(self::PARENTS . $ad))) return $p;
+                if (Cache::has($none)) return [];
+                if (Cache::has($fail)) return $failed;
                 $rate = 'chatbot-adgroups:lookup:rate:' . sha1($this->settings->pageKey($page));
                 if (RateLimiter::tooManyAttempts($rate, self::LOOKUPS_PER_MINUTE)) {
                     return ['note' => 'Ad lookup for ' . $ad . ' skipped (' . self::LOOKUPS_PER_MINUTE . ' lookups this minute already): page values', 'unresolved' => true];
@@ -312,9 +315,11 @@ class AdGroups
 
             return ['note' => 'Ad ' . $ad . ' not found in Meta: page values'];
         };
-        // Walang Meta Ads connection (o lahat ay expired): hindi maitatanong hanggang may mag-Connect. Gaya ng "wala" ito
-        // para sa sequence (page values ang itinatala, gaya ng dati), at hindi inuulit nang LOOKUP_RETRY segundo.
-        $token = $this->metaToken($page);
+        // Walang kahit isang Meta Ads connection: hindi maitatanong hanggang may mag-Connect, kaya gaya ng "wala" ito para
+        // sa sequence (page values ang itinatala, gaya ng dati). May connection pero expired o hindi mabasa ang token:
+        // pumalya (hindi itinatala; kinukuha ulit pagkatapos ng Reconnect). Parehong hindi inuulit nang LOOKUP_RETRY segundo.
+        [$token, $connected] = $this->metaToken($page);
+        if ($token === null && $connected) return $failed('Meta token expired: Reconnect');
         if ($token === null) {
             Cache::put($none, true, self::LOOKUP_RETRY);
 
@@ -355,15 +360,17 @@ class AdGroups
 
     /**
      * Ang token ng Meta Ads connection na gagamitin (gaya ng sync): ang may ad account ng page muna (ayon sa reports),
-     * saka ang unang hindi expired. Hindi kailanman ipinapakita o itinatala.
+     * saka ang unang hindi expired. Hindi kailanman ipinapakita o itinatala. Ang ikalawa: may connection ba kahit isa.
+     * @return array{0: ?string, 1: bool}
      */
-    private function metaToken(string $page): ?string
+    private function metaToken(string $page): array
     {
         try {
             $connections = app(Connections::class);
-            $all = array_filter($connections->all(), fn ($c) => ($c['status'] ?? 'ok') !== 'expired');
+            $every = $connections->all();
+            $all = array_filter($every, fn ($c) => ($c['status'] ?? 'ok') !== 'expired');
         } catch (QueryException) {
-            return null;
+            return [null, false];
         }
         $bare = fn ($id) => preg_replace('/^act_/', '', trim((string) $id));
         $mine = [];
@@ -374,9 +381,9 @@ class AdGroups
         }
         $ours = fn (array $c) => (bool) array_filter($c['ad_accounts'] ?? [], fn ($x) => isset($mine[$bare($x['id'] ?? '')]));
         uasort($all, fn ($a, $b) => $ours($b) <=> $ours($a));
-        foreach ($all as $c) if (($t = $connections->token($c)) !== null && $t !== '') return $t;
+        foreach ($all as $c) if (($t = $connections->token($c)) !== null && $t !== '') return [$t, true];
 
-        return null;
+        return [null, (bool) $every];
     }
 
     /**
@@ -390,13 +397,13 @@ class AdGroups
             ->orderByDesc('id')->limit(self::RECENT_CHATS)->get(['id', 'payload']);
         foreach ($chats as $c) {
             $ad = trim((string) ($c->payload['ad_id'] ?? ''));
-            if (preg_match('/^\d{1,64}$/', $ad)) return $ad;
+            if (preg_match('/^\d{1,64}\z/', $ad)) return $ad;
         }
         $key = $this->settings->pageKey($page);
         $ad = BotcakePsid::where('psid', (string) $psid)->whereNotNull('ad_id')->where('ad_id', '<>', '')->get(['page', 'ad_id'])
             ->first(fn ($r) => $this->settings->pageKey((string) $r->page) === $key)?->ad_id;
 
-        return $ad !== null && preg_match('/^\d{1,64}$/', (string) $ad) ? (string) $ad : null;
+        return $ad !== null && preg_match('/^\d{1,64}\z/', (string) $ad) ? (string) $ad : null;
     }
 
     /**
@@ -771,7 +778,7 @@ class AdGroups
      */
     private function parentsMany(array $ads): array
     {
-        $ads = array_values(array_filter($ads, fn ($a) => preg_match('/^\d{1,64}$/', $a)));
+        $ads = array_values(array_filter($ads, fn ($a) => preg_match('/^\d{1,64}\z/', $a)));
         sort($ads, SORT_STRING);
         if (!$ads) return [];
 
@@ -804,7 +811,7 @@ class AdGroups
      */
     private function levels(array $ids): array
     {
-        $ids = array_values(array_filter($ids, fn ($a) => preg_match('/^\d{1,64}$/', $a)));
+        $ids = array_values(array_filter($ids, fn ($a) => preg_match('/^\d{1,64}\z/', $a)));
         sort($ids, SORT_STRING);
         $out = ['kind' => [], 'names' => [], 'children' => []];
         if (!$ids) return $out;
@@ -893,7 +900,7 @@ class AdGroups
      */
     public function statuses(array $ads): array
     {
-        $ads = array_values(array_unique(array_filter(array_map('strval', $ads), fn ($a) => preg_match('/^\d{1,64}$/', $a))));
+        $ads = array_values(array_unique(array_filter(array_map('strval', $ads), fn ($a) => preg_match('/^\d{1,64}\z/', $a))));
         sort($ads, SORT_STRING);
         if (!$ads || !\Illuminate\Support\Facades\Schema::hasTable('ads_manager_reports')) return ['as_of' => null, 'ads' => []];
 
@@ -943,7 +950,7 @@ class AdGroups
         $first = [];
         $add = function ($ad, $psid, $at, $from = null) use (&$psids, &$last, &$first) {
             $ad = trim((string) $ad);
-            if (!preg_match('/^\d{1,64}$/', $ad)) return;
+            if (!preg_match('/^\d{1,64}\z/', $ad)) return;
             $psids[$ad][(string) $psid] = true;
             $at = $at ? (string) \Carbon\Carbon::parse($at)->format('Y-m-d H:i:s') : null;
             if ($at && ($last[$ad] ?? '') < $at) $last[$ad] = $at;

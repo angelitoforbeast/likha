@@ -677,4 +677,44 @@ class AdGroupRunTest extends ChatblastTestCase
         $this->assertStringNotContainsString(self::META_TOKEN, json_encode($rows));
         $this->assertStringNotContainsString('Ana Cruz', json_encode($rows));
     }
+
+    public function test_S_212_2_6_and_2_7_an_expired_meta_connection_is_a_failure_and_the_sequence_is_not_pinned(): void
+    {
+        $this->metaConnection();
+        app(\App\Services\MetaAds\Connections::class)->update(1, ['status' => 'expired']);
+        $this->meta(['id' => '1']);
+        $this->groupWith('By campaign', [self::CAMPAIGN]);
+        $seq = $this->sequence();
+        $this->chat('40013', '7001');
+        app(ChatbotSequences::class)->subscribe($seq->id, 1001, 7001, 'other');
+        $this->assertNull((new CustomerFields(1001, 7001))->get(AdGroups::SEQ_PIN . $seq->id), 'expired: hindi itinatala bilang page values');
+        $g = app(AdGroups::class);
+        $this->assertNull($g->forCustomer('1001', '7001', 'Page P'));
+        $this->assertTrue($g->unresolved);
+        $this->assertSame(0, $this->metaCalls());
+    }
+
+    public function test_S_212_2_7_a_sequence_subscribed_after_a_wait_resume_during_a_failed_lookup_is_not_pinned(): void
+    {
+        $this->metaConnection();
+        $this->meta([503, 'down']);
+        $this->groupWith('By campaign', [self::CAMPAIGN]);
+        $seq = $this->sequence(1);
+        $flow = ChatbotFlow::create(['name' => 'Wait flow', 'graph' => FlowGraph::clean(['nodes' => [
+            ['id' => 'n1', 'type' => 'start'],
+            ['id' => 'n2', 'type' => 'send', 'config' => ['items' => [['type' => 'text', 'value' => 'Hi {{PRICE}}']], 'wait' => true, 'skip_after' => ['amount' => 1, 'unit' => 'hours']]],
+            ['id' => 'n3', 'type' => 'sequence', 'config' => ['action' => 'subscribe', 'sequence_id' => $seq->id]],
+        ], 'edges' => [['from' => 'n1', 'port' => 'next', 'to' => 'n2'], ['from' => 'n2', 'port' => 'skipped', 'to' => 'n3']]])]);
+        DB::table('chatbot_flows')->where('id', $flow->id)->update(['published_at' => now()]);
+        app(ChatbotPage::class)->link('Page P', $flow->fresh());
+        $this->chat('40014', '7001', true);
+        $this->assertSame(['Hi 199'], $this->sent('7001'));
+        $wait = DB::table('chatbot_waits')->where('psid', 7001)->value('id');
+        $this->assertNotNull($wait);
+        $this->travel(61)->minutes();
+        app(ChatbotRunner::class)->skip((int) $wait);
+        $this->assertNotNull(DB::table('chatbot_sequence_subscriptions')->where('sequence_id', $seq->id)->where('psid', 7001)->first(), 'na-subscribe');
+        $this->assertNull((new CustomerFields(1001, 7001))->get(AdGroups::SEQ_PIN . $seq->id), 'ang pumalyang lookup ay hindi itinatala');
+        $this->assertSame(2, DB::table('chatbot_events')->where('psid', 7001)->where('type', 'ad_lookup')->count(), 'pati ang takbo ng skip ay may tala');
+    }
 }
