@@ -181,6 +181,8 @@ class ForbeastHoldTest extends ChatblastTestCase
         $this->artisan('chatbot:forbeast-watch')->assertSuccessful();
         $this->assertCount(1, $this->events(ForbeastWatch::RECOVERED));
 
+        // Ang naipadala ng page na wala sa burst ay hindi patunay para sa mga pumapalyang page.
+        $this->send(6);
         foreach ([1, 2, 3, 4, 5] as $n) $this->send($n);
         $this->send(1, 2);
         $this->assertSame('botcake', $this->provider(1));

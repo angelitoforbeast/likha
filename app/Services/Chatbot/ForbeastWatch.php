@@ -210,7 +210,7 @@ class ForbeastWatch
      * mula sa simula ang bilang ng walang sagot at palya ng mga page sa hold, at isang "recovered" event (walang nailipat).
      * Ang sagot mula sa page na wala sa hold ay hindi patunay: maaaring ibang daan o ibang sira iyon. Pagkatapos ng hold na
      * nauwi sa lipat, ang sagot ay tahimik na nagtatapos dito (bagong burst, bagong hold). Ang tinapos ng health check lang
-     * ay may tandang "probed" nang back_minutes (walang bagong hold) hanggang may maipadala ulit sa gateway.
+     * ay may tandang "probed" nang back_minutes (walang bagong hold) hanggang may maipadala ulit ang isang page ng burst.
      */
     private function recovered(string $page, string $gw, string $via): void
     {
@@ -218,14 +218,15 @@ class ForbeastWatch
         $peek = Cache::get(self::holdKey($gw));
         if (!is_array($peek)) return; // ang karaniwang padala: isang basa lang ng cache
         if (isset($peek['probed'])) {
-            if ($via === 'send') Cache::forget(self::holdKey($gw));
+            // Ang naipadala ng page na nasa burst lang ang patunay: ang ibang page ay maaaring dumaan sa gumaganang bahagi.
+            if ($via === 'send' && isset($peek['seen'][$hash])) Cache::forget(self::holdKey($gw));
             return;
         }
         if (!isset($peek['seen'][$hash])) return;
         $hold = $this->underHold($gw, function () use ($gw, $hash, $via) {
             $hold = Cache::get(self::holdKey($gw));
             if (!is_array($hold) || !isset($hold['seen'][$hash])) return null;
-            if ($via === 'health' && empty($hold['ended'])) Cache::put(self::holdKey($gw), ['probed' => now()->getTimestamp()], self::limit('back_minutes') * 60);
+            if ($via === 'health' && empty($hold['ended'])) Cache::put(self::holdKey($gw), ['probed' => now()->getTimestamp(), 'seen' => $hold['seen']], self::limit('back_minutes') * 60);
             else Cache::forget(self::holdKey($gw));
             Cache::forget(self::holdKey($gw, 'burst'));
 
