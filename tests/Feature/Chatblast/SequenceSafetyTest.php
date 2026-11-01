@@ -177,7 +177,7 @@ class SequenceSafetyTest extends SequenceHandoffTestCase
         DB::table('chatbot_sequence_subscriptions')->where('id', $id)->update(['dispatched_at' => '2026-11-02 09:00:00']);
         $levels = [];
         DB::listen(function ($q) use (&$levels) {
-            if (str_contains($q->sql, 'insert into "botcake_send_requests"')) $levels[] = DB::transactionLevel();
+            if (preg_match('/^insert into [`"]?botcake_send_requests[`"]?/i', $q->sql)) $levels[] = DB::transactionLevel(); // any quote style (sqlite, MySQL)
         });
         $ticket = BotcakeSendQueue::submitSequence($run, 'n10', [['type' => 'text', 'text' => 'Hi']]);
         $this->assertSame([1], $levels, 'inserted inside the same transaction as the link');
@@ -465,31 +465,44 @@ class SequenceSafetyTest extends SequenceHandoffTestCase
         $this->assertSame(2000, Queue::pushed(RunChatbotSequenceStep::class)->pluck('subscriptionId')->unique()->count(), 'no row hidden');
     }
 
-    public function test_S_215d_5_a_running_job_is_never_claimed_again_and_a_killed_one_is_picked_up_after_the_window(): void
+    public function test_S_215d_5_a_running_job_is_never_claimed_again_and_its_marker_runs_out_after_its_timeout(): void
     {
-        $seq = $this->sequence('Running', [$this->stepFlow(['Hi'])->id]);
+        $seq = $this->sequence('Running', [$this->stepFlow(['{{line}}'], [['type' => 'ai', 'config' => ['user' => 'hi', 'save_to' => 'line'], 'port' => 'success']])->id]);
+        config(['services.openai.key' => 'sk-test-not-real']);
         $id = $this->join($seq, '7001');
         $this->tick();
         $job = Queue::pushed(RunChatbotSequenceStep::class)->first();
-        $this->assertSame(ChatbotSequences::HANDOFF_TIMEOUT, $job->timeout);
-        $this->assertLessThan(ChatbotSequences::STALE_MINUTES * 60, $job->timeout, 'the job times out inside the stale window');
-        (new UniqueLock(app('cache.store')))->release($job);
-        // The job is running (its marker is set by runStep), started 3 minutes after its claim.
-        $this->travel(3)->minutes();
-        Cache::put(ChatbotSequences::RUNNING . $id, 1, ChatbotSequences::HANDOFF_TIMEOUT + 10);
-        DB::table('chatbot_sequence_subscriptions')->where('id', $id)->update(['dispatched_at' => now()->subMinutes(3)]);
-        $this->pool->beat();
-        $this->replyPool->beat();
-        $this->tick();
-        Queue::assertPushed(RunChatbotSequenceStep::class, 1);
+        $this->assertSame(ChatbotSequences::INLINE_TIMEOUT, $job->timeout);
+        $claimed = DB::table('chatbot_sequence_subscriptions')->where('id', $id)->value('dispatched_at');
+        $this->travel(3)->minutes(); // the job starts 3 minutes after its claim (a queue backlog)
+        $start = now()->format('Y-m-d H:i:s');
+        $seen = [];
+        Http::fake(['api.openai.com/*' => function () use ($id, &$seen, $start) {
+            // The step is running (a slow AI call). The tick runs meanwhile.
+            $seen['restamp'] = DB::table('chatbot_sequence_subscriptions')->where('id', $id)->value('dispatched_at');
+            foreach ([200, 289] as $s) {
+                $this->travelTo(\Carbon\Carbon::parse($start)->addSeconds($s));
+                $this->pool->beat();
+                $this->replyPool->beat();
+                $this->tick();
+                $seen[$s] = Queue::pushed(RunChatbotSequenceStep::class)->count();
+            }
+            // Past the job's timeout + 10 s: a job still "running" now was killed; its row is picked up once.
+            $this->travelTo(\Carbon\Carbon::parse($start)->addSeconds(ChatbotSequences::INLINE_TIMEOUT + 11));
+            $this->pool->beat();
+            $this->replyPool->beat();
+            $this->tick();
+            $seen['after'] = Queue::pushed(RunChatbotSequenceStep::class)->count();
 
-        // Killed at its timeout: the marker runs out and the row is picked up once.
-        $this->travel(ChatbotSequences::HANDOFF_TIMEOUT + 11)->seconds();
-        $this->pool->beat();
-        $this->replyPool->beat();
-        $this->tick();
-        $this->tick();
-        Queue::assertPushed(RunChatbotSequenceStep::class, 2);
+            return Http::response(['choices' => [['message' => ['content' => 'AI line']]]]);
+        }]);
+        (new UniqueLock(app('cache.store')))->release($job);
+        app()->call([$job, 'handle']);
+
+        $this->assertNotSame($claimed, $seen['restamp']);
+        $this->assertSame($start, $seen['restamp'], 'the claim is re-stamped when the step starts');
+        $this->assertSame([1, 1], [$seen[200], $seen[289]], 'not claimed again while it runs, though older than the 2-minute window');
+        $this->assertSame(2, $seen['after'], 'the marker lives for the job\'s timeout + 10 s');
     }
 
     public function test_S_215d_6_without_the_new_column_the_tick_and_the_step_work_as_before(): void

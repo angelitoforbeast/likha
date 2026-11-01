@@ -54,7 +54,7 @@ class SequenceHandoffTest extends SequenceHandoffTestCase
         $start = microtime(true);
         $this->work(RunChatbotSequenceStep::class);
         $this->assertLessThan(0.5, microtime(true) - $start, 'handle() ends without waiting on the API');
-        $this->assertSame(100, $job->timeout, 'the hand-off job times out below the 2-minute stale window');
+        $this->assertSame(280, $job->timeout, 'the job keeps its timeout; a running job is protected by its marker');
 
         $t = $this->tickets()->sole();
         $this->assertSame(['sequence', 'pending'], [$t->kind, $t->status]);

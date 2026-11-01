@@ -2,7 +2,6 @@
 
 namespace App\Jobs;
 
-use App\Services\Chatbot\BotcakeSendQueue;
 use App\Services\Chatbot\ChatbotSequences;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUniqueUntilProcessing;
@@ -14,9 +13,9 @@ use Illuminate\Queue\SerializesModels;
 /**
  * Isang step ng sequence para sa isang customer, sa queue na "chatbot" (ang mga unang sagot ay nasa "chatbot-high"). Isa
  * lang kada subscription habang naghihintay sa queue: ang lock ay binibitawan ng Laravel bago tumakbo ang handle, kaya ang
- * claim ay itinatala ulit sa simula ng step at may tanda habang tumatakbo; ang job na namatay sa gitna ay kinukuha ulit ng
- * tick pagkalipas ng 2 minuto (ipinapasa ang padala, at ang job ay hanggang 100 s lang) o 10 minuto (naghihintay ang job sa
- * padala, gaya ng dati). Ang ulit na job ay sinusuri ulit ang lahat.
+ * claim ay itinatala ulit sa simula ng step at may tanda habang tumatakbo (hanggang sa timeout); ang job na namatay ay kinukuha
+ * ulit ng tick pagkalipas ng 2 minuto (ipinapasa ang padala) o 10 minuto (naghihintay ang job sa padala, gaya ng dati), at ang
+ * step na nagsimula na ay hindi inuulit kapag may epekto na o maaaring naipadala na (ChatbotSequences::ATTEMPT).
  */
 class RunChatbotSequenceStep implements ShouldQueue, ShouldBeUniqueUntilProcessing
 {
@@ -33,7 +32,6 @@ class RunChatbotSequenceStep implements ShouldQueue, ShouldBeUniqueUntilProcessi
     public function __construct(public int $subscriptionId, public ?string $claim = null, public ?string $earlier = null)
     {
         $this->onConnection(config('queue.chatbot_connection'))->onQueue(RunChatbotFlow::QUEUE);
-        if ($claim !== null && BotcakeSendQueue::sequenceReady()) $this->timeout = ChatbotSequences::HANDOFF_TIMEOUT;
     }
 
     public function uniqueId(): string
