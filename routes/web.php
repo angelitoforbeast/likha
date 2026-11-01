@@ -369,6 +369,14 @@ Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('chatbot')->name('chatb
     // Aling AI ang sumasagot kada page at ang site default, at ang paghahambing ng mga AI ng isang page.
     Route::post('/ai', [\App\Http\Controllers\ChatbotAiController::class, 'save'])->middleware('throttle:30,1,chatbot-ai')->name('ai');
     Route::post('/ai/site', [\App\Http\Controllers\ChatbotAiController::class, 'site'])->middleware('throttle:30,1,chatbot-ai-site')->name('ai.site');
+    // Ang pool ng AI key ng kumpanya (spec 210): access gaya ng AI default ng site; ang Test ay totoong tawag, kaya mas mahigpit.
+    Route::get('/ai-keys', [\App\Http\Controllers\ChatbotAiKeyController::class, 'index'])->name('ai-keys');
+    Route::get('/ai-keys/data', [\App\Http\Controllers\ChatbotAiKeyController::class, 'data'])->middleware('throttle:60,1,chatbot-ai-keys')->name('ai-keys.data');
+    Route::post('/ai-keys', [\App\Http\Controllers\ChatbotAiKeyController::class, 'store'])->middleware('throttle:20,1,chatbot-ai-keys-save')->name('ai-keys.store');
+    Route::post('/ai-keys/{id}/test', [\App\Http\Controllers\ChatbotAiKeyController::class, 'test'])->middleware('throttle:10,1,chatbot-ai-keys-test')->name('ai-keys.test');
+    Route::post('/ai-keys/{id}/enabled', [\App\Http\Controllers\ChatbotAiKeyController::class, 'enabled'])->middleware('throttle:30,1,chatbot-ai-keys-save')->name('ai-keys.enabled');
+    Route::post('/ai-keys/{id}/label', [\App\Http\Controllers\ChatbotAiKeyController::class, 'label'])->middleware('throttle:30,1,chatbot-ai-keys-save')->name('ai-keys.label');
+    Route::delete('/ai-keys/{id}', [\App\Http\Controllers\ChatbotAiKeyController::class, 'destroy'])->middleware('throttle:30,1,chatbot-ai-keys-save')->name('ai-keys.destroy');
     Route::get('/ai/compare', [\App\Http\Controllers\ChatbotAiController::class, 'compare'])->middleware('throttle:60,1,chatbot-ai-compare')->name('ai.compare');
     Route::post('/forbeast-token', [\App\Http\Controllers\ChatbotController::class, 'forbeastToken'])->middleware('throttle:30,1,chatbot-forbeast-token')->name('forbeast-token');
     Route::get('/connections', [\App\Http\Controllers\ChatbotController::class, 'connections'])->middleware('throttle:120,1,chatbot-connections')->name('connections');
