@@ -155,4 +155,66 @@ class AdGroupsTest extends ChatblastTestCase
         $this->actingAs($this->user())->post('/chatblast/page-settings/' . $row->id . '/deactivate')->assertRedirect();
         $this->assertTrue($row->fresh()->active, 'hindi rin nabubura mula sa generic grid');
     }
+
+    // ---- Spec 212: ang ID ay ad, ad set o campaign; iisang group pa rin ang bawat ID ----
+
+    private function catalog(): void
+    {
+        Artisan::call('migrate', ['--path' => ['database/migrations/2026_05_22_140000_create_ad_catalog_table.php']]);
+        foreach ([['40001', '50001', '60001'], ['40002', '50002', '60001']] as [$ad, $set, $camp]) {
+            \Illuminate\Support\Facades\DB::table('ad_catalog')->insert(['ad_id' => $ad, 'ad_set_id' => $set, 'campaign_id' => $camp, 'created_at' => now(), 'updated_at' => now()]);
+        }
+    }
+
+    public function test_S_212_1_6_an_id_at_any_level_is_in_one_group_only_and_an_ad_plus_its_ad_set_in_two_groups_is_allowed(): void
+    {
+        $this->catalog();
+        $x = $this->ag()->save('Page P', null, 'X', ['60001', '50002', '40001'], [])['id'];
+        foreach (['60001' => 'Campaign', '50002' => 'Ad set', '40001' => 'Ad'] as $id => $label) {
+            $r = $this->ag()->save('Page P', null, 'Y', [$id], []);
+            $this->assertSame([false, $label . ' ' . $id . ' is already in the group "X".', $x], [$r['ok'], $r['error'], $r['group']]);
+        }
+        $this->assertCount(1, $this->ag()->groups('Page P'));
+        // Ang ad sa isang group at ang ad set nito sa iba: puwede (ang ad ang nananaig sa takbo).
+        $this->assertTrue($this->ag()->save('Page P', null, 'Its ad set', ['50001'], [])['ok']);
+        $this->assertSame($x, $this->ag()->groupForAd('Page P', '40001'));
+    }
+
+    public function test_S_212_1_7_a_double_submitted_add_stores_the_id_once_and_says_so(): void
+    {
+        $a = $this->ag()->save('Page P', null, 'A', ['111'], [])['id'];
+        $this->assertSame(['ok' => true, 'id' => $a], $this->ag()->addAds('Page P', $a, null, ['50001']));
+        $rows = PageSetting::where('key', 'g' . $a . '.ads')->count();
+        $this->assertSame(['ok' => true, 'id' => $a, 'note' => 'Already in this group: 50001.'], $this->ag()->addAds('Page P', $a, null, ['50001']));
+        $this->assertSame(['111', '50001'], $this->ag()->groups('Page P')[$a]['ads']);
+        $this->assertSame($rows, PageSetting::where('key', 'g' . $a . '.ads')->count(), 'walang bagong row');
+    }
+
+    public function test_S_212_8_4_two_saves_of_the_same_ad_set_one_is_refused_and_nothing_half_saved_is_seen(): void
+    {
+        $a = $this->ag()->save('Page P', null, 'A', ['111'], [])['id'];
+        $b = $this->ag()->save('Page P', null, 'B', ['222'], [])['id'];
+        $this->ag()->groups('Page P'); // ang memo ng prosesong ito ay luma na pagkatapos ng sulat ng iba
+        // Ang ibang worker ay nauna: ang ad set 50001 ay nasa B na.
+        $this->otherWorkerSetsAds('Page P', $b, '222,50001');
+        $r = $this->ag()->save('Page P', $a, 'A', ['111', '50001'], ['price' => '499']);
+        $this->assertSame([false, 'Ad 50001 is already in the group "B".'], [$r['ok'], $r['error']], 'binasa sa loob ng lock, hindi ang lumang memo');
+        $this->assertSame([['111'], []], [$this->ag()->groups('Page P')[$a]['ads'], $this->ag()->groups('Page P')[$a]['values']], 'walang kalahating naisulat');
+        $this->assertSame($b, $this->ag()->groupForAd('Page P', '50001'));
+    }
+
+    public function test_S_212_8_5_a_500_id_group_of_mixed_levels_saves_matches_and_lists(): void
+    {
+        $this->catalog();
+        $ids = array_merge(['50002', '60001'], array_map(fn ($i) => (string) (700000 + $i), range(1, 498)));
+        $r = $this->ag()->save('Page P', null, 'Big', $ids, []);
+        $this->assertTrue($r['ok'], $r['error'] ?? '');
+        $this->assertCount(500, $this->ag()->groups('Page P')[$r['id']]['ads']);
+        $this->assertSame($r['id'], $this->ag()->groupForAd('Page P', '40001'), 'sa campaign');
+        $this->assertSame($r['id'], $this->ag()->groupForAd('Page P', '700250'), 'ang ad mismo');
+        $this->assertSame('At most 500 ads in a group.', $this->ag()->addAds('Page P', $r['id'], null, ['999999'])['error']);
+        $rows = $this->ag()->overview('Page P')['groups'][$r['id']]['rows'];
+        $this->assertCount(500, $rows);
+        $this->assertSame(['adset', 'campaign'], array_column(array_slice(array_values(array_filter($rows, fn ($x) => in_array($x['ad_id'], ['50002', '60001'], true))), 0, 2), 'kind'));
+    }
 }

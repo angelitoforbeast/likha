@@ -34,6 +34,14 @@
     return el('span', {class: 'inline-block rounded px-1.5 py-0.5 text-[11px] font-medium ' + cls, text: statusText(a)});
   }
   function newBadge(a) { return a.new ? el('span', {class: 'inline-block rounded bg-blue-600 px-1.5 py-0.5 text-[11px] font-semibold text-white', text: 'New'}) : null; }
+  // Ang uri ng ID sa group: Ad, Ad set o Campaign (ayon sa Ads Manager); ang hindi kilala ay "Not found in Ads Manager".
+  var KINDS = {ad: 'Ad', adset: 'Ad set', campaign: 'Campaign'};
+  function kindTag(a) {
+    if (!a.kind) return null;
+    var known = KINDS[a.kind];
+    return el('span', {class: 'inline-block rounded px-1.5 py-0.5 text-[11px] font-medium ' + (known ? 'bg-slate-100 text-slate-700' : 'bg-amber-100 text-amber-900'), text: known || 'Not found in Ads Manager'});
+  }
+  function kindWord(a) { return KINDS[a.kind] ? KINDS[a.kind].toLowerCase() : 'ID'; }
 
   /**
    * opts: {csrf, urls: {index, save, add, del, history, restore, mode, value, removeAd, ad}, onChange()}
@@ -53,7 +61,8 @@
         .catch(function () { return {ok: false, status: 0, data: {error: 'No connection: nothing was saved.'}}; });
     };
     function state(page) {
-      if (!pages.has(page)) pages.set(page, {data: null, error: '', note: '', q: '', ticked: new Set(), showAll: new Set(), seq: 0, adding: false});
+      // showHidden: ipinapakita rin ang mga tahimik (group, ID at ad), malabo; nananatili hanggang reload.
+      if (!pages.has(page)) pages.set(page, {data: null, error: '', note: '', q: '', ticked: new Set(), showAll: new Set(), seq: 0, adding: false, showHidden: false});
       return pages.get(page);
     }
     function load(page, focusSearch) {
@@ -70,8 +79,17 @@
         .catch(function (s) { if (seq === st.seq) { st.error = 'Could not load the ad groups (' + s + ').'; changed(page); } });
     }
     function say(page, text, bad) { var st = state(page); st.note = text; st.noteBad = !!bad; }
-    // Pagkatapos ng sulat: ang mensahe, saka ang bagong data ng page.
-    function after(page, ok, text) { return function (r) { say(page, r.ok ? text : (r.data.error || 'Not saved (' + r.status + ').'), !r.ok); return load(page); }; }
+    // Pagkatapos ng sulat: ang mensahe (pati ang note ng server, hal. "Already in this group"), saka ang bagong data ng page.
+    // Ang tinanggihang ID na nasa nakatagong group: sinasabi ring nakatago ito.
+    function after(page, ok, text) {
+      return function (r) {
+        var err = r.data.error || 'Not saved (' + r.status + ').', d = state(page).data;
+        var g = !r.ok && r.data.group != null && d ? d.groups.find(function (x) { return x.id === r.data.group; }) : null;
+        if (g && g.hidden) err += ' That group is hidden (quiet for 7+ days): press "Show hidden" to see it.';
+        say(page, r.ok ? text + (r.data.note ? ' ' + r.data.note : '') : err, !r.ok);
+        return load(page);
+      };
+    }
 
     // ---- Maliit na modal (value ng group at history): nasa ibabaw ng table, Escape o ✕ ang nagsasara. ----
     var modal = null;
@@ -199,40 +217,67 @@
       return b;
     }
 
-    /** Isang ad: ID (preview), New, status, pangalan, mga customer. Remove lang sa Edit (manage) at kapag nasa group. */
+    /**
+     * Isang ID: ang ID (preview kapag ad), ang uri (Ad, Ad set, Campaign o Not found in Ads Manager), New, status, ang
+     * sariling pangalan, mga customer. Remove lang sa Edit (manage) at kapag nasa group. Ang tahimik na ipinapakita
+     * (Show hidden) ay malabo.
+     */
     function adItem(page, g, a, manage) {
-      var rm = null;
+      var rm = null, word = kindWord(a);
       if (g && manage) {
-        rm = el('button', {type: 'button', class: 'py-1 text-xs text-red-700 underline hover:text-red-900', text: 'Remove', 'aria-label': 'Remove ad ' + a.ad_id + ' from ' + g.name});
+        rm = el('button', {type: 'button', class: 'min-h-[2rem] px-1 py-1 text-xs text-red-700 underline hover:text-red-900', text: 'Remove', 'aria-label': 'Remove ' + word + ' ' + a.ad_id + ' from ' + g.name});
         rm.addEventListener('click', function () {
-          if (!confirm('Remove ad ' + a.ad_id + ' from "' + g.name + '"? Its customers get the page values again.')) return;
+          if (!confirm('Remove ' + word + ' ' + a.ad_id + ' from "' + g.name + '"? Its customers get the page values again.')) return;
           rm.disabled = true;
-          post(u.removeAd, {page: page, id: g.id, ad: a.ad_id}).then(after(page, true, 'Removed ad ' + a.ad_id + ' from "' + g.name + '".'));
+          post(u.removeAd, {page: page, id: g.id, ad: a.ad_id}).then(after(page, true, 'Removed ' + word + ' ' + a.ad_id + ' from "' + g.name + '".'));
         });
       }
-      return el('li', {class: 'flex items-start gap-2 py-1'}, [
+      var id = !a.kind || a.kind === 'ad' ? adButton(page, a) : el('span', {class: 'break-all py-1 font-mono text-slate-800', text: a.ad_id});
+      var under = a.ads_under != null ? ' · ' + plural(a.ads_under, 'ad') + ' under it' : '';
+      return el('li', {class: 'flex items-start gap-2 py-1' + (a.quiet ? ' opacity-60' : ''), 'data-ag-id': a.ad_id}, [
         el('div', {class: 'min-w-0 flex-1'}, [
-          el('div', {class: 'flex flex-wrap items-center gap-1'}, [adButton(page, a), newBadge(a), statusPill(a)]),
-          el('div', {class: 'break-words text-slate-600', text: a.name || '(no name in Ads Manager)'}),
-          el('div', {class: 'text-slate-500', text: plural(a.customers, 'customer') + ' in 30 days' + (a.last ? ' · last ' + a.last : '')})]),
+          el('div', {class: 'flex flex-wrap items-center gap-1'}, [id, kindTag(a), newBadge(a), statusPill(a)]),
+          el('div', {class: 'break-words text-slate-600', text: a.name || (a.kind === 'unknown' ? '(not in the Ads Manager data yet)' : '(no name in Ads Manager)')}),
+          el('div', {class: 'text-slate-500', text: plural(a.customers, 'customer') + ' in 30 days' + (a.last ? ' · last ' + a.last : '') + under})]),
         rm]);
+    }
+
+    /** Ang ipinapakita: lahat kapag Show hidden; kung hindi, ang hindi tahimik lang. */
+    function visible(page, list) { return state(page).showHidden ? list : list.filter(function (x) { return !x.quiet && !x.hidden; }); }
+
+    /**
+     * Ang linya ng nakatago at ang "Show hidden (N)" / "Hide again" (aria-pressed): ang mga group na tahimik lahat, ang
+     * mga tahimik na ID sa ibang group, at ang tahimik na ads na wala sa group. Walang nakatago: walang button.
+     */
+    function hiddenBar(page) {
+      var st = state(page), h = (st.data && st.data.hidden) || {groups: 0, ids: 0, unassigned: 0}, n = h.groups + h.ids + h.unassigned;
+      if (!n) return null;
+      var parts = [h.groups ? plural(h.groups, 'group') : null, h.ids ? plural(h.ids, 'id') + ' in groups' : null, h.unassigned ? plural(h.unassigned, 'ad') + ' not in a group' : null].filter(Boolean);
+      var b = el('button', {type: 'button', class: 'cb-btn cb-btn-sm min-h-[2rem]', 'aria-pressed': st.showHidden ? 'true' : 'false', 'data-ag-hidden-toggle': page,
+        text: st.showHidden ? 'Hide again' : 'Show hidden (' + n + ')'});
+      b.addEventListener('click', function () { st.showHidden = !st.showHidden; changed(page); var t = document.querySelector('[data-ag-hidden-toggle="' + CSS.escape(page) + '"]'); if (t) t.focus(); });
+      return el('div', {class: 'mt-1 flex flex-wrap items-center gap-2 text-slate-500'}, [
+        el('span', {'data-ag-hidden-line': '', text: 'Hidden: ' + parts.join(', ') + ' (off or no report data for 7+ days, and no messages in 7 days).'}), b]);
     }
 
     /** Ang mga ad ID ng group; sa Edit (manage) may Remove at kahon para mag-paste ng iba pa. */
     function adsBlock(page, g, manage) {
-      var st = state(page), all = st.showAll.has(g.id), ads = all ? g.ads : g.ads.slice(0, SHOWN_ADS);
+      // Ang tahimik na ID ay nakatiklop ("N hidden ads"), maliban kung Show hidden; ang "Show all N" ay sa mga nakikita.
+      var st = state(page), all = st.showAll.has(g.id), shown = visible(page, g.ads), folded = g.ads.length - shown.length;
+      var ads = all ? shown : shown.slice(0, SHOWN_ADS);
       var more = null;
-      if (g.ads.length > SHOWN_ADS) {
-        more = el('button', {type: 'button', class: LINK, text: all ? 'Show less' : 'Show all ' + g.ads.length, 'aria-expanded': all ? 'true' : 'false'});
+      if (shown.length > SHOWN_ADS) {
+        more = el('button', {type: 'button', class: LINK, text: all ? 'Show less' : 'Show all ' + shown.length, 'aria-expanded': all ? 'true' : 'false'});
         more.addEventListener('click', function () { if (all) st.showAll.delete(g.id); else st.showAll.add(g.id); changed(page); });
       }
       var list = [
-        el('div', {class: 'font-medium text-slate-700', text: plural(g.ads.length, 'ad ID') + ' in ' + g.name}),
+        el('div', {class: 'font-medium text-slate-700', text: plural(g.ads.length, 'id') + ' in ' + g.name}),
         ads.length ? el('ul', {class: 'divide-y divide-slate-100'}, ads.map(function (a) { return adItem(page, g, a, manage); }))
-          : el('p', {class: 'text-slate-500', text: manage ? 'No ad IDs yet: add some below.' : 'No ad IDs yet.'}),
+          : el('p', {class: 'text-slate-500', text: folded ? '' : manage ? 'No IDs yet: add some below.' : 'No IDs yet.'}),
+        folded ? el('p', {class: 'text-slate-500', 'data-ag-folded': '', text: plural(folded, 'hidden ad') + ' (quiet for 7+ days)'}) : null,
         more];
       if (!manage) return list;
-      var typed = el('textarea', {rows: '1', class: INPUT + ' font-mono sm:max-w-xs', placeholder: 'Ad IDs: comma, space or new line', 'aria-label': 'Ad IDs to add to ' + g.name});
+      var typed = el('textarea', {rows: '1', class: INPUT + ' font-mono sm:max-w-xs', placeholder: 'IDs: ad, ad set or campaign; comma, space or new line', 'aria-label': 'IDs to add to ' + g.name});
       var add = el('button', {type: 'button', class: 'cb-btn cb-btn-sm', text: 'Add'});
       add.addEventListener('click', function () {
         if (!typed.value.trim()) return;
@@ -295,7 +340,7 @@
       });
       var del = el('button', {type: 'button', class: 'py-1 text-xs text-red-700 underline hover:text-red-900', text: 'Delete', 'aria-label': 'Delete ' + g.name});
       del.addEventListener('click', function () {
-        if (!confirm('Delete the group "' + g.name + '"? Its ' + plural(g.ads.length, 'ad') + ' go back to the page values.')) return;
+        if (!confirm('Delete the group "' + g.name + '"? Its ' + plural(g.ads.length, 'id') + ' go back to the page values.')) return;
         post(u.del, {page: page, id: g.id}).then(after(page, true, 'Deleted "' + g.name + '".'));
       });
       return el('div', {class: 'flex flex-wrap gap-x-3 font-normal'}, [rename, hist, del]);
@@ -303,11 +348,11 @@
 
     /** Ang row ng group sa table: pangalan, ang mga value nito (✎ gaya ng mga cell ng page) at ang flow. */
     function groupRow(page, r, g, ctx, keys, flows) {
-      var muted = g.all_off ? ' opacity-60' : '';
+      var muted = g.all_off || g.hidden ? ' opacity-60' : '';
       return el('tr', {class: 'ag-sub', 'data-ag-group': String(g.id)}, [
         el('td', {class: 'stick-1 ' + TD + ' font-medium break-words' + muted}, [
           el('div', {class: 'flex items-start gap-1'}, [el('span', {'aria-hidden': 'true', class: 'text-slate-400', text: '↳'}), el('span', {class: 'min-w-0 break-words', text: g.name})]),
-          el('div', {class: 'font-normal text-slate-500', text: plural(g.ads.length, 'ad') + (g.all_off ? ' · all ads off' : '')})]),
+          el('div', {class: 'font-normal text-slate-500', text: plural(g.ads.length, 'id') + (g.all_off ? ' · all ads off' : '') + (g.hidden ? ' · hidden' : '')})]),
         el('td', {class: 'stick-2 ' + TD + muted}, aiButton(page, r, g, keys)),
         el('td', {class: 'stick-3 ' + TD + muted}, flowSelect(page, g, flows)),
         el('td', {class: 'stick-4 ' + TD}),
@@ -319,7 +364,7 @@
     function newGroupForm(page, form) {
       var st = state(page);
       var name = el('input', {type: 'text', maxlength: '100', class: INPUT + ' sm:max-w-xs', autocomplete: 'off', placeholder: 'Group name, e.g. Serum', 'aria-label': 'New group name'});
-      var ids = el('textarea', {rows: '1', class: INPUT + ' font-mono sm:max-w-xs', placeholder: 'Ad IDs: comma, space or new line', 'aria-label': 'Ad IDs of the new group'});
+      var ids = el('textarea', {rows: '1', class: INPUT + ' font-mono sm:max-w-xs', placeholder: 'IDs: ad, ad set or campaign; comma, space or new line', 'aria-label': 'IDs of the new group'});
       name.value = form.name; ids.value = form.ids;
       name.addEventListener('input', function () { form.name = name.value; });
       ids.addEventListener('input', function () { form.ids = ids.value; });
@@ -347,7 +392,7 @@
       search.value = st.q;
       var timer = null;
       search.addEventListener('input', function () { clearTimeout(timer); timer = setTimeout(function () { st.q = search.value.trim(); load(page, true); }, 300); });
-      var rows = d.unassigned.map(function (a) {
+      var rows = visible(page, d.unassigned).map(function (a) {
         var cid = 'ag-t-' + page.replace(/\W+/g, '_') + '-' + a.ad_id;
         var cb = el('input', {id: cid, type: 'checkbox', class: 'mt-0.5 h-5 w-5 shrink-0', checked: st.ticked.has(a.ad_id)});
         cb.addEventListener('change', function () { if (cb.checked) st.ticked.add(a.ad_id); else st.ticked.delete(a.ad_id); paint(); });
@@ -373,7 +418,7 @@
         el('p', {class: 'text-slate-500', text: 'New ads first, then On, then by customers.'}),
         el('div', {class: 'mt-1'}, search),
         rows.length ? el('ul', {class: 'mt-1 max-h-80 divide-y divide-slate-100 overflow-y-auto'}, rows)
-          : el('p', {class: 'mt-1 text-slate-500', text: st.q ? 'No ad matches.' : 'Every ad seen in the last 30 days is in a group.'}),
+          : el('p', {class: 'mt-1 text-slate-500', text: st.q ? 'No ad matches.' : d.unassigned.length ? 'Only quiet ads are left: see "Show hidden".' : 'Every ad seen in the last 30 days is in a group.'}),
         d.unassigned_total > d.unassigned.length ? el('p', {class: 'mt-1 text-slate-500', text: 'Showing ' + d.unassigned.length + ' of ' + d.unassigned_total + '. Search to find others.'}) : null,
         rows.length ? el('div', {class: 'mt-2 flex flex-wrap items-center gap-2'}, [target, add]) : null];
     }
@@ -402,11 +447,12 @@
           el('span', {class: 'text-slate-500', text: asOfText(d)}),
           rest != null ? el('span', {class: 'rounded bg-blue-50 px-1.5 py-0.5 font-medium text-blue-800', text: plural(rest, 'ad') + ' not in a group yet' + (d.new_unassigned ? ' (' + d.new_unassigned + ' new)' : '')}) : null,
           manage]),
+        hiddenBar(page),
         noteLine(st)])];
       out.push(ctx.defaultRow());
-      d.groups.forEach(function (g) {
+      visible(page, d.groups).forEach(function (g) {
         out.push(groupRow(page, r, g, ctx, valueKeys(d), d.flows || []));
-        out.push(wide(ctx.cols, adsBlock(page, g, false), g.all_off ? 'opacity-60' : ''));
+        out.push(wide(ctx.cols, adsBlock(page, g, false), g.all_off || g.hidden ? 'opacity-60' : ''));
       });
       if (!d.groups.length) out.push(wide(ctx.cols, el('p', {class: 'text-slate-500', text: 'No groups yet: every customer gets Default. Create groups with "Manage in Edit".'})));
       return out;
@@ -457,11 +503,12 @@
       addBtn.addEventListener('click', function () { if (!st.adding) st.adding = {name: '', ids: '', focused: false}; changed(page); });
       var out = [
         el('p', {class: 'text-slate-500', text: 'Customers whose latest ad is in a group get that group\'s values; everyone else gets the page values above. Changes here save right away (not with Save below). ' + asOfText(d) + '.'}),
+        hiddenBar(page),
         noteLine(st)];
-      d.groups.forEach(function (g) {
-        out.push(el('div', {class: 'mt-2 rounded-md border border-slate-200 p-2' + (g.all_off ? ' bg-slate-50' : ''), 'data-ag-group': String(g.id)}, [
+      visible(page, d.groups).forEach(function (g) {
+        out.push(el('div', {class: 'mt-2 rounded-md border border-slate-200 p-2' + (g.all_off ? ' bg-slate-50' : '') + (g.hidden ? ' opacity-60' : ''), 'data-ag-group': String(g.id)}, [
           el('div', {class: 'flex flex-wrap items-baseline gap-x-2'}, [el('h4', {class: 'min-w-0 break-words text-sm font-semibold text-slate-800', text: g.name}),
-            el('span', {class: 'text-slate-500', text: plural(g.ads.length, 'ad') + (g.all_off ? ' · all ads off' : '')})]),
+            el('span', {class: 'text-slate-500', text: plural(g.ads.length, 'id') + (g.all_off ? ' · all ads off' : '') + (g.hidden ? ' · hidden' : '')})]),
           manageLinks(page, g),
           valuesBlock(page, r, g, d),
           el('div', {class: 'mt-2'}, adsBlock(page, g, true))]));

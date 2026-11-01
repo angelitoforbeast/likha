@@ -661,4 +661,20 @@ class AdGroupRunTest extends ChatblastTestCase
         $this->assertSame($one, $many, 'hindi lumalaki sa dami ng group');
         $this->assertSame(1, $reads, 'isang basa ng cache');
     }
+
+    public function test_S_212_8_6_the_lookup_store_is_one_ad_catalog_row_per_ad_with_ids_only(): void
+    {
+        $this->metaConnection();
+        $this->meta(fn ($ad) => ['id' => $ad, 'adset_id' => '50005', 'campaign_id' => self::CAMPAIGN, 'name' => 'Ana Cruz 0917', 'access_token' => self::META_TOKEN]);
+        $this->groupWith('By campaign', [self::CAMPAIGN]);
+        foreach (['40021', '40022', '40021'] as $i => $ad) $this->chat($ad, (string) (7100 + $i), true);
+        $rows = DB::table('ad_catalog')->orderBy('ad_id')->get();
+        $this->assertSame(['40021', '40022'], $rows->pluck('ad_id')->all(), 'isang row kada ad');
+        foreach ($rows as $row) {
+            $filled = array_keys(array_filter((array) $row, fn ($v) => $v !== null));
+            $this->assertSame(['id', 'ad_id', 'ad_set_id', 'campaign_id', 'created_at', 'updated_at'], $filled, 'ID lang: walang pangalan ng customer o token');
+        }
+        $this->assertStringNotContainsString(self::META_TOKEN, json_encode($rows));
+        $this->assertStringNotContainsString('Ana Cruz', json_encode($rows));
+    }
 }
