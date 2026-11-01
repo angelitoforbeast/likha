@@ -15,10 +15,17 @@ class OrderEncodeForbeastController extends Controller
 {
     private const LIMIT = 200;
 
+    private function getNormalizedRole(): string
+    {
+        $raw = Auth::user()?->employeeProfile?->role ?? Auth::user()?->role ?? '';
+
+        return preg_replace('/\s+/u', ' ', trim((string) $raw));
+    }
+
+    /** CEO lang, sa parehong check ng ibang CEO-only na screen (role === 'CEO'). */
     private function checkAccess(): void
     {
-        $role = preg_replace('/\s+/u', ' ', trim((string) (Auth::user()?->employeeProfile?->role ?? Auth::user()?->role ?? '')));
-        if ($role !== 'CEO' || !Schema::hasTable('order_encodes') || !Schema::hasColumn('order_encodes', 'forbeast_state')) abort(404);
+        if ($this->getNormalizedRole() !== 'CEO' ||!Schema::hasTable('order_encodes') || !Schema::hasColumn('order_encodes', 'forbeast_state')) abort(404);
     }
 
     public function index()
