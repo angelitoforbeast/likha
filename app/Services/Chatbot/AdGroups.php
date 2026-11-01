@@ -679,7 +679,9 @@ class AdGroups
         $names = $this->adNames(array_values(array_diff($all, array_keys($levels['kind']))));
         $row = fn (string $ad) => $this->adRow($ad, $names[$ad] ?? null, $seen[$ad] ?? null, $status['ads'][$ad] ?? null);
         $times = $this->times($page);
+        // Ang hangganan ng tahimik, isang beses: text (gaya ng "last") at timestamp (gaya ng times()).
         $cut = now()->subDays(self::QUIET_DAYS);
+        $cutAt = [$cut->format('Y-m-d H:i'), $cut->getTimestamp()];
 
         $outGroups = [];
         $hidden = ['groups' => 0, 'ids' => 0, 'unassigned' => 0];
@@ -690,10 +692,10 @@ class AdGroups
                 $r = $kind === 'adset' || $kind === 'campaign'
                     ? $this->rollup($x, $levels['names'][$x] ?? null, array_map('strval', array_keys($under[$x] ?? [])), $seen, $status)
                     : $row($x);
-                $touched = max($times['added'][$id][$x] ?? null, $times['edited'][$id] ?? null);
-                $rows[] = $r + ['kind' => $kind, 'quiet' => $this->quiet($r, $touched)];
+                $touched = max($times['added'][$id][$x] ?? 0, $times['edited'][$id] ?? 0);
+                $rows[] = $r + ['kind' => $kind, 'quiet' => self::quiet($r, $touched ?: null, $cutAt)];
             }
-            $isHidden = $rows && ($times['created'][$id] ?? now())->lt($cut) && !array_filter($rows, fn ($r) => !$r['quiet']);
+            $isHidden = $rows && ($times['created'][$id] ?? PHP_INT_MAX) < $cutAt[1] && !array_filter($rows, fn ($r) => !$r['quiet']);
             if ($isHidden) $hidden['groups']++;
             else $hidden['ids'] += count(array_filter($rows, fn ($r) => $r['quiet']));
             $outGroups[$id] = $g + ['rows' => $rows, 'all_off' => $rows && !array_filter($rows, fn ($a) => $a['status'] !== 'off'), 'hidden' => $isHidden];
@@ -703,7 +705,7 @@ class AdGroups
         $new = 0;
         foreach (array_keys($rest) as $ad) {
             $r = $row((string) $ad);
-            $r += ['kind' => 'ad', 'quiet' => $this->quiet($r, null)];
+            $r += ['kind' => 'ad', 'quiet' => self::quiet($r, null, $cutAt)];
             if ($r['new']) $new++;
             if ($q !== '' && !str_contains($r['ad_id'], $q) && !str_contains(mb_strtolower((string) $r['name']), $q)) continue;
             if ($r['quiet']) $hidden['unassigned']++;
@@ -740,12 +742,11 @@ class AdGroups
      * walang customer na nag-message nito (o sa ilalim nito) sa huling QUIET_DAYS araw, at (c) ang pagdagdag nito o ang
      * huling ayos ng values ng group ($touched; null = wala, gaya ng ad na wala sa group) ay lampas QUIET_DAYS araw na.
      */
-    private function quiet(array $r, ?Carbon $touched): bool
+    private static function quiet(array $r, ?int $touched, array $cut): bool
     {
-        $cut = now()->subDays(self::QUIET_DAYS);
         $off = $r['status'] === 'none' || ($r['status'] === 'off' && (int) $r['off_days'] >= self::QUIET_DAYS);
 
-        return $off && ($r['last'] === null || Carbon::parse($r['last'])->lt($cut)) && ($touched === null || $touched->lt($cut));
+        return $off && ($r['last'] === null || $r['last'] < $cut[0]) && ($touched === null || $touched < $cut[1]);
     }
 
     /**
@@ -840,29 +841,30 @@ class AdGroups
     /**
      * Mula sa history ng page_settings (dalawang query): kailan nagawa ang bawat group, kailan huling inayos ang values
      * nito, at kailan idinagdag ang bawat ID (ang pinakalumang sunod-sunod na ad list ng group na may ID na iyon).
-     * @return array{created: array<int, Carbon>, edited: array<int, Carbon>, added: array<int, array<string, Carbon>>}
+     * @return array{created: array<int, int>, edited: array<int, int>, added: array<int, array<string, int>>} unix timestamps
      */
     private function times(string $page): array
     {
         $out = ['created' => [], 'edited' => [], 'added' => []];
-        $at = fn ($v) => $v ? Carbon::parse($v) : null;
+        // strtotime: ang oras ng database ay sa timezone ng app (gaya ng Carbon::parse), mas mabilis sa daan-daang row.
+        $at = fn ($v) => $v ? (strtotime((string) $v) ?: null) : null;
         $rows = $this->settings->pageQuery($page)->where('provider', self::PROVIDER)->where('key', 'like', 'g%.%')->toBase()->get(['key', 'active', 'created_at', 'replaced_at']);
         foreach ($rows as $s) {
             if (!preg_match('/^g(\d+)\.(.+)$/', (string) $s->key, $m)) continue;
             $id = (int) $m[1];
             $c = $at($s->created_at);
-            if ($c && (!isset($out['created'][$id]) || $c->lt($out['created'][$id]))) $out['created'][$id] = $c;
+            if ($c && (!isset($out['created'][$id]) || $c < $out['created'][$id])) $out['created'][$id] = $c;
             if (!self::isValueKey($m[2])) continue;
-            foreach ([$c, $at($s->replaced_at)] as $t) if ($t && (!isset($out['edited'][$id]) || $t->gt($out['edited'][$id]))) $out['edited'][$id] = $t;
+            foreach ([$c, $at($s->replaced_at)] as $t) if ($t && (!isset($out['edited'][$id]) || $t > $out['edited'][$id])) $out['edited'][$id] = $t;
         }
-        $lists = $this->settings->pageQuery($page)->where('provider', self::PROVIDER)->where('key', 'like', 'g%.ads')->orderBy('id')->get(['id', 'key', 'value', 'is_secret', 'created_at']);
+        $lists = $this->settings->pageQuery($page)->where('provider', self::PROVIDER)->where('key', 'like', 'g%.ads')->where('is_secret', false)->orderBy('id')->toBase()->get(['id', 'key', 'value', 'created_at']);
         foreach ($lists as $s) {
             if (!preg_match('/^g(\d+)\.ads$/', (string) $s->key, $m)) continue;
             $id = (int) $m[1];
-            $now = array_flip(array_filter(explode(',', (string) $s->plainValue()), fn ($a) => $a !== ''));
+            $now = array_flip(array_filter(explode(',', (string) $s->value), fn ($a) => $a !== ''));
             $prev = $out['added'][$id] ?? [];
             $out['added'][$id] = [];
-            foreach (array_keys($now) as $ad) $out['added'][$id][(string) $ad] = $prev[(string) $ad] ?? ($s->created_at ?? now());
+            foreach (array_keys($now) as $ad) $out['added'][$id][(string) $ad] = $prev[(string) $ad] ?? ($at($s->created_at) ?? now()->getTimestamp());
         }
 
         return $out;
