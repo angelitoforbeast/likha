@@ -21,15 +21,27 @@ class ChatbotAiSettings
     public const NO_MODEL = 'Set the Local model name first.';
 
     /** Ang mga key ng page at ng site (walang "ai_" sa app_settings), at ang pangalan nila sa Changes. */
-    public const PAGE_FIELDS = ['provider', 'fallback', 'local_model', 'local_timeout'];
-    public const SITE_FIELDS = ['provider', 'fallback', 'local_model', 'local_timeout', 'local_concurrency', 'breaker_failures', 'breaker_seconds', 'local_reasoning_effort'];
+    // Ang model ng Claude at DeepSeek (spec 210): sa site default o sa page; ang OpenAI ay ang model ng node gaya ng dati.
+    public const PAGE_FIELDS = ['provider', 'fallback', 'local_model', 'local_timeout', 'anthropic_model', 'deepseek_model'];
+    public const SITE_FIELDS = ['provider', 'fallback', 'local_model', 'local_timeout', 'local_concurrency', 'breaker_failures', 'breaker_seconds', 'local_reasoning_effort',
+        'anthropic_model', 'deepseek_model'];
+    public const MODEL_FIELDS = ['local_model', 'anthropic_model', 'deepseek_model'];
     public const LABELS = ['ai_provider' => 'AI provider', 'ai_fallback' => 'AI fallback', 'ai_local_model' => 'Local model', 'ai_local_timeout' => 'Local timeout',
         'ai_local_concurrency' => 'Local concurrency', 'ai_breaker_failures' => 'Breaker failures', 'ai_breaker_seconds' => 'Breaker seconds',
-        'ai_local_reasoning_effort' => 'Local reasoning'];
+        'ai_local_reasoning_effort' => 'Local reasoning', 'ai_anthropic_model' => 'Claude model', 'ai_deepseek_model' => 'DeepSeek model'];
     private const RANGES = ['local_timeout' => [1, 60], 'local_concurrency' => [1, 50], 'breaker_failures' => [1, 20], 'breaker_seconds' => [5, 600]];
 
     public function __construct(private PageSettings $settings)
     {
+    }
+
+    /** "OpenAI, Claude, DeepSeek or Local" (ang mga provider sa config, ayon sa ayos). */
+    public static function providerList(): string
+    {
+        $labels = array_map(fn ($p) => ChatbotAiProviders::label($p), ChatbotAiProviders::names());
+        $last = array_pop($labels);
+
+        return $labels ? implode(', ', $labels) . ' or ' . $last : (string) $last;
     }
 
     /** @return array<int, string> ang mga key sa page_settings (chatbot.ai_*) */
@@ -66,7 +78,7 @@ class ChatbotAiSettings
             }
             if (!is_scalar($input[$f])) return ['Pick a valid ' . strtolower(self::LABELS['ai_' . $f]) . '.', []];
             $v = trim((string) $input[$f]);
-            $clear = !$site && ($v === self::DEFAULT || ($v === '' && in_array($f, ['local_model', 'local_timeout'], true)));
+            $clear = !$site && ($v === self::DEFAULT || ($v === '' && in_array($f, [...self::MODEL_FIELDS, 'local_timeout'], true)));
             // Ang reasoning ng Local: blangko = hindi ipinapadala (naitatala bilang "omit").
             if ($f === 'local_reasoning_effort') {
                 if ($v !== '' && !in_array($v, ChatbotAiChain::EFFORTS, true)) return ['Local reasoning: none, low, medium, high, or empty (not sent).', []];
@@ -77,17 +89,25 @@ class ChatbotAiSettings
                 $out[$f] = self::DEFAULT;
                 continue;
             }
+            // Ang fallback ay listahan ng provider ayon sa ayos ("deepseek,openai"), o None lang.
+            if ($f === 'fallback' && $v !== ChatbotAiChain::NONE) {
+                $list = array_values(array_unique(array_map('trim', explode(',', $v))));
+                if (!$list || count($list) > count(ChatbotAiProviders::names()) || array_filter($list, fn ($p) => !ChatbotAiProviders::exists($p))) {
+                    return ['Pick ' . self::providerList() . ' (or None), in order.', []];
+                }
+                $v = implode(',', $list);
+            }
             $ok = match ($f) {
                 'provider' => ChatbotAiProviders::exists($v),
-                'fallback' => $v === ChatbotAiChain::NONE || ChatbotAiProviders::exists($v),
-                'local_model' => (bool) preg_match(self::MODEL_PATTERN, $v),
+                'fallback' => true,
+                'local_model', 'anthropic_model', 'deepseek_model' => (bool) preg_match(self::MODEL_PATTERN, $v),
                 default => ctype_digit($v) && (int) $v >= self::RANGES[$f][0] && (int) $v <= self::RANGES[$f][1],
             };
             if (!$ok) {
                 $range = self::RANGES[$f] ?? null;
                 return [match ($f) {
-                    'provider', 'fallback' => 'Pick OpenAI or Local' . ($f === 'fallback' ? ' (or None)' : '') . '.',
-                    'local_model' => 'Model name: letters, digits and . : - _ / only, up to 100.',
+                    'provider' => 'Pick ' . self::providerList() . '.',
+                    'local_model', 'anthropic_model', 'deepseek_model' => 'Model name: letters, digits and . : - _ / only, up to 100.',
                     default => self::LABELS['ai_' . $f] . ': a whole number from ' . $range[0] . ' to ' . $range[1] . '.',
                 }, []];
             }
@@ -177,6 +197,7 @@ class ChatbotAiSettings
         return [
             'provider' => $provider, 'override' => $override, 'label' => ChatbotAiProviders::label($provider) . ($override ? '' : ' (default)'),
             'fallback' => $own['ai_fallback'] ?? null, 'local_model' => $own['ai_local_model'] ?? null, 'local_timeout' => isset($own['ai_local_timeout']) ? (int) $own['ai_local_timeout'] : null,
+            'anthropic_model' => $own['ai_anthropic_model'] ?? null, 'deepseek_model' => $own['ai_deepseek_model'] ?? null,
             'chain' => implode(' → ', array_map(fn ($s) => ChatbotAiProviders::label($s['provider']), $chain)),
         ];
     }
@@ -195,6 +216,8 @@ class ChatbotAiSettings
             'breaker_failures' => (int) ($site['breaker_failures'] ?? ChatbotAiProviders::option($local, 'breaker_failures', 3)),
             'breaker_seconds' => (int) ($site['breaker_seconds'] ?? ChatbotAiProviders::option($local, 'breaker_seconds', 30)),
             'local_reasoning_effort' => ChatbotAiChain::reasoning($local),
+            'anthropic_model' => $site['anthropic_model'] ?? ((string) ChatbotAiProviders::option('anthropic', 'model', '') ?: null),
+            'deepseek_model' => $site['deepseek_model'] ?? ((string) ChatbotAiProviders::option('deepseek', 'model', '') ?: null),
             'local_ready' => ChatbotAiProviders::notReady($local) === null,
             'providers' => array_map(fn ($p) => ['name' => $p, 'label' => ChatbotAiProviders::label($p)], ChatbotAiProviders::names()),
         ];

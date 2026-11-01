@@ -3628,3 +3628,92 @@ Tests: `tests/Feature/Chatblast/AdGroupPagesTest.php` (the panel script run in N
 | S-213.4 (P2) | Nothing hidden: no line and no button in either view | `test_S_213_1_to_6…` | passed |
 | S-213.5 (P2) | Show hidden turned on in Edit, then Edit closed: the read-only panel shows the same state ("Hide again", groups shown), and with only ads hidden it shows the line and no button, without errors | `test_S_213_1_to_6…` | passed |
 | S-213.6 (P2) | At 390 x 844 the line wraps, there is no sideways scroll, and the button keeps `aria-pressed` | `test_S_213_1_to_6…`, browser check (result) | passed |
+
+## Slice 210 – AI key pool, failover, cost and billing
+
+As the owner, I want the chatbot's AI step to run on a pool of the company's own keys (OpenAI, Claude, DeepSeek) that fail over by themselves, with every call costed and billed through the page's Forbeast, so the AI keeps answering and is resold at its real cost.
+
+Slice 210. Threat model: untrusted = provider and Forbeast responses, customer messages, key-screen input; high = key storage, display and anything that could put a key in a log, prompt or response. Risk tier: high.
+Tests: `tests/Feature/Chatblast/Ai*Test.php` (Http::fake for every provider and Forbeast; no real network).
+
+### S-210.1 The owner manages the company's AI keys (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-210.1.1 | happy | Given no keys, when the owner adds an OpenAI key with a label, then it is saved encrypted and the list shows provider, label, status, last used and only the last 4 characters | `AiKeyScreenTest::test_S_210_1_1_an_added_key_is_saved_encrypted_and_listed_with_only_its_last_4` | passed 2026-11-01 |
+| S-210.1.2 | happy | Given a saved key, when the owner presses Test, then one cheap real call runs and the result (ok / invalid / no credit / rate limited) shows with the time; a key whose test fails is saved but marked down, never used until a later test passes | `AiKeyScreenTest::test_S_210_1_2_test_runs_one_cheap_call_and_a_failing_key_is_kept_but_never_used_until_a_test_passes` | passed 2026-11-01 |
+| S-210.1.3 | happy | Given a key in use, when the owner disables it, then the next call skips it; enabling puts it back | `AiKeyScreenTest::test_S_210_1_3_a_disabled_key_is_skipped_and_enabling_puts_it_back` | passed 2026-11-01 |
+| S-210.1.4 | happy | Given Claude and DeepSeek keys, when added and tested, then they work the same way | `AiKeyScreenTest::test_S_210_1_4_claude_and_deepseek_keys_are_added_and_tested_the_same_way` | passed 2026-11-01 |
+| S-210.1.5 | negative | Given anyone but the CEO (amendment 210-1; a user with /chatblast access included), when they open or POST the key screen, then 403 and nothing changes; no "AI keys" link is shown | `AiKeyScreenTest::test_S_210_1_5_anyone_but_the_ceo_gets_403_on_the_key_screen_sees_no_link_and_nothing_changes` | passed 2026-11-01 |
+| S-210.1.6 | negative | Given the same key pasted twice, then the second is refused as a duplicate (compared by a hash, never by showing the key) | `AiKeyScreenTest::test_S_210_1_6_the_same_key_pasted_twice_is_refused_as_a_duplicate` | passed 2026-11-01 |
+| S-210.1.7 | negative | Given empty, whitespace-only, multi-line or over-long input, then a clear message and nothing saved | `AiKeyScreenTest::test_S_210_1_7_empty_whitespace_multi_line_or_over_long_input_is_refused_with_a_message` | passed 2026-11-01 |
+| S-210.1.8 | edge | Given a deleted key, then its encrypted value is gone (not just hidden) and old usage rows keep its label and last 4 | `AiKeyScreenTest::test_S_210_1_8_a_deleted_key_loses_its_encrypted_value_and_old_usage_keeps_its_label_and_last_4` | passed 2026-11-01 |
+| S-210.1.9 | edge | Given a key that cannot be decrypted (APP_KEY changed), then it shows "cannot decrypt", no 500, and the chain skips it | `AiKeyScreenTest::test_S_210_1_9_a_key_that_cannot_be_decrypted_shows_cannot_decrypt_and_the_chain_skips_it` | passed 2026-11-01 |
+| S-210.1.10 | edge | Given the existing `services.openai.key`, when no OpenAI key is in the pool yet, then it is used as before (nothing breaks on deploy) | `AiKeyFailoverTest::test_S_210_1_10_without_an_openai_key_in_the_pool_the_server_key_is_used_as_before` | passed 2026-11-01 |
+
+### S-210.2 Each page uses its chosen provider order; keys rotate inside a provider (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-210.2.1 | happy | Given a page set to Claude then OpenAI, when its AI step runs, then Claude is tried first; the page settings and the site default offer OpenAI, Claude, DeepSeek and Local | `AiKeyFailoverTest::test_S_210_2_1_a_page_set_to_claude_then_openai_tries_claude_first`<br>`AiKeySettingsTest::test_S_210_2_1_the_page_settings_and_the_site_default_offer_openai_claude_deepseek_and_local` | passed 2026-11-01 |
+| S-210.2.2 | happy | Given 3 OpenAI keys, when many calls run, then they are spread across the healthy keys of that provider | `AiKeyFailoverTest::test_S_210_2_2_calls_are_spread_across_the_healthy_keys_of_a_provider` | passed 2026-11-01 |
+| S-210.2.3 | happy | Given a page with no own setting, then the site default applies; an ad group's own setting still wins (existing behaviour) | `AiKeyFailoverTest::test_S_210_2_3_the_site_default_applies_to_a_page_without_its_own_and_an_ad_group_still_wins` | passed 2026-11-01 |
+| S-210.2.4 | negative | Given a provider with no usable key, then it is skipped and the next provider in the chain is used | `AiKeyFailoverTest::test_S_210_2_4_a_provider_with_no_usable_key_is_skipped_and_the_next_one_answers` | passed 2026-11-01 |
+| S-210.2.5 | edge | Given a model that does not exist for the provider, then it is a model error, not a key failure: no key is marked down | `AiKeyFailoverTest::test_S_210_2_5_a_model_that_does_not_exist_is_a_model_error_and_no_key_is_marked` | passed 2026-11-01 |
+| S-210.2.6 | edge | Given each provider's model, then the page settings choose it as today for Local; OpenAI keeps the node's model; Claude and DeepSeek use a model set on the site default (or page), with a sensible default named in the plan | `AiKeySettingsTest::test_S_210_2_6_claude_and_deepseek_use_the_model_of_the_site_default_or_the_page_and_openai_keeps_the_nodes` | passed 2026-11-01 |
+
+### S-210.3 A failing key is skipped and retried later (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-210.3.1 | happy | Given key 1 answers 402 / no credit, when a call runs, then key 2 answers in the same call (one answer to the customer) and key 1 is marked down "no credit" | `AiKeyFailoverTest::test_S_210_3_1_no_credit_on_key_1_is_answered_by_key_2_in_the_same_call_and_key_1_is_marked_down` | passed 2026-11-01 |
+| S-210.3.2 | happy | Given key 1 answers 429, then the next key answers and key 1 rests a few minutes (shorter than for 402 or 401) | `AiKeyFailoverTest::test_S_210_3_2_a_429_moves_to_the_next_key_and_rests_key_1_shorter_than_402_or_401` | passed 2026-11-01 |
+| S-210.3.3 | happy | Given key 1 answers 401 (invalid), then it is marked down "invalid" and not retried until the owner tests it again | `AiKeyFailoverTest::test_S_210_3_3_a_401_marks_the_key_invalid_and_it_waits_for_a_test` | passed 2026-11-01 |
+| S-210.3.4 | happy | Given key 1 rested and its time passed, when the next call runs, then key 1 is tried; on success the mark clears | `AiKeyFailoverTest::test_S_210_3_4_a_rested_key_is_tried_again_when_its_time_passed_and_success_clears_the_mark` | passed 2026-11-01 |
+| S-210.3.5 | happy | Given a switch, then an event row is written (page, provider, from key label, to key label, reason, time; never key text) and shows on the key screen | `AiKeyFailoverTest::test_S_210_3_5_a_switch_writes_an_event_row_without_key_text_and_it_shows_on_the_key_screen` | passed 2026-11-01 |
+| S-210.3.6 | negative | Given a 400 caused by the request content, then no key is marked down | `AiKeyFailoverTest::test_S_210_3_6_a_400_caused_by_the_request_marks_no_key` | passed 2026-11-01 |
+| S-210.3.7 | negative | Given one 5xx / 529 / timeout, then the call moves on, but the key is marked down only after the threshold (config) | `AiKeyFailoverTest::test_S_210_3_7_one_5xx_529_or_timeout_moves_on_and_the_key_is_marked_only_after_the_threshold` | passed 2026-11-01 |
+| S-210.3.8 | edge | Given 20 calls at once hit a key that just died, then all move on, the key is marked down once, and the next key's concurrency limit holds | `AiKeyPoolPathTest::test_S_210_3_8_twenty_calls_on_a_key_that_just_died_all_move_on_mark_it_once_and_keep_the_next_keys_cap` | passed 2026-11-01 |
+| S-210.3.9 | edge | Given a cache clear or a worker restart, then a down mark is kept (persisted like ForbeastWatch) | `AiKeyFailoverTest::test_S_210_3_9_a_down_mark_survives_a_cache_clear` | passed 2026-11-01 |
+| S-210.3.10 | edge | Given a recovering key fails again, then its rest grows (capped backoff) | `AiKeyFailoverTest::test_S_210_3_10_a_recovering_key_that_fails_again_rests_longer_up_to_the_cap` | passed 2026-11-01 |
+| S-210.3.11 | happy | Given every key of every provider in the chain is down, then the AI step takes its failed path (no exception), the row says "all keys failed", nothing is billed, and the owner sees one alert on the key screen (not one per message) | `AiKeyFailoverTest::test_S_210_3_11_with_every_key_down_the_step_fails_cleanly_with_all_keys_failed_nothing_billed_and_one_alert` | passed 2026-11-01 |
+| S-210.3.12 | edge | Given an async ticket queued while keys die, then the worker follows the same chain and outcome as a sync call | `AiKeyPoolPathTest::test_S_210_3_12_a_queued_ticket_follows_the_same_key_chain_and_outcome_as_a_sync_call` | passed 2026-11-01 |
+
+### S-210.4 Every chatbot AI call records key, provider, model, tokens and cost (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-210.4.1 | happy | Given a successful call, then its `chatbot_ai_requests` row has provider, model_used, key label and last 4, prompt/completion tokens and cost in integer micro-USD from the price list | `AiKeyCostTest::test_S_210_4_1_a_successful_call_records_provider_model_key_tokens_and_cost_in_micro_usd` | passed 2026-11-01 |
+| S-210.4.2 | happy | Given failover (key 1 402, key 2 ok), then ai_attempts lists both with key label and reason; the row names key 2; only key 2's tokens are costed | `AiKeyCostTest::test_S_210_4_2_after_failover_both_attempts_are_listed_and_only_the_answering_keys_tokens_are_costed` | passed 2026-11-01 |
+| S-210.4.3 | happy | Given Claude and DeepSeek answers, then text, tokens and errors reach the same internal shape as OpenAI's | `AiKeyFailoverTest::test_S_210_4_3_claude_and_deepseek_answers_and_errors_reach_the_same_shape_as_openai` | passed 2026-11-01 |
+| S-210.4.4 | negative | Given an answer with no usage block, or a model not in the price list, then cost is null and the row is flagged; never 0 | `AiKeyCostTest::test_S_210_4_4_no_usage_block_or_an_unpriced_model_gives_a_null_flagged_cost_never_0` | passed 2026-11-01 |
+| S-210.4.5 | edge | Given tiny calls, then cost keeps micro precision (never rounded to 0) | `AiKeyCostTest::test_S_210_4_5_a_tiny_call_keeps_micro_precision_and_is_never_rounded_to_0` | passed 2026-11-01 |
+| S-210.4.6 | edge | Given a queue retry of the same call, then one cost row, not two | `AiKeyCostTest::test_S_210_4_6_a_queue_retry_of_the_same_call_gives_one_cost_row_not_two` | passed 2026-11-01 |
+| S-210.4.7 | edge | Given the prune of old rows, then a row whose usage has not reached Forbeast is never pruned | `AiKeyCostTest::test_S_210_4_7_the_prune_never_deletes_a_row_whose_usage_has_not_reached_forbeast` | passed 2026-11-01 |
+
+### S-210.5 Usage reaches the page's Forbeast exactly once (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-210.5.1 | happy | Given costed rows on pages whose `chatbot.gateway` is forbeast, then a queued sender POSTs them in batches of at most 100 to that gateway's `/api/v1/site/ai-usage` with its site key, `client_ref` = the row's request id, `at` with a time-zone offset; each row is marked with the result | `AiUsageSenderTest::test_S_210_5_1_costed_rows_are_posted_in_batches_of_at_most_100_with_the_site_key_and_marked` | passed 2026-11-01 |
+| S-210.5.2 | happy | Given pages on the incepxionbot gateway, then their usage goes to the incepxionbot gateway, not to forbeast | `AiUsageSenderTest::test_S_210_5_2_incepxionbot_pages_go_to_the_incepxionbot_gateway` | passed 2026-11-01 |
+| S-210.5.3 | negative | Given an item answers `duplicate`, then the row is marked sent (the first try had landed) | `AiUsageSenderTest::test_S_210_5_3_a_duplicate_answer_marks_the_row_sent` | passed 2026-11-01 |
+| S-210.5.4 | negative | Given `page_not_found` or `unbilled`, then the row is marked so, not retried forever, and the key screen shows the count | `AiUsageSenderTest::test_S_210_5_4_page_not_found_and_unbilled_are_marked_not_retried_and_counted_on_the_key_screen` | passed 2026-11-01 |
+| S-210.5.5 | edge | Given Forbeast is down, times out, answers 5xx or 429, then rows stay pending and are retried with backoff, in order, without blocking chat | `AiUsageSenderTest::test_S_210_5_5_when_forbeast_is_down_rows_stay_pending_and_are_retried_with_backoff_in_order` | passed 2026-11-01 |
+| S-210.5.6 | edge | Given 401 from Forbeast (site key changed), then sending pauses, the key screen shows it, and nothing is dropped | `AiUsageSenderTest::test_S_210_5_6_a_401_pauses_sending_shows_on_the_key_screen_and_drops_nothing` | passed 2026-11-01 |
+| S-210.5.7 | edge | Given a page with no gateway set up, or a row with null cost, then it is not sent as a charge (null cost is sent as `cost_micros: null` so Forbeast flags it, per the contract) | `AiUsageSenderTest::test_S_210_5_7_no_gateway_is_never_sent_and_a_null_cost_is_sent_as_null` | passed 2026-11-01 |
+| S-210.5.8 | edge | Given a 10,000-row backlog, then it drains in batches within Forbeast's rate limit | `AiUsageSenderTest::test_S_210_5_8_a_10000_row_backlog_drains_in_batches_within_the_rate_limit` | passed 2026-11-01 |
+
+### S-210.6 At zero load the AI step is skipped with Forbeast's note (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-210.6.1 | happy | Given Forbeast answers `stopped` for the page, when its AI step runs, then no provider call is made, the step takes its failed path with reason "no load", and the rest of the flow runs | `AiLoadTest::test_S_210_6_1_a_stopped_page_makes_no_provider_call_and_takes_the_failed_path_with_no_load` | passed 2026-11-01 |
+| S-210.6.2 | happy | Given `ok`, `low` or `unbilled`, then the AI runs | `AiLoadTest::test_S_210_6_2_ok_low_or_unbilled_runs_the_ai` | passed 2026-11-01 |
+| S-210.6.3 | happy | Given `low` or `stopped`, then the chatbot pages screen shows Forbeast's English note on that page's row (and in its settings) | `AiLoadTest::test_S_210_6_3_a_low_or_stopped_page_shows_the_forbeast_note_on_its_row` | passed 2026-11-01 |
+| S-210.6.4 | edge | Given the status is cached per page for 60 seconds, then a top-up in Forbeast resumes the AI within a minute | `AiLoadTest::test_S_210_6_4_the_state_is_cached_60_seconds_so_a_top_up_resumes_the_ai_within_a_minute` | passed 2026-11-01 |
+| S-210.6.5 | edge | Given Forbeast unreachable, `page_not_found`, or no gateway set up, then the AI runs (never stopped by an error) | `AiLoadTest::test_S_210_6_5_an_unreachable_forbeast_page_not_found_or_no_gateway_runs_the_ai` | passed 2026-11-01 |
+| S-210.6.6 | edge | Given many pages, then status is fetched in batches of up to 100, not one request per message | `AiLoadTest::test_S_210_6_6_many_pages_are_fetched_in_batches_of_up_to_100_not_one_request_per_message` | passed 2026-11-01 |
+
+### S-210.7 Secrets never leak (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-210.7.1 | negative | Given a full run (add, test, failover, error), when logs, failed_jobs, exception output, HTTP responses, page source, page_settings history and ai_attempts are searched for the test key, then only the last 4 appear | `AiKeySecretsTest::test_S_210_7_1_after_add_test_failover_and_errors_only_the_last_4_of_the_key_appear_anywhere` | passed 2026-11-01 |
+| S-210.7.2 | negative | Given a provider error that echoes headers or the key, then it is scrubbed before it is stored or logged | `AiKeySecretsTest::test_S_210_7_2_a_provider_error_that_echoes_headers_or_the_key_is_not_stored_or_logged` | passed 2026-11-01 |
+| S-210.7.3 | negative | Given a customer message asking for the key, then no secret is reachable (keys never enter a prompt) | `AiKeySecretsTest::test_S_210_7_3_a_customer_asking_for_the_key_reaches_no_secret_because_keys_never_enter_a_prompt` | passed 2026-11-01 |
+| S-210.7.4 | edge | Given every add, edit, test, disable and delete of a key, then it is in the page_settings history with who and when, no key text | `AiKeyScreenTest::test_S_210_7_4_every_add_edit_test_disable_and_delete_is_in_the_history_with_who_and_when_and_no_key_text` | passed 2026-11-01 |
+

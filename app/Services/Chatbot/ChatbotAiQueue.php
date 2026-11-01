@@ -48,7 +48,22 @@ class ChatbotAiQueue
     {
         return ['provider' => $res['provider'], 'model_used' => $res['model_used'], 'fell_back' => (bool) $res['fell_back'],
             'fallback_reason' => $res['fallback_reason'], 'ai_attempts' => json_encode($res['attempts'], JSON_UNESCAPED_UNICODE),
-            'latency_ms' => $res['latency_ms'], 'prompt_tokens' => $res['prompt_tokens'], 'completion_tokens' => $res['completion_tokens']];
+            'latency_ms' => $res['latency_ms'], 'prompt_tokens' => $res['prompt_tokens'], 'completion_tokens' => $res['completion_tokens']]
+            + (ChatbotAiUsage::ready() ? ['key_id' => $res['key_id'] ?? null, 'key_label' => $res['key_label'] ?? null, 'key_last4' => $res['key_last4'] ?? null] : []);
+    }
+
+    /**
+     * Ang gastos at ang padala ng usage (spec 210): ang sagot lang ng provider na may pool (OpenAI, Claude, DeepSeek) ang
+     * sinisingil; ang palya, ang Local at ang mock ay wala. Ang gateway ay ang sa page ngayon; walang naka-set up = no_gateway.
+     */
+    private static function billOf(array $res, string $page): array
+    {
+        if (!ChatbotAiUsage::ready() || !isset($res['attempts'])) return [];
+        if (!$res['ok'] || !ChatbotAiKeys::pooled((string) $res['provider'])) return ['cost_micros' => null, 'cost_flag' => null, 'usage_status' => null, 'usage_gateway' => null];
+        [$cost, $flag] = ChatbotAiCost::of((string) $res['model_used'], $res['prompt_tokens'], $res['completion_tokens']);
+        $gateway = ChatbotAiUsage::gatewayOf($page);
+
+        return ['cost_micros' => $cost, 'cost_flag' => $flag, 'usage_status' => $gateway !== null ? ChatbotAiUsage::PENDING : ChatbotAiUsage::NO_GATEWAY, 'usage_gateway' => $gateway];
     }
 
     /**
@@ -63,7 +78,7 @@ class ChatbotAiQueue
             'flow_id' => (int) $run->flowId, 'node_id' => mb_substr($nodeId, 0, 20), 'run_id' => $run->runId, 'page_name' => $run->pageName, 'model' => mb_substr($model, 0, 100),
             'messages' => null, 'max_tokens' => $maxTokens, 'context' => null, 'status' => 'sync', 'deadline_at' => now(), 'answered_at' => now(),
             'error' => $res['ok'] ? null : mb_substr((string) $res['error'], 0, 255), 'path' => 'sync', 'created_at' => now(), 'updated_at' => now(),
-        ] + self::recordOf($res));
+        ] + self::recordOf($res) + self::billOf($res, $run->pageName));
     }
 
     /** Ang ticket: isang row, at ang __ai ng customer (ang marka na may hinihintay pang sagot). @return string request_id */
@@ -139,7 +154,7 @@ class ChatbotAiQueue
         $ok = DB::table(self::TABLE)->where('id', $row->id)->where('status', 'sending')->where('claimed_by', $owner)->update([
             'status' => $res['ok'] ? 'answered' : 'failed', 'answer' => $res['ok'] ? $res['text'] : null,
             'error' => $res['ok'] ? null : mb_substr((string) $res['error'], 0, 255), 'http' => $http, 'answered_at' => now(), 'updated_at' => now(),
-        ] + (isset($res['attempts']) && self::recorded() ? self::recordOf($res) : []));
+        ] + (isset($res['attempts']) && self::recorded() ? self::recordOf($res) + self::billOf($res, (string) $row->page_name) : []));
         if ($ok !== 1) return false;
         ResumeChatbotAi::dispatch(self::ticket($row));
 
@@ -175,6 +190,12 @@ class ChatbotAiQueue
      * ng REDISPATCH_SECONDS → ipinapadala ulit ang resume (isang beses lang tumatakbo); ang luma → binubura.
      * @return array{failed: int, redispatched: int, pruned: int}
      */
+    /** Ang row na binubura: walang usage na naghihintay na maipadala sa Forbeast (ang pending ay hindi kailanman binubura). */
+    private static function sentOrNone($q)
+    {
+        return ChatbotAiUsage::ready() ? $q->whereNull('usage_status')->orWhere('usage_status', '!=', ChatbotAiUsage::PENDING) : $q;
+    }
+
     public static function sweep(): array
     {
         $out = ['failed' => 0, 'redispatched' => 0, 'pruned' => 0];
@@ -219,11 +240,11 @@ class ChatbotAiQueue
         // May record: ang naiwang answered/failed (hindi naituloy) ay binubura pagkatapos ng 2 araw gaya ng dati; sa tapos na
         // (resumed, sync) ang text ng customer lang ang binubura, at ang row (record) pagkatapos ng 90. Ang paghahanap ay sa
         // ilang araw lang pagkatapos ng 2 (hindi ang buong 90), para mabilis ang sweep sa loob ng pool.
-        $out['pruned'] = DB::table(self::TABLE)->where('created_at', '<', now()->subDays(self::KEEP_DAYS))->whereIn('status', ['failed', 'answered'])->orderBy('id')->limit(5000)->delete();
+        $out['pruned'] = DB::table(self::TABLE)->where('created_at', '<', now()->subDays(self::KEEP_DAYS))->whereIn('status', ['failed', 'answered'])->where(fn ($q) => self::sentOrNone($q))->orderBy('id')->limit(5000)->delete();
         $ids = DB::table(self::TABLE)->whereBetween('created_at', [now()->subDays(self::KEEP_DAYS + 5), now()->subDays(self::KEEP_DAYS)])->whereIn('status', ['resumed', 'sync'])
             ->where(fn ($q) => $q->whereNotNull('messages')->orWhereNotNull('answer')->orWhereNotNull('context'))->orderBy('id')->limit(5000)->pluck('id');
         if ($ids->isNotEmpty()) DB::table(self::TABLE)->whereIn('id', $ids)->update(['messages' => null, 'answer' => null, 'context' => null]);
-        $out['pruned'] += DB::table(self::TABLE)->where('created_at', '<', now()->subDays(self::RECORD_DAYS))->whereIn('status', ['resumed', 'sync'])->orderBy('id')->limit(5000)->delete();
+        $out['pruned'] += DB::table(self::TABLE)->where('created_at', '<', now()->subDays(self::RECORD_DAYS))->whereIn('status', ['resumed', 'sync'])->where(fn ($q) => self::sentOrNone($q))->orderBy('id')->limit(5000)->delete();
 
         return $out;
     }

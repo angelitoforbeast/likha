@@ -467,14 +467,19 @@ class FlowEngine
             $model = (string) ($c['model'] ?? 'gpt-4o-mini');
             $maxTokens = (int) ($c['max_tokens'] ?? 250);
 
-            // Hindi hinihintay ang sagot: ang ticket ay sa pool, at humihinto ang takbo (bakante agad ang worker).
-            if (ChatbotAiQueue::async($run, $outbox)) {
-                $id = ChatbotAiQueue::submit($run, $node['id'], $model, $messages, $maxTokens);
-                $run->aiPending = true;
-                $run->event('ai_pending', $node['id'], ['model' => $model, 'request' => substr($id, 0, 8)]);
-                return ['port' => null, 'suspend' => true, 'note' => 'Waiting for the AI answer'];
+            // Walang load ang account ng page sa Forbeast (spec 210): walang tawag sa AI, ang failed port, at tuloy ang flow.
+            if (app(ChatbotAiLoad::class)->stopped($run->pageName, (string) $run->pageId) !== null) {
+                $res = ChatbotAiLoad::skipped($run, $node['id'], $model, $maxTokens);
+            } else {
+                // Hindi hinihintay ang sagot: ang ticket ay sa pool, at humihinto ang takbo (bakante agad ang worker).
+                if (ChatbotAiQueue::async($run, $outbox)) {
+                    $id = ChatbotAiQueue::submit($run, $node['id'], $model, $messages, $maxTokens);
+                    $run->aiPending = true;
+                    $run->event('ai_pending', $node['id'], ['model' => $model, 'request' => substr($id, 0, 8)]);
+                    return ['port' => null, 'suspend' => true, 'note' => 'Waiting for the AI answer'];
+                }
+                $res = ChatbotMockAi::answer($run) ?? $this->ai->answer($run, $node['id'], $model, $messages, $maxTokens);
             }
-            $res = ChatbotMockAi::answer($run) ?? $this->ai->answer($run, $node['id'], $model, $messages, $maxTokens);
         }
         if (!$res['ok']) {
             $run->event('ai', $node['id'], ['result' => 'failed', 'model' => (string) ($c['model'] ?? 'gpt-4o-mini'), 'error' => (string) $res['error']]);

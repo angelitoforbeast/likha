@@ -472,6 +472,10 @@ class PageSettingController extends Controller
         if ($setting->provider === \App\Services\Chatbot\AdGroups::PROVIDER) {
             return redirect()->route('page-settings.index')->withErrors(['value' => 'Ad groups are changed in the page\'s Ad groups on /chatbot/pages.']);
         }
+        // Ang pool ng AI key: sa /chatbot/ai-keys lang (ang delete doon ang bumubura ng naka-encrypt na value).
+        if ($setting->provider === \App\Services\Chatbot\ChatbotAiKeys::PROVIDER) {
+            return redirect()->route('page-settings.index')->withErrors(['value' => 'AI keys are changed on /chatbot/ai-keys.']);
+        }
         if ($setting->fullKey() === 'forbeast.token') app(ForbeastPageSetup::class)->disconnect($setting->page_name, Auth::id());
         else $this->settings->deactivate($setting, Auth::id());
 
