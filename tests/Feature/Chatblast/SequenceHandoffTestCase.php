@@ -21,6 +21,7 @@ use GuzzleHttp\Psr7\Response;
 use Illuminate\Bus\UniqueLock;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Psr\Http\Message\RequestInterface;
 
@@ -63,6 +64,7 @@ abstract class SequenceHandoffTestCase extends ChatblastTestCase
             app(PageSettings::class)->set($page, 'botcake', 'token', 'tok-' . $id);
         }
         Queue::fake();
+        Http::preventStrayRequests(); // the pool has its own fake handler; an inline send must be faked by the test
         $this->travelTo('2026-11-02 10:00:00');
         $this->replyPool = new BotcakeSendPool(fn () => new Promise(), $this->clock);
         $this->assertTrue($this->replyPool->start());
