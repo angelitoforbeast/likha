@@ -3612,3 +3612,19 @@ Stories: 1 match by ad, ad set or campaign (P1); 2 live lookup, once, stored, ne
 | S-212.A1 (P1) | Amendment 212-1. Given a new ad looked up in Meta, When its parents are found, Then they are cached first and the `ad_catalog` write is a queued job on the default queue: a write that waits (import lock) or fails never delays the match, never makes a second Meta call, and is not logged as a failed lookup | `test_S_212_A1_the_catalog_write_is_queued…`, `test_S_212_A1_a_failing_catalog_write…` | passed |
 | S-212.A2 (P1) | Amendment 212-1. The Inbox panel and the order-sheet preview show the known or cached group (or page values) and never call Meta or spend the page's lookup cap | `test_S_212_A2…` | passed |
 | S-212.A3 (P2) | Amendment 212-1. "Hide again" unticks hidden ticked ads in "Ads not in a group yet", so "Add N ads to group" counts and adds only visible ones | Node test (`test_S_212_4_5_4_6_and_7_4_to_7_9…`) | passed |
+
+## S-213 "Show hidden" on the read-only Ad groups panel shows only what that panel can reveal
+
+As staff who look at an Ad-based page's groups in the /chatbot/pages table, I want "Show hidden" there to reveal only what that view shows, and to be told where the hidden ads not in a group are, so the button never looks broken.
+
+Slice 213. Threat model: trusted = signed-in staff; no new inputs, routes or data; display only. Risk tier: low.
+Tests: `tests/Feature/Chatblast/AdGroupPagesTest.php` (the panel script run in Node on `tests/js/dom-stub.cjs`); the browser check `docs/specs/213-evidence/shots.mjs`.
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-213.1 (P1) | Given only ads not in a group are hidden (209), Then the read-only panel shows "209 ads not in a group are hidden (…): see Manage in Edit." and no button; the Edit view shows "Show hidden (209)", which reveals them in the list | `test_S_213_1_to_6…` | passed |
+| S-213.2 (P1) | Given only a hidden group, Then the read-only button reads "Show hidden (1)"; pressing it shows the group dimmed and reads "Hide again" | `test_S_213_1_to_6…` | passed |
+| S-213.3 (P1) | Given 2 hidden groups, 3 hidden ids and 50 hidden ads not in a group, Then the read-only button counts 5 and reveals those 5, the line still names the 50 with the pointer, and the Edit button counts 55 | `test_S_213_1_to_6…` | passed |
+| S-213.4 (P2) | Nothing hidden: no line and no button in either view | `test_S_213_1_to_6…` | passed |
+| S-213.5 (P2) | Show hidden turned on in Edit, then Edit closed: the read-only panel shows the same state ("Hide again", groups shown), and with only ads hidden it shows the line and no button, without errors | `test_S_213_1_to_6…` | passed |
+| S-213.6 (P2) | At 390 x 844 the line wraps, there is no sideways scroll, and the button keeps `aria-pressed` | `test_S_213_1_to_6…`, browser check (result) | passed |

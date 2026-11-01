@@ -1,0 +1,48 @@
+{
+  "only-ads-not-in-a-group desktop": {
+    "line": "209 ads not in a group are hidden (off or no report data for 7+ days, and no messages in 7 days): see Manage in Edit.",
+    "lineWidth": 619,
+    "lineHeight": 16,
+    "wraps": false,
+    "scrollWidth": 1440,
+    "innerWidth": 1440,
+    "sideways": false,
+    "button": null
+  },
+  "only-ads-not-in-a-group phone-390x844": {
+    "line": "209 ads not in a group are hidden (off or no report data for 7+ days, and no messages in 7 days): see Manage in Edit.",
+    "lineWidth": 366,
+    "lineHeight": 32,
+    "wraps": true,
+    "scrollWidth": 390,
+    "innerWidth": 390,
+    "sideways": false,
+    "button": null
+  },
+  "mixed desktop": {
+    "line": "Hidden: 2 groups, 3 ids in groups (off or no report data for 7+ days, and no messages in 7 days). 50 ads not in a group are hidden: see Manage in Edit.",
+    "lineWidth": 795,
+    "lineHeight": 16,
+    "wraps": false,
+    "scrollWidth": 1440,
+    "innerWidth": 1440,
+    "sideways": false,
+    "button": {
+      "text": "Show hidden (5)",
+      "pressed": "false"
+    }
+  },
+  "mixed phone-390x844": {
+    "line": "Hidden: 2 groups, 3 ids in groups (off or no report data for 7+ days, and no messages in 7 days). 50 ads not in a group are hidden: see Manage in Edit.",
+    "lineWidth": 366,
+    "lineHeight": 48,
+    "wraps": true,
+    "scrollWidth": 390,
+    "innerWidth": 390,
+    "sideways": false,
+    "button": {
+      "text": "Show hidden (5)",
+      "pressed": "false"
+    }
+  }
+}
