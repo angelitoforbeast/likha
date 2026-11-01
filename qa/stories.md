@@ -3628,3 +3628,82 @@ Tests: `tests/Feature/Chatblast/AdGroupPagesTest.php` (the panel script run in N
 | S-213.4 (P2) | Nothing hidden: no line and no button in either view | `test_S_213_1_to_6…` | passed |
 | S-213.5 (P2) | Show hidden turned on in Edit, then Edit closed: the read-only panel shows the same state ("Hide again", groups shown), and with only ads hidden it shows the line and no button, without errors | `test_S_213_1_to_6…` | passed |
 | S-213.6 (P2) | At 390 x 844 the line wraps, there is no sideways scroll, and the button keeps `aria-pressed` | `test_S_213_1_to_6…`, browser check (result) | passed |
+
+## S-215 Sequence sends don't hold a worker while waiting on the send API
+
+As the owner of pages with sequence follow-ups, I want every sequence step to hand its send off and never hold a queue worker while it waits on the send API, the same way for Botcake and for the Forbeast gateway, so follow-ups go out on time at any volume, never twice, and never slow down first replies.
+
+Slice 215. Threat model: untrusted = message content and API responses (Meta, Botcake, gateway); trusted = page settings written by staff, config. The risk is operational: duplicate or lost customer messages, and slowed first replies. Risk tier: high.
+Tests: planned in `docs/plans/215-sequence-sends-no-wait.md`. Priorities: S-215 to S-215e are P1, S-215f is P2 except S-215f.3 (P1).
+
+### S-215 Hand-off: sends don't hold a worker
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-215.1 (P1) | Given 4 workers, 300 due steps on 20 pages and a fake API at 2.9 s, When they run, Then peak in flight is at least 40 and all are sent within 60 virtual seconds | planned | planned |
+| S-215.2 (P1) | When a sequence step job hands its send off, Then `handle()` ends in under 0.5 s | planned | planned |
+| S-215.3 (P1) | Given a send that succeeds, Then the subscription advances as `advance()` does today | planned | planned |
+| S-215.4 (P1) | Given #551 or another 4xx, Then the send is logged failed with the same text, is not retried, and the step advances | planned | planned |
+| S-215.5 (P1) | Given a 5xx or HTTP 0, Then it behaves as today's inline path, with exactly one row per attempt | planned | planned |
+| S-215.6 (P1) | Given a step with several sends, Then they keep their order, a failed send doesn't stop the next send, and every row carries the sequence id and step | planned | planned |
+| S-215.7 (P1) | Given "Wait for reply" in a step, Then the step doesn't park | planned | planned |
+| S-215.8 (P1) | Given AI or Sheet nodes in a step, Then they don't run twice | planned | planned |
+| S-215.9 (P1) | Given non-ASCII, 2,000-character and image messages, Then what reaches the API is byte-identical to today's | planned | planned |
+| S-215.10 (P1) | Given the flag off or the pool down, Then the step sends inline as before | planned | planned |
+| S-215.11 (P1) | Inbox, Replies and /chatbot/speed show the same fields as today (via, sequence id and step, tags, UPDATE type, due) | planned | planned |
+
+### S-215b Safety under load
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-215b.1 (P1) | Steps 1, 2, 3 go in order, once each | planned | planned |
+| S-215b.2 (P1) | A step whose send is in flight gets no second job or ticket | planned | planned |
+| S-215b.3 (P1) | A 12-minute backlog is not re-claimed | planned | planned |
+| S-215b.4 (P1) | A sequence ticket and a reply ticket for the same customer go one at a time, and a customer reply isn't held behind more than one sequence send | planned | planned |
+| S-215b.5 (P1) | Exit on reply while in flight: no later step, no double send | planned | planned |
+| S-215b.6 (P1) | Pause, page off or 24 h window closed: checked at send time | planned | planned |
+| S-215b.7 (P1) | A page move while in flight: no double send | planned | planned |
+| S-215b.8 (P1) | Lock taken: retry in 1 minute as today | planned | planned |
+
+### S-215c Restarts
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-215c.1 (P1) | A clean pool exit drains in-flight sends; each advances once | planned | planned |
+| S-215c.2 (P1) | Pool killed after the call: no resend, recorded failed, not stuck | planned | planned |
+| S-215c.3 (P1) | Pool killed before the call: back to pending, sent once | planned | planned |
+| S-215c.4 (P1) | A worker restart between hand-off and result still advances once; a duplicate resume does nothing | planned | planned |
+| S-215c.5 (P1) | Pool down: inline fallback | planned | planned |
+| S-215c.6 (P1) | A terminate and a pool restart together: rows plus failures equal steps due | planned | planned |
+
+### S-215d Stale claim
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-215d.1 (P1) | A dead job's subscription is re-picked within about 2 minutes and sent once | planned | planned |
+| S-215d.2 (P1) | A queued job's row is not re-stamped | planned | planned |
+| S-215d.3 (P1) | A stale job after a newer claim never leaves a stuck row | planned | planned |
+| S-215d.4 (P1) | 2,000 due at once: no row hidden, tick within 50 s | planned | planned |
+
+### S-215e Providers and other traffic
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-215e.1 (P1) | A Botcake page step goes via Botcake | planned | planned |
+| S-215e.2 (P1) | A Forbeast gateway page step goes via the gateway with UPDATE and client_ref, and the ForbeastWatch hooks are still called | planned | planned |
+| S-215e.3 (P1) | A gateway that fails or isn't set up: logged failed, no worker held | planned | planned |
+| S-215e.4 (P1) | A provider switch mid-flight: exactly one provider, once | planned | planned |
+| S-215e.5 (P1) | The per-page rate holds; a 429 backs off that page only | planned | planned |
+| S-215e.6 (P1) | Sequence and inbox sends share the rate | planned | planned |
+| S-215e.7 (P1) | 2,000 steps in flight don't slow a first reply on chatbot-high (same fixture versus the old code) | planned | planned |
+| S-215e.8 (P1) | Chatblast unchanged and not starved either way | planned | planned |
+| S-215e.9 (P1) | A full pool means pending, no failure | planned | planned |
+
+### S-215f Visibility
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-215f.1 (P2) | /chatbot/speed Sequences shows average, p90 and max lateness per hour (S-182.11 and S-185.5 still pass) | planned | planned |
+| S-215f.2 (P2) | A read-only artisan command shows per hour: steps sent, due but unsent, oldest overdue, average lateness, and pool pending | planned | planned |
+| S-215f.3 (P1) | Lateness is measured due → sent at Meta, not due → hand-off | planned | planned |
+| S-215f.4 (P2) | An empty hour shows blank, no error | planned | planned |
