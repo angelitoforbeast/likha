@@ -3664,6 +3664,9 @@ Tests: planned in `docs/plans/215-sequence-sends-no-wait.md`. Priorities: S-215 
 | S-215b.6 (P1) | Pause, page off or 24 h window closed: checked at send time | planned | planned |
 | S-215b.7 (P1) | A page move while in flight: no double send | planned | planned |
 | S-215b.8 (P1) | Lock taken: retry in 1 minute as today | planned | planned |
+| S-215b.9 (P1) | The ticket and the subscription's link to it are written in one transaction, conditional on the claim; a pool tick in between sees no ticket, and a link that updates 0 rows leaves no ticket | planned | planned |
+| S-215b.10 (P1) | Re-subscribe while a step is in flight: the old result advances nothing, step 1 of the new subscription is sent once | planned | planned |
+| S-215b.11 (P1) | A page transfer while a ticket is in flight: a called ticket's step is advanced before the export (the new site sends the next step), an uncalled one is cancelled (the new site sends it); one send in total | planned | planned |
 
 ### S-215c Restarts
 
@@ -3675,6 +3678,8 @@ Tests: planned in `docs/plans/215-sequence-sends-no-wait.md`. Priorities: S-215 
 | S-215c.4 (P1) | A worker restart between hand-off and result still advances once; a duplicate resume does nothing | planned | planned |
 | S-215c.5 (P1) | Pool down: inline fallback | planned | planned |
 | S-215c.6 (P1) | A terminate and a pool restart together: rows plus failures equal steps due | planned | planned |
+| S-215c.7 (P1) | Mixed versions: a reply pool without the new beat flag means inline sends; a sequence ticket left done without a send by another process is resolved after the deadline plus 5 minutes, never resent when it was called | planned | planned |
+| S-215c.8 (P1) | The sequence pool dead past DEAD_POOL_SECONDS: uncalled tickets are cancelled and their steps go inline once; called ones are recorded failed, not resent | planned | planned |
 
 ### S-215d Stale claim
 
@@ -3684,6 +3689,8 @@ Tests: planned in `docs/plans/215-sequence-sends-no-wait.md`. Priorities: S-215 
 | S-215d.2 (P1) | A queued job's row is not re-stamped | planned | planned |
 | S-215d.3 (P1) | A stale job after a newer claim never leaves a stuck row | planned | planned |
 | S-215d.4 (P1) | 2,000 due at once: no row hidden, tick within 50 s | planned | planned |
+| S-215d.5 (P1) | A job still running is never re-claimed (the claim is re-stamped at start, a running marker, job timeout below the stale window); a job killed mid-run is re-picked once after the window | planned | planned |
+| S-215d.6 (P1) | Migration not run: tick, claim, step and advance work as on the base, with inline sends | planned | planned |
 
 ### S-215e Providers and other traffic
 
@@ -3707,3 +3714,4 @@ Tests: planned in `docs/plans/215-sequence-sends-no-wait.md`. Priorities: S-215 
 | S-215f.2 (P2) | A read-only artisan command shows per hour: steps sent, due but unsent, oldest overdue, average lateness, and pool pending | planned | planned |
 | S-215f.3 (P1) | Lateness is measured due → sent at Meta, not due → hand-off | planned | planned |
 | S-215f.4 (P2) | An empty hour shows blank, no error | planned | planned |
+| S-215f.5 (P1) | A step with several sends: the `ran` event is stamped so /chatbot/speed matches its sends (the first one always), with the first send's lateness | planned | planned |
