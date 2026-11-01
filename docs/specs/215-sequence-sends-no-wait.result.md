@@ -1,6 +1,6 @@
 # Result: spec 215, sequence sends don't hold a worker while waiting on the send API
 
-**Status:** done (built and tested locally; review and MySQL QA fix list applied; not pushed, not deployed)
+**Status:** done (built and tested locally; review and MySQL QA fix lists of rounds 2 and 3 applied; not pushed, not deployed)
 **Date:** 2026-11-02
 **Branch / PR:** `feat/215-sequence-sends-no-wait`, cut from 96080bfe. Not pushed, no PR.
 **Plan:** `docs/plans/215-sequence-sends-no-wait.md` (revision 2, accepted).
@@ -17,14 +17,20 @@
 - **Never twice.** The call is recorded before it goes out, only while the subscription still holds the ticket. A killed
   pool, a lost resume, a dead pool, an old process, a re-claimed job, a page move, or a job killed during a step each end
   with no resend; when unsure the step is recorded failed ("stopped after a send; not sent again") and advances.
-- **A step killed mid-run.** The step job keeps its 280 s timeout. A running job is never claimed again (its marker lives
-  for its timeout + 10 s). Each run of a step leaves an attempt marker (subscription, step, due) that only a run that ends
-  normally removes. A re-claim that finds it does not run the step again when the earlier run may have sent (an inline call
-  was going out), when a node with effects (anything but Start, Condition, Send, End and Set set/clear) comes before the
-  first send, or when it already ran again once; otherwise it runs once more.
+- **A step killed mid-run.** The step job keeps its 280 s timeout. A running job is never claimed again: its row says so
+  (the `attempt` column, started time) and, as a speed-up only, a cache marker for its timeout + 10 s. Each run of a step
+  writes its attempt in the subscription row (step, due, count, "a call went out", start), and only a run that ends
+  normally clears it; a cleared cache (a deploy's `optimize:clear`) changes nothing. A re-claim that finds it does not run the step again when the earlier run may have sent (an inline call
+  was going out: marked right before the HTTP request, not while waiting for the page slot), when a node with effects
+  (anything but Start, Condition, Send, End and Set set/clear) comes before the first send, or when it already ran again
+  once; otherwise it runs once more. The reasons are recorded apart: "stopped after a send; not sent again" and "stopped
+  before the send; not run again".
 - **Late, never lost.** While the sequence pool is alive, a ticket that has not been called never fails for being late: it
-  waits, and the subscription and the 24 h window are checked at send time. A dead pool (no beat for 60 s) cancels its
-  uncalled tickets and the tick sends those steps inline; a step whose effects already ran is recorded instead.
+  waits, and the subscription and the 24 h window are checked at send time. A call in the air is never failed while the
+  pool that made it is alive (the backstop ages a call by the ticket's own `called_at`, and only for a pool that is gone).
+  A dead pool (no beat for 60 s), or one that beats without progress for 5 minutes while tickets wait (logged as a
+  warning), has its uncalled tickets cancelled, and the tick sends those steps inline; a step whose effects already ran
+  is recorded instead.
 - **First replies untouched.** The reply pool's claim rule, lanes and order are unchanged; it only leaves `sequence`
   tickets out. The two pools share each page's rate through `BotcakeClient::slot`.
 - **Fallback.** Flag off, migration not run, the sequence pool not alive, or a reply pool from before this change: the
@@ -39,7 +45,9 @@
 | `app/Services/Chatbot/SequenceSendPool.php` (new) | The sequence pool: own beat with `sequence:1` (and `stopped` on a clean exit), claims `priority = 3` only, every 200 ms, up to `sequence_concurrency`. Botcake lane per token (same `send_content`, timeout, 429-only retry with a page pause, shared slot); gateway lane per page (no client rate, no retry, `sequence_gateway_per_page` held). Before the call: provider unchanged, no reply ticket of the customer open, `sendCheck`, then the conditional `calledSequence`; a holder that left in between ends the ticket as skipped. `ForbeastWatch::afterSend` via `GatewayAfterSend` after the result is recorded. |
 | `app/Services/Chatbot/BotcakeSendQueue.php` | `sequenceReady`, `sequenceAsync`, `repeatable`/`sideEffects` (allowlist), `submitSequence` (ticket and link in one transaction, 3 tries; `moved` and `released` outcomes), `replyOpen`, `calledSequence` (holder must still exist; stores via and `client_ref`), `finishSequence`, `noAnswer`, `recoverSequence`, `sweepSequence` (no lateness failure), `hasTable` memo. The sequence claim has no deadline. The reply pool's `claim` (`priority < 3`), `recover`, the pending-deadline loop and prune leave `sequence` tickets out. |
 | `app/Services/Chatbot/ChatbotSequences.php` | `hasInFlight` (memoized column guard), `unlink`, `staleMinutes`; writers clear the link; `claim`/`tick` skip linked (in PHP, not in the SQL), queued or running rows; `runStep` re-stamps the claim at start (same-second safe on MySQL), running marker, attempt marker (`attemptKey`, `markSending`, `preSendEffects`), one sequence send per customer, the re-claim checks, hands off and returns `sending`, `handOffFailed`; `sendCheck`; `resumeSend`/`continueStep` (holder check, skip outcomes, `ran` stamp from the first send, `eventAt`); `settleInFlight` (sweep, dead pool, backstop that never cancels a ticket waiting on a live pool); `settleForMove` (row locks, one pass). |
-| `app/Services/Chatbot/FlowEngine.php` | The send node and the AI node's "send the answer" hand off through `sequenceAsync` → `submitSequence`; an inline sequence send is marked (`markSending`) before it goes out. |
+| `app/Services/Chatbot/FlowEngine.php` | The send node and the AI node's "send the answer" hand off through `sequenceAsync` → `submitSequence`; an inline sequence send is marked through `SequenceAttempt::around`, fired by the client right before the HTTP request. |
+| `app/Services/Chatbot/SequenceAttempt.php` (new) | The one-shot "before the request" hook for the inline send of a sequence step. |
+| `app/Services/BotcakeClient.php`, `GatewayProvider::send` | Call `SequenceAttempt::beforeCall()` right before the HTTP request (no effect outside a sequence step). |
 | `app/Services/Chatbot/FlowRun.php` | `$sequenceTicket`. |
 | `app/Services/Chatbot/GatewayProvider.php` | Split into `request()` and a static `outcome()`, used by `send()` and the pool (no behaviour change). |
 | `app/Services/Chatbot/TicketPool.php` | `beatInfo()` hook; a `stopped` beat does not block the next pool's start. |
@@ -50,7 +58,7 @@
 | `app/Jobs/GatewayAfterSend.php` (new) | Calls `ForbeastWatch::afterSend` with the outcome and the raw body, once per real gateway attempt. |
 | `app/Console/Commands/RunSequenceSendPool.php` (new) | `chatbot:sequence-pool --max-time=3600`. |
 | `app/Console/Commands/ChatbotSequenceLateness.php` (new) | `chatbot:sequence-lateness {--date=} {--page=}`, read-only. |
-| `database/migrations/2026_11_15_100000_add_send_request_to_chatbot_sequence_subscriptions.php` (new) | `send_request_id` string(36) nullable, indexed; guarded. |
+| `database/migrations/2026_11_15_100000_add_send_request_to_chatbot_sequence_subscriptions.php` (new) | `send_request_id` string(36) nullable, indexed, and `attempt` string(80) nullable; each guarded. |
 | `config/services.php`, `.env.example` | The three new keys below. |
 | `tests/Feature/Chatblast/Sequence*Test*.php` (new) | Harness, hand-off, safety, re-run, visibility, bench. |
 | `docs/specs/215-…md`, `docs/plans/215-…md`, `qa/stories.md` | Spec, plan, stories with test names and status. |
@@ -116,7 +124,7 @@ optimizer can still choose another one, so it is not guaranteed without `FORCE I
 stale window are read once per tick and skipped (the `$after` cursor moves past them). Not measured on MySQL here; the
 QA's EXPLAIN ANALYZE should be re-run on this head.
 
-### Queries per send (item 10)
+### Queries per send (item 10; measured in round 3, item O: 11 statements in the pool and 10 in the resume job)
 
 Per Botcake send that succeeds, in the pool's single loop:
 1. claim: 1 shared `SELECT` per claim round (every 200 ms, up to 500 candidates), then per ticket 1 conditional `UPDATE` and 1 `SELECT` of the row;
@@ -125,6 +133,26 @@ Per Botcake send that succeeds, in the pool's single loop:
 About 9–10 queries and one Redis dispatch per send; removed in this round: the ownership `SELECT` before the first call
 (the conditional `calledSequence` is that check) and the `SELECT` of the ticket's result in `finishSequence`. At 0.5 ms a
 query that is about 5 ms of database time per send in one process; the real ceiling must be measured on the server.
+
+## Round 3 fix list (second review and the MySQL 8.4 QA on 363ac71b)
+
+| # | Fix | Test |
+|---|---|---|
+| A | The backstop never touches a ticket held by the live sequence pool. A call held by a pool that is gone (or stalled) is failed "no answer" only when its own `called_at` is older than `CALL_SECONDS` (300 s: the 30 s call and the 429 waits), never by the subscription's link time. Linked rows whose ticket is resumed or gone are the only ones the 20-minute backstop ends. | `SequenceReRunTest::test_3_2500…` now answers after 2.9 s and runs past 20 minutes: all 2,500 sent, none failed, no "did not answer" (red on 363ac71b: 2,494 sent, 6 live calls failed) |
+| B | The per-attempt state is in the row: `chatbot_sequence_subscriptions.attempt` = "step\|due\|count\|call went out\|start". Written when the step starts (conditional), marked when an inline call goes out, cleared when the run ends normally; a run in progress (start within the job timeout + 10 s) is never claimed or run again, whatever the cache holds. The cache keeps only the short running marker as a speed-up. | `SequenceDurabilityTest::test_B_a_cache_cleared_mid_run…` (hand-off: the AI node runs once, one send) and `test_B_a_cache_cleared_during_an_inline_call…` (one send) (red on 363ac71b: the AI ran again, 131 sends) |
+| C | The inline send is marked by the client, right before the HTTP request (`SequenceAttempt`, called in `BotcakeClient::call` and `GatewayProvider::send`), not before the slot wait and the checks. | `test_C_the_inline_send_is_marked_at_the_request…` (not marked during the slot wait, marked at the request) |
+| D | A step killed before its send is recorded "stopped before the send; not run again"; after a send (or a possible send) "stopped after a send; not sent again". The dead-pool cancel of a step with effects uses the first reason. | `SequenceReRunTest` tests 1b and 3 |
+| E | The dead-pool cancel re-reads the beat and leaves tickets held by the pool that owns the current fresh beat (a pool that just started). | `test_E_the_dead_pool_cancel_leaves_tickets…` |
+| F | The beat carries `progress_at` (a claim, a finished send, or nothing waiting). A fresh beat with no progress for 5 minutes while tickets wait is a stalled pool: no new hand-off to it, its waiting tickets are cancelled and sent inline by the tick, and a warning line `sequence send pool: no progress for 5 minutes; …` is logged for the log checks. | `test_F_a_pool_that_beats_but_does_not_progress…` |
+| G | `PageTransfers::hold` and `release` run their transactions with 3 tries on deadlock. | none on sqlite (deadlocks are not reproducible there); by reading |
+| H | `ResumeChatbotSequenceSend` timeout 280 s. | `test_H_and_I…` |
+| I | The running marker's key carries the site (a hash of `app.url`), so two sites on one Redis never share it; `config/cache.php`'s default prefix comes from `APP_NAME` and may be the same on both. The state that matters is in rows now (B). | `test_H_and_I…` |
+| J | Rollback step 5 waits until nothing is in flight, with the read-only check (see Deploy steps). | — |
+| K | A step held because the page ID changed is recorded ("the page ID changed; stopped") and stops (status error) once its first such hold is more than 24 hours old. | `test_K_a_page_id_changed_for_24_hours…` |
+| L | `test_5` creates its failing trigger in the form of the driver (MySQL `SIGNAL SQLSTATE '45000'`, sqlite `RAISE(ABORT)`). | `SequenceReRunTest::test_5…` |
+| M | The backstop reads linked rows ordered by the indexed `send_request_id` with a `NOT EXISTS` on the ticket's unique `request_id`; the resume sweep and the prune read per status with `status = ? AND priority = 3` first, on the `(status, priority, id)` index. Both portable. | `test_M_the_backstop_and_the_resume_sweep_read_through_their_indexes` (red on 363ac71b: `order by id`) |
+| N | Sequence tickets were already pruned by `sweepSequence` (resumed, failed, done; a skipped send is `done`, a cancelled one `resumed`); now per status on the index, in chunks of 5,000. | `test_N_old_sequence_tickets_are_pruned…` |
+| O | Measured with `DB::listen` around the pool alone, after one warm-up send (the per-process schema checks of the reply columns run once in a pool's life): **11 statements per send in the pool** (claim `SELECT` + `UPDATE` + row `SELECT`, `replyOpen`, subscription, customer values, last chat, `calledSequence`, `finishSequence`, reply `INSERT`, tag rows `INSERT`) and **10 in the resume job**. The first send of a process adds 9 schema reads. Ceilings asserted: 12 and 12. | `test_O_the_pool_runs_a_stated_number_of_queries_per_send` |
 
 ## Bench (Done when)
 
@@ -151,13 +179,16 @@ Full `vendor/bin/phpunit` (sqlite in memory):
 |---|---|---|---|---|
 | Base 96080bfe | 3,976 | 43,465 | 4 | 4 |
 | Head 8a2c4244 (before the fix list) | 4,028 | 74,224 | 3 | 4 |
-| Head after the fix list | 4,040 | 74,286 | 2 | 5 |
+| Head after round 2 (363ac71b) | 4,040 | 74,286 | 2 | 5 |
+| Head after round 3 | 4,050 | 44,333 | 3 | 5 |
 
-- **No new failure.** The head's 2 failures are on the base list: `ExampleTest` (302) and `ItemTableFitScriptTest`
-  (57 vs 45). The base's timing failures (`BigBroadcastTest::test_S_167_1`, `AstraAddressRulesTest::test_S_26_18`, both
-  load-dependent) passed on this run. The extra skip is `test_14_mysql_only…` (MySQL only).
-- **64 new tests:** SequenceHandoffTest 11, SequenceSafetyTest 28, SequenceReRunTest 12 (1 skipped on sqlite),
-  SequenceVisibilityTest 3, SequenceBenchTest 10.
+- **No new failure.** The round 3 head's 3 failures are all on the base list: `ExampleTest` (302), `ItemTableFitScriptTest`
+  (57 vs 45), and `BigBroadcastTest::test_S_167_1` (the same timing assertion as on base, "all 5,000 handed to the pool at
+  once": 4,508; the class passes alone, 10/10, 30,077 assertions, on this head). That test stops at its first assertion
+  under load, which is why the assertion total is lower on this run. `AstraAddressRulesTest::test_S_26_18` passed. The
+  extra skip is `test_14_mysql_only…` (MySQL only).
+- **74 new tests:** SequenceHandoffTest 11, SequenceSafetyTest 28, SequenceReRunTest 12 (1 skipped on sqlite),
+  SequenceDurabilityTest 10, SequenceVisibilityTest 3, SequenceBenchTest 10. All green on sqlite.
 - **The 14 listed suites, all green on the head, same counts as base:** ChatbotSequenceEngineTest 22, ChatbotPriorityTest 8,
   BotcakeAsyncSendTest 23, FailedSendKeepsConversationTest 12, ChatbotSequencePagesTest 7, ChatbotAfterOrderSequenceTest 3,
   GatewaySitePagesTest 26, GatewayTypingTest 9, ForbeastAutoSwitchTest 35, ChatbotTagsTest 12, ChatbotViaTest 3,
@@ -205,7 +236,10 @@ Rollback (the flag is read by long-running Horizon workers and by the pools, so 
 2. `php artisan config:cache`;
 3. `php artisan horizon:terminate` (supervisor restarts Horizon);
 4. restart the sequence pool (`supervisorctl restart likha-sequence-send`, and Incepxion's twin);
-5. wait 15 minutes for the tickets already in flight to settle;
+5. wait until nothing is in flight: the read-only check below returns 0 and 0 (the pool sends what was handed off, and
+   the resume jobs clear the links):
+   `SELECT (SELECT COUNT(*) FROM botcake_send_requests WHERE kind = 'sequence' AND status IN ('pending','sending')) AS tickets, (SELECT COUNT(*) FROM chatbot_sequence_subscriptions WHERE send_request_id IS NOT NULL) AS linked;`
+   (or `php artisan chatbot:sequence-lateness`, column "Pool pending", all blank);
 6. only then deploy older code, if needed (older code does not know `send_request_id`).
 
 ### Memory
@@ -246,12 +280,14 @@ taken for a dead pool) and seven minors. Second round (independent review and My
 2. **A reply and a sequence send of one customer can be in the air together** for one call (the reply never waits).
 3. **`GatewayAfterSend` runs through the `chatbot` queue**, so for sequence-only gateway traffic the auto-switch reacts
    after that queue's wait; replies still call `afterSend` inline.
-4. **The attempt marker lives in the cache** (Redis on the servers, 2 days). If the cache is flushed while a step job is
-   dead, the re-claim falls back to the earlier check (a reply row of the step since the earlier claim), which does not
-   see an inline call that went out without a row.
-5. **A killed job is picked up after its marker runs out** (about 290 s), not 2 minutes; only a job that never started is
-   re-picked in about 2 minutes.
-6. **The pool's database time per send** (about 9–10 queries) is the ceiling of one pool process; measure it on MySQL.
+4. **The customer lock is still a cache lock** (as for replies today). A cleared cache no longer repeats a step (its state
+   is in the row), but for the moment of the clear a reply run and a sequence step of one customer can overlap.
+5. **A killed job is picked up after its row's run time runs out** (about 290 s), not 2 minutes; only a job that never
+   started is re-picked in about 2 minutes.
+6. **The pool's database time per send** (11 statements in the pool, 10 in the resume job, measured on sqlite) is the
+   ceiling of one pool process; measure it on MySQL.
+9. **A stalled pool is remembered in the cache** until it progresses again (advisory: if that is lost, the next tick
+   detects the stall again).
 7. **MySQL-only behaviour** (row locks in `settleForMove`, the same-second re-stamp, the tick plan) is checked by reading
    and by the MySQL-only test, not by the sqlite suite.
 8. **AI nodes in a sequence step still run inline** (out of this spec); with the 280 s timeout a step with several slow
