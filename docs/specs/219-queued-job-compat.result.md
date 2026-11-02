@@ -1,8 +1,10 @@
-# Result: spec 218, a deploy never breaks the jobs already waiting in the queue
+# Result: spec 219, a deploy never breaks the jobs already waiting in the queue
 
 **Status:** done after rework (built and tested locally; not pushed, not deployed)
 **Date:** 2026-11-03
 **Branch / PR:** `fix/218-queued-job-compat`, cut from f5d6d450 (live Likha main; Incepxion 36e36f9c has the same tree). Not pushed, no PR.
+**Number:** first written as spec 218; renumbered to 219 because another spec 218 (comment answer once a day, 81d106ac)
+was released first. The earlier commit subjects on this branch, and the branch name, keep "218".
 
 ## Cause
 
@@ -38,21 +40,21 @@ Now:
 
 ## Payload format unchanged: the evidence
 
-`tests/Feature/Chatblast/fixtures/218/payloads.json` was recorded on f5d6d450's job classes: `app/Jobs` was checked out
-from f5d6d450 (`git diff f5d6d450 -- app/Jobs` empty) and `QueuedJobPayloadTest` ran with `RECORD_218_PAYLOADS=1`. It
+`tests/Feature/Chatblast/fixtures/219/payloads.json` was recorded on f5d6d450's job classes: `app/Jobs` was checked out
+from f5d6d450 (`git diff f5d6d450 -- app/Jobs` empty) and `QueuedJobPayloadTest` ran with `RECORD_219_PAYLOADS=1`. It
 holds `serialize()` of the 15 classes, each built twice (required arguments only, and every argument with non-default
 values; 29 payloads), with the clock frozen. That fixture and the reverted classes are one commit (`5e2533ea`); the trait
-came after (`cbd1f23c`). `test_S_218_4_every_payload_is_byte_for_byte_what_f5d6d450_writes` compares the branch's
+came after (`cbd1f23c`). `test_S_219_4_every_payload_is_byte_for_byte_what_f5d6d450_writes` compares the branch's
 payloads with the recorded bytes: identical for all 29.
 
 ## Both directions
 
-- **Old payload into new code:** `test_S_218_1…` unserializes the exact payload that failed in production
+- **Old payload into new code:** `test_S_219_1…` unserializes the exact payload that failed in production
   (`O:31:"App\Jobs\RunChatbotSequenceStep":4:{subscriptionId;claim;connection;queue}`) and runs `handle()`: the step hands
-  its send off and the message is sent once; `$earlier` reads null. `test_S_218_2…` does the same for
+  its send off and the message is sent once; `$earlier` reads null. `test_S_219_2…` does the same for
   `ResumeChatbotSequenceSend` and `GatewayAfterSend`.
-- **New payload into old code:** the new code writes the f5d6d450 bytes (S-218.4), which f5d6d450 reads by definition;
-  `test_S_218_4_a_payload_written_now_is_read_…` also reads every payload back and checks every typed property is set.
+- **New payload into old code:** the new code writes the f5d6d450 bytes (S-219.4), which f5d6d450 reads by definition;
+  `test_S_219_4_a_payload_written_now_is_read_…` also reads every payload back and checks every typed property is set.
 - **Rollback is safe:** the payload format is f5d6d450's, so rolling back to f5d6d450 with jobs from this code in the queue
   works. Rolling back to code before 215 is the old situation (payloads with `earlier` are read by a class without it:
   PHP ignores an unknown property, no error).
@@ -61,10 +63,10 @@ payloads with the recorded bytes: identical for all 29.
 
 | Case | Test | Before the fix | After |
 |---|---|---|---|
-| S-218.1 | `QueuedJobCompatTest::test_S_218_1…` (the exact production payload) | fails: `Error: Typed property App\Jobs\RunChatbotSequenceStep::$earlier must not be accessed before initialization` | passes |
-| S-218.2 | `test_S_218_2…` (resume and gateway watch jobs) | passes | passes |
-| S-218.3 | `test_S_218_3_every_queued_job_with_an_optional_typed_property_restores_missing_defaults` (recursive over `app/Jobs`, subfolders such as `Boardroom` included; the rule: every queued job with an optional typed property uses the trait), `test_S_218_3_the_guard_reads_subfolders` | fails, listing 20 properties in 14 classes | passes |
-| S-218.4 | `QueuedJobPayloadTest` (2 tests, 29 payloads) | passes (it is the recorded state) | passes |
+| S-219.1 | `QueuedJobCompatTest::test_S_219_1…` (the exact production payload) | fails: `Error: Typed property App\Jobs\RunChatbotSequenceStep::$earlier must not be accessed before initialization` | passes |
+| S-219.2 | `test_S_219_2…` (resume and gateway watch jobs) | passes | passes |
+| S-219.3 | `test_S_219_3_every_queued_job_with_an_optional_typed_property_restores_missing_defaults` (recursive over `app/Jobs`, subfolders such as `Boardroom` included; the rule: every queued job with an optional typed property uses the trait), `test_S_219_3_the_guard_reads_subfolders` | fails, listing 20 properties in 14 classes | passes |
+| S-219.4 | `QueuedJobPayloadTest` (2 tests, 29 payloads) | passes (it is the recorded state) | passes |
 
 The guard's docblock records the known gap: a new **required** constructor parameter on a job that is already queued is not
 covered (there is no default to restore); such a change needs a default or a drained queue before the deploy.

@@ -9,7 +9,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Spec 218: ang job na naka-queue na bago ang deploy (serialized ng lumang bersyon ng klase) ay tumatakbo pagkatapos ng
+ * Spec 219: ang job na naka-queue na bago ang deploy (serialized ng lumang bersyon ng klase) ay tumatakbo pagkatapos ng
  * deploy gaya ng bagong dispatch, at ang guard na humuhuli sa typed property na maiiwang walang laman ng lumang payload.
  */
 class QueuedJobCompatTest extends SequenceHandoffTestCase
@@ -23,7 +23,7 @@ class QueuedJobCompatTest extends SequenceHandoffTestCase
         return 'O:' . strlen($class) . ':"' . $class . '":' . count($props) . ':{' . $out . '}';
     }
 
-    public function test_S_218_1_a_step_job_queued_by_the_previous_class_version_runs_after_the_deploy(): void
+    public function test_S_219_1_a_step_job_queued_by_the_previous_class_version_runs_after_the_deploy(): void
     {
         $seq = $this->sequence('Old payload', [$this->stepFlow(['Hi'])->id]);
         $id = $this->join($seq, '7001');
@@ -43,7 +43,7 @@ class QueuedJobCompatTest extends SequenceHandoffTestCase
         $this->assertSame(['sent: Hi'], $this->replies('7001'));
     }
 
-    public function test_S_218_2_the_resume_and_gateway_watch_jobs_run_from_their_first_payload_shape(): void
+    public function test_S_219_2_the_resume_and_gateway_watch_jobs_run_from_their_first_payload_shape(): void
     {
         $seq = $this->sequence('Resume', [$this->stepFlow(['Hi'])->id]);
         $this->join($seq, '7001');
@@ -76,7 +76,7 @@ class QueuedJobCompatTest extends SequenceHandoffTestCase
      * Known gap: a new REQUIRED constructor parameter on a job that is already queued is not covered (there is no default to
      * restore); a job that gains a required parameter needs a default or a drained queue before the deploy.
      */
-    public function test_S_218_3_every_queued_job_with_an_optional_typed_property_restores_missing_defaults(): void
+    public function test_S_219_3_every_queued_job_with_an_optional_typed_property_restores_missing_defaults(): void
     {
         $bad = [];
         $checked = 0;
@@ -103,7 +103,7 @@ class QueuedJobCompatTest extends SequenceHandoffTestCase
         $this->assertSame([], $bad, 'a required constructor parameter, RestoresMissingDefaults with an optional parameter of the same type, or a class default');
     }
 
-    public function test_S_218_3_a_comment_job_with_or_without_until_in_the_payload_keeps_its_retry_window(): void
+    public function test_S_219_3_a_comment_job_with_or_without_until_in_the_payload_keeps_its_retry_window(): void
     {
         \Illuminate\Support\Carbon::setTestNow('2026-11-03 01:00:00');
         $old = unserialize(self::payload(\App\Jobs\HandleComment::class, ['maxExceptions' => 1, 'until' => 1762138800, 'eventId' => 5]));
@@ -114,7 +114,7 @@ class QueuedJobCompatTest extends SequenceHandoffTestCase
         $this->assertSame(now()->addHours(6)->getTimestamp(), $missing->retryUntil()->getTimestamp(), '6 hours from now, like a fresh dispatch');
     }
 
-    public function test_S_218_3_the_guard_reads_subfolders(): void
+    public function test_S_219_3_the_guard_reads_subfolders(): void
     {
         $this->assertTrue(is_subclass_of(\App\Jobs\Boardroom\RunTurnJob::class, ShouldQueue::class), 'app/Jobs/Boardroom is a queued job folder the guard must read');
     }

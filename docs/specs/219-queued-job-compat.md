@@ -1,4 +1,4 @@
-# Spec 218: a deploy never breaks the jobs already waiting in the queue
+# Spec 219: a deploy never breaks the jobs already waiting in the queue
 
 **Project:** Likha and Incepxion (one codebase). Laravel, Redis Horizon, PHPUnit.
 **Shape:** bug · **Weight:** small · **Risk tier:** medium (background jobs on a trusted path)
@@ -20,19 +20,19 @@ deploy exactly as a fresh dispatch of the new version would.
 
 | Case | Given / When / Then |
 |---|---|
-| S-218.1 (P1) | Given a `RunChatbotSequenceStep` payload serialized by the previous class version (`subscriptionId`, `claim`, `connection`, `queue` only), When a worker unserializes it after the deploy and runs `handle()`, Then the step runs normally, as a fresh dispatch with no earlier-claim information would |
-| S-218.2 (P1) | The same for `ResumeChatbotSequenceSend` and `GatewayAfterSend`: a payload that carries only the properties the class had when it was first queued runs normally |
-| S-218.3 (P1) | A guard test fails when any queued job class under `app/Jobs` has a typed property that an older payload can leave uninitialized: a typed property with no class-level default, other than a required (no default) constructor parameter |
+| S-219.1 (P1) | Given a `RunChatbotSequenceStep` payload serialized by the previous class version (`subscriptionId`, `claim`, `connection`, `queue` only), When a worker unserializes it after the deploy and runs `handle()`, Then the step runs normally, as a fresh dispatch with no earlier-claim information would |
+| S-219.2 (P1) | The same for `ResumeChatbotSequenceSend` and `GatewayAfterSend`: a payload that carries only the properties the class had when it was first queued runs normally |
+| S-219.3 (P1) | A guard test fails when any queued job class under `app/Jobs` has a typed property that an older payload can leave uninitialized: a typed property with no class-level default, other than a required (no default) constructor parameter |
 
 ## Done when
 
 - A test reproduces the incident with the exact old payload shape and fails on f5d6d450, then passes after the fix.
 - Every typed, optional property of a queued job has a class-level default, and the code treats the default as "no
   information" so the job behaves exactly as a fresh dispatch.
-- The guard test of S-218.3 covers every `ShouldQueue` class under `app/Jobs`.
+- The guard test of S-219.3 covers every `ShouldQueue` class under `app/Jobs`.
 - The 6 Sequence classes, the 14 listed suites, ForbeastHoldTest and the full suite pass, with no new failures compared
   with f5d6d450 (4 known failures: BigBroadcast, ExampleTest, ItemTableFit, Astra S-26.18).
-- `docs/specs/218-queued-job-compat.result.md` is filled in, with deploy notes: no migration, no supervisor change, safe
+- `docs/specs/219-queued-job-compat.result.md` is filled in, with deploy notes: no migration, no supervisor change, safe
   to deploy with a full queue.
 
 ## Out of scope
