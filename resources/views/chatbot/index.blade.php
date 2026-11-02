@@ -724,7 +724,7 @@
     // bukas, ine-edit, may focus o bukas ang Ad groups). Kaya ilang screen lang ng row ang nasa table kahit ilang page:
     // ang style, layout at paint ng bawat frame (ang pagbukas ng Ad groups, ang Save) ay hindi lumalaki sa bilang ng page.
     // Ang data ng bawat row ay nasa rows pa rin: ang filter, Copy, Paste, Save at Check ay hindi nakadepende sa DOM.
-    const BUILD_MS = 12, NEAR_PX = 800, NEAR = NEAR_PX + 'px 0px', FAR = '3200px 0px';
+    const BUILD_MS = 12, VIEW_MS = 60, NEAR_PX = 800, NEAR = NEAR_PX + 'px 0px', FAR = '3200px 0px';
     const lazyWait = new Set(), lazyNear = new Set(); // ang kapalit na wala pang sagot ng observer; ang malapit na
     let lazyH = 120, lazyFrame = 0; // ang karaniwang taas ng row (sinusukat sa markClamped)
     const IO = 'IntersectionObserver' in window ? window.IntersectionObserver : null;
@@ -758,15 +758,18 @@
     }
     /**
      * Ang mga kapalit na malapit na: ang nasa kahon mismo ay lahat sa frame na ito (isang layout ng table, hindi isa kada
-     * row: ang bawat frame ay layout ng buong table), saka ang nasa NEAR lang hanggang BUILD_MS (kahit isa).
+     * row: ang bawat frame ay layout ng buong table), saka ang nasa NEAR lang hanggang BUILD_MS (kahit isa). Pagkatapos ng
+     * unang screen, ang nasa kahon ay hanggang VIEW_MS kada frame: sa mabilis na scroll, ang pangalan ng page muna ang
+     * kita sa isang iglap, hindi isang mahabang frame.
      */
+    let firstScreen = true;
     function buildNear() {
         lazyFrame = 0;
         const t0 = performance.now();
         let built = 0;
         const states = rowStates();
         for (const tr of [...lazyNear].sort((a, b) => !!b.cbInView - !!a.cbInView)) {
-            if (!tr.cbInView && built && performance.now() - t0 > BUILD_MS) break;
+            if (built && performance.now() - t0 > (!tr.cbInView ? BUILD_MS : firstScreen ? Infinity : VIEW_MS)) break;
             lazyNear.delete(tr);
             const entry = rowCache.get(tr.dataset.page);
             if (!entry || !entry.lazy || entry.nodes[0] !== tr || !tr.isConnected) { unwatch(tr); continue; }
@@ -781,7 +784,7 @@
             watchRow(entry);
             built++;
         }
-        if (built) { paintSel(); requestAnimationFrame(markClamped); }
+        if (built) { firstScreen = false; paintSel(); requestAnimationFrame(markClamped); }
         if (lazyNear.size) lazyFrame = requestAnimationFrame(buildNear);
         paintBusy();
     }

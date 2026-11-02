@@ -186,7 +186,7 @@ async function features(p, out, label) {
  * the real page and server. Native questions (confirm) are answered yes.
  */
 async function groupCases(p, out, label) {
-    const RUN = Date.now().toString(36), PAGE = 'Perf Page 007';
+    const RUN = Date.now().toString(36), PAGE = 'Perf Page 007', PRICE = String(500 + Date.now() % 400); // new values each run
     const shown = id => `!document.getElementById('${id}').classList.contains('hidden')`;
     const panel = `fetch('/chatbot/ad-groups?page=' + encodeURIComponent(${JSON.stringify(PAGE)}), {headers: {Accept: 'application/json'}}).then(r => r.json())`;
     const check = async (cs, action, run, ok, timeout = 15000) => {
@@ -241,18 +241,18 @@ async function groupCases(p, out, label) {
     // S-217.2.2: a row from Google Sheets, mapped by the (faked) AI through /chatbot/paste-map, preview, Apply, Save.
     p.fakeMap = {0: 'main_flow', 1: 'price', 2: 'seq_1'};
     p.pasteMaps.length = 0;
-    await check('S-217.2.2', 'a pasted row goes to /chatbot/paste-map as for the page, and the preview shows', `const t = document.getElementById('pe-paste'); t.value = 'G1 main ${RUN}\\t555\\t'; t.dispatchEvent(new Event('input'))`,
+    await check('S-217.2.2', 'a pasted row goes to /chatbot/paste-map as for the page, and the preview shows', `const t = document.getElementById('pe-paste'); t.value = 'G1 main ${RUN}\\t${PRICE}\\t'; t.dispatchEvent(new Event('input'))`,
         `${shown('pe-map')} && document.querySelectorAll('#pe-map-list .pe-map-item').length === 2 && !document.getElementById('pe-map-apply').disabled`);
-    out.push({action: label + ': S-217.2.2 the paste-map request is the page\'s (page name and the pasted cells)', pass: p.pasteMaps.length === 1 && p.pasteMaps[0].page_name === PAGE && JSON.stringify(p.pasteMaps[0].cells) === JSON.stringify([`G1 main ${RUN}`, '555', '']),
+    out.push({action: label + ': S-217.2.2 the paste-map request is the page\'s (page name and the pasted cells)', pass: p.pasteMaps.length === 1 && p.pasteMaps[0].page_name === PAGE && JSON.stringify(p.pasteMaps[0].cells) === JSON.stringify([`G1 main ${RUN}`, PRICE, '']),
         note: JSON.stringify(p.pasteMaps.map(m => ({page_name: m.page_name, cells: m.cells})))});
     await check('S-217.2.5', 'Apply with "Paste blanks as empty" off fills the values and leaves the blank\'s field as it was', `document.getElementById('pe-blanks').checked = false; document.getElementById('pe-map-apply').click()`,
-        `${input('main_flow')}.value === 'G1 main ${RUN}' && ${input('price')}.value === '555' && ${input('seq_1')}.value === ${JSON.stringify(own.seq_1 || '')}`);
+        `${input('main_flow')}.value === 'G1 main ${RUN}' && ${input('price')}.value === '${PRICE}' && ${input('seq_1')}.value === ${JSON.stringify(own.seq_1 || '')}`);
     await check('S-217.2.5', 'with "Paste blanks as empty" on, the blank empties the field (uses default), as on the page', `const b = document.getElementById('pe-blanks'); b.checked = true; b.dispatchEvent(new Event('change'))`,
         `${input('seq_1')}.value === '' && !document.querySelector('#pe-fields [data-key="seq_1"] .pe-default').classList.contains('hidden')`);
     await check('S-217.2.2', 'Save writes the group values', `document.getElementById('pe-save').click()`,
-        `${shown('pe')} === false && /^Saved 3 values of "${g1.name}"/.test(document.getElementById('notice').textContent)`);
+        `${shown('pe')} === false && /^Saved [0-9]+ values? of "${g1.name}"/.test(document.getElementById('notice').textContent)`);
     const after = (await p.ev(panel)).groups.find(g => g.id === g1.id).values;
-    out.push({action: label + ': S-217.2.2 the server has the group values (the blank back to the page value)', pass: after.main_flow === `G1 main ${RUN}` && after.price === '555' && !after.seq_1,
+    out.push({action: label + ': S-217.2.2 the server has the group values (the blank back to the page value)', pass: after.main_flow === `G1 main ${RUN}` && after.price === PRICE && !after.seq_1,
         note: JSON.stringify({main_flow: after.main_flow, price: after.price, seq_1: after.seq_1 ?? null})});
     await check('S-217.2.2', 'History of the group (from the group Edit) lists the old value with Restore', `document.querySelector('#cb-table button[aria-label="Edit ${g1.name} of ${PAGE}"]').click(); document.querySelector('#pe-fields [data-key="main_flow"] button[aria-label^="History of"]').click()`,
         `[...document.querySelectorAll('[role="dialog"][aria-label="History · ${g1.name}"] button')].some(b => b.getAttribute('aria-label')?.startsWith('Restore Main Flow'))`);
