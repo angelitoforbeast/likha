@@ -322,6 +322,19 @@ class NexusStockReadTest extends ItemTestCase
         $this->assertFalse($json['stock_meta']['nexus']['stale'], 'ang stale ay sa last_synced_at lang');
     }
 
+    public function test_a_skipped_items_warning_reaches_the_page_without_marking_a_token_problem(): void
+    {
+        $this->appSetting('nexus_stock_last_error', json_encode(['at' => '2026-11-03 10:10:00', 'kind' => 'skipped', 'count' => 2,
+            'names' => ['ROPE', 'LAMP'], 'message' => '2 Nexus items skipped for bad values: ROPE, LAMP']));
+
+        $meta = $this->stock()->assertOk()->json('stock_meta.nexus');
+
+        $this->assertSame(['at' => '2026-11-03 10:10:00', 'kind' => 'skipped', 'message' => '2 Nexus items skipped for bad values: ROPE, LAMP'], $meta['last_error']);
+        $this->assertFalse($meta['token_problem']);
+        $this->assertTrue($meta['synced']);
+        $this->assertFalse($meta['stale']);
+    }
+
     public function test_S_220_2_7_never_synced_says_so(): void
     {
         $this->appSetting('nexus_stock_last_synced_at', null);

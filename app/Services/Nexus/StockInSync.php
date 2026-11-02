@@ -207,12 +207,18 @@ class StockInSync
         $okDays     = [];
         $emptyDays  = [];        // may naka-store pero walang laman ang sagot: nananatili ang dati
         $filledDays = [];        // may laman ang sagot: hindi na "walang laman"
+        $skipped    = 0;         // nilaktawang item (sirang numero o pangalan) sa buong takbo
+        $skipNames  = [];
 
-        foreach ($askDays as $day) {
+        foreach ($askDays as $i => $day) {
             $res = $this->day($day);
             if ($res['ok']) {
                 $okDays[] = $day;
                 $stored += $res['rows'];
+                $skipped += $res['skipped'];
+                foreach ($res['skipped_names'] ?? [] as $n) {
+                    if (count($skipNames) < 5 && !in_array($n, $skipNames, true)) $skipNames[] = $n;
+                }
                 if ($day >= $first && !$mainFailed) $contiguous = $day;
                 if (!empty($res['empty_stored'])) {
                     $emptyDays[] = $day;
@@ -227,7 +233,11 @@ class StockInSync
             if ($day >= $first) $mainFailed = true;
             $failure ??= $res + ['day' => $day];
             $lines[] = "$day: {$res['message']}";
-            if ($res['stop']) break;
+            if ($res['stop']) {
+                // Ang mga araw na hindi na naitanong (hal. pagkatapos ng 429) ay bumabagsak din, para mapunta sa pending.
+                $failedDays = array_merge($failedDays, array_slice($askDays, $i + 1));
+                break;
+            }
         }
 
         // Ang listahan ng hindi kumpirmadong walang laman: dagdag ang bago, alis ang nagkaroon na ng laman.
@@ -256,8 +266,12 @@ class StockInSync
         $this->put(self::PENDING_DAYS, json_encode($keep));
         if ($failure === null) {
             $this->put(self::LAST_SYNCED, $now->format('Y-m-d H:i:s'));
-            $this->put(self::LAST_ERROR, '');
-            $lines[] = "Nexus stock-in synced $first to $today ($stored rows).";
+            // Matagumpay ang takbo; pero ang nilaktawang item ay babala na makikita sa /item (nawawala sa takbong walang laktaw).
+            $this->put(self::LAST_ERROR, $skipped > 0 ? json_encode([
+                'at' => $now->format('Y-m-d H:i:s'), 'kind' => 'skipped', 'count' => $skipped, 'names' => $skipNames,
+                'message' => "$skipped Nexus items skipped for bad values" . ($skipNames ? ': ' . implode(', ', $skipNames) : ''),
+            ], JSON_UNESCAPED_UNICODE) : '');
+            $lines[] = "Nexus stock-in synced $first to $today ($stored rows" . ($skipped ? ", $skipped skipped" : '') . ').';
             return ['status' => 'ok', 'lines' => $lines];
         }
 
@@ -308,7 +322,7 @@ class StockInSync
             }
         }
 
-        [$items, $skipped, $protected] = $this->parseItems($json['items'], $day);
+        [$items, $skipped, $protected, $skipNames] = $this->parseItems($json['items'], $day);
         if ($json['items'] !== [] && !$items) {
             // May laman pero lahat ay sira: hindi ito "walang dumating".
             return $fail('malformed', 'Every item in the Nexus answer is invalid');
@@ -324,18 +338,20 @@ class StockInSync
         $asOf   = $this->asOf($json['as_of'] ?? null);
         $zeroed = DB::transaction(fn () => $this->store($day, $items, $asOf, $protected));
 
-        return ['ok' => true, 'rows' => count($items), 'skipped' => $skipped, 'zeroed' => $zeroed];
+        return ['ok' => true, 'rows' => count($items), 'skipped' => $skipped, 'skipped_names' => $skipNames, 'zeroed' => $zeroed];
     }
 
     /**
-     * @return array{0: array<string,array>, 1: int, 2: array<int,string>}
-     *   name_key => row; ilan ang nilaktawan; name_key ng mga nilaktawan na may maayos na pangalan (hindi ginagawang 0)
+     * @return array{0: array<string,array>, 1: int, 2: array<int,string>, 3: array<int,string>}
+     *   name_key => row; ilan ang nilaktawan; name_key ng mga nilaktawan na may maayos na pangalan (hindi ginagawang 0);
+     *   ang mga pangalan ng nilaktawan (para sa babala)
      */
     private function parseItems(array $raw, string $day): array
     {
         $out = [];
         $skipped = 0;
         $protected = [];
+        $names = [];
         foreach ($raw as $i => $it) {
             $name = is_array($it) && is_string($it['item'] ?? null) ? self::trimName($it['item']) : '';
             $pieces = is_array($it) ? self::count($it['stock_in_pieces'] ?? null) : null;
@@ -343,6 +359,7 @@ class StockInSync
             $badName = $name === '' || mb_strlen($name) > 255;
             if ($badName || $pieces === null || $lots === null) {
                 $skipped++;
+                $names[] = $badName ? '(no name)' : mb_substr($name, 0, 60);
                 if (!$badName) $protected[] = self::nameKey($name);
                 Log::warning('nexus:sync-stock item skipped', [
                     'day' => $day, 'index' => $i, 'item' => mb_substr($name, 0, 80),
@@ -365,7 +382,7 @@ class StockInSync
             ];
         }
 
-        return [$out, $skipped, array_values(array_unique($protected))];
+        return [$out, $skipped, array_values(array_unique($protected)), array_values(array_unique($names))];
     }
 
     /**
@@ -378,13 +395,29 @@ class StockInSync
         if (!array_is_list($v)) return null;
         $sum = 0;
         foreach ($v as $entry) {
-            if (!is_array($entry) || substr((string) ($entry['date'] ?? ''), 0, 10) !== $day) return null;
+            if (!is_array($entry) || self::manilaDate($entry['date'] ?? null) !== $day) return null;
             $n = self::count($entry['lots'] ?? null);
             if ($n === null) return null;
             $sum = min(self::MAX_COUNT, $sum + $n);
         }
 
         return $sum;
+    }
+
+    /**
+     * Ang petsa (Y-m-d, Manila) ng stock_in[].date. Ngayon ay "Y-m-d" ang Nexus; kung maging datetime ito balang araw
+     * (hal. may oras o offset), binabasa pa rin sa Manila imbes na laktawan nang tahimik. Hindi mabasa = null.
+     */
+    private static function manilaDate(mixed $v): ?string
+    {
+        if (!is_string($v) || trim($v) === '' || strlen($v) > 40) return null;
+        $v = trim($v);
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $v)) return self::validDate($v) ? $v : null;
+        try {
+            return Carbon::parse($v, self::TZ)->setTimezone(self::TZ)->toDateString();
+        } catch (\Throwable $e) {
+            return null;
+        }
     }
 
 

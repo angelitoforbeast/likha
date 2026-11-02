@@ -581,6 +581,83 @@ class NexusStockSyncTest extends ItemTestCase
         }
     }
 
+    public function test_a_pinned_live_sample_of_the_nexus_answer_is_stored(): void
+    {
+        // Ang anyo ng totoong sagot ng Nexus (prod, read-only na tingin): stock_in = [{date "Y-m-d", lots, pieces}],
+        // shelf-only na item = stock_in [], int ang stock_in_pieces at remaining, as_of DATE_ATOM.
+        Carbon::setTestNow(Carbon::parse('2026-11-01 10:10:00', 'Asia/Manila'));
+        $this->appSetting('nexus_stock_synced_through', '2026-11-01');
+        Http::swap(new \Illuminate\Http\Client\Factory(app('events')));
+        Http::preventStrayRequests();
+        Http::fake(['nexus.test/api/item-stock?date=2026-10-31' => Http::response(json_decode(<<<'JSON'
+            {"as_of":"2026-11-01T10:09:41+08:00","from":"2026-10-31","to":"2026-10-31","items":[
+              {"item":"GLOW TAPE","stock_in":[{"date":"2026-10-31","lots":2,"pieces":48}],"stock_in_pieces":48,"remaining":131},
+              {"item":"HAND GRIP","stock_in":[],"stock_in_pieces":0,"remaining":17}
+            ]}
+            JSON, true), 200),
+            'nexus.test/api/item-stock?date=2026-11-01' => Http::response(['as_of' => '2026-11-01T10:09:42+08:00', 'from' => '2026-11-01', 'to' => '2026-11-01', 'items' => []], 200),
+        ]);
+
+        [$code] = $this->sync();
+
+        $this->assertSame(0, $code);
+        $this->assertSame([['2026-10-31', 'GLOW TAPE', 2, 48, 131], ['2026-10-31', 'HAND GRIP', 0, 0, 17]], $this->rows());
+        $this->assertSame('2026-11-01 10:09:41', substr((string) DB::table('nexus_stock_ins')->value('as_of'), 0, 19));
+        $this->assertSame('', (string) $this->settingValue('nexus_stock_last_error'));
+    }
+
+    public function test_a_stock_in_date_is_compared_as_a_manila_date_even_if_nexus_sends_a_datetime(): void
+    {
+        $this->alreadySynced();
+        $entry = fn (string $date) => [['date' => $date, 'lots' => 1, 'pieces' => 2]];
+        $this->fakeNexus(['2026-11-02' => [
+            ['item' => 'PLAIN', 'stock_in' => $entry('2026-11-02'), 'stock_in_pieces' => 2],
+            ['item' => 'WITH OFFSET', 'stock_in' => $entry('2026-11-02T09:00:00+08:00'), 'stock_in_pieces' => 2],
+            ['item' => 'WITH TIME', 'stock_in' => $entry('2026-11-02 09:00:00'), 'stock_in_pieces' => 2],
+            ['item' => 'UTC LATE', 'stock_in' => $entry('2026-11-01T16:30:00Z'), 'stock_in_pieces' => 2],   // 11-02 00:30 Manila
+            ['item' => 'UTC EARLY', 'stock_in' => $entry('2026-11-01T15:59:59Z'), 'stock_in_pieces' => 2],  // 11-01 23:59 Manila
+            ['item' => 'NOT A DATE', 'stock_in' => $entry('yesterday-ish'), 'stock_in_pieces' => 2],
+        ]]);
+
+        $this->sync();
+
+        $this->assertSame(['PLAIN', 'UTC LATE', 'WITH OFFSET', 'WITH TIME'], array_column($this->rows(), 1));
+    }
+
+    public function test_skipped_items_leave_a_non_failing_warning_that_a_clean_run_clears(): void
+    {
+        $this->alreadySynced();
+        $this->fakeNexus(['2026-11-02' => [$this->item('GLOW TAPE', 5), $this->item('ROPE', -1), $this->item('LAMP', 'x')],
+                          '2026-11-03' => [$this->item('PEN', 1.5), ['item' => '', 'stock_in_pieces' => 1], $this->item('GLOW TAPE', 1)]]);
+
+        [$code] = $this->sync();
+
+        $this->assertSame(0, $code, 'ok pa rin ang takbo');
+        $this->assertSame('2026-11-03 10:10:00', $this->settingValue('nexus_stock_last_synced_at'));
+        $err = json_decode((string) $this->settingValue('nexus_stock_last_error'), true);
+        $this->assertSame('skipped', $err['kind']);
+        $this->assertSame(4, $err['count']);
+        $this->assertSame(['ROPE', 'LAMP', 'PEN', '(no name)'], $err['names']);
+        $this->assertSame('4 Nexus items skipped for bad values: ROPE, LAMP, PEN, (no name)', $err['message']);
+
+        $this->fakeNexus(['2026-11-02' => [$this->item('GLOW TAPE', 5)], '2026-11-03' => [$this->item('GLOW TAPE', 1)]]);
+        $this->sync();
+        $this->assertSame('', (string) $this->settingValue('nexus_stock_last_error'));
+    }
+
+    public function test_days_after_a_429_in_a_long_run_go_to_the_pending_list(): void
+    {
+        $this->alreadySynced();
+        $this->fakeNexus(['2026-10-22' => 429]);
+
+        $this->sync(['--from' => '2026-10-20']);
+
+        $this->assertSame(['2026-10-20', '2026-10-21', '2026-10-22'], $this->requestedDates());
+        $expected = array_map(fn ($d) => $d->toDateString(), iterator_to_array(\Carbon\CarbonPeriod::create('2026-10-22', '2026-11-01')));
+        $this->assertSame($expected, json_decode((string) $this->settingValue('nexus_stock_pending_days'), true),
+            'ang 429 na araw at ang hindi na naitanong, hanggang bago ang karaniwang hanay (11-02)');
+    }
+
     public function test_the_real_nexus_shape_counts_the_lots_of_the_asked_day_and_the_old_number_shape_still_works(): void
     {
         $this->alreadySynced();

@@ -3363,6 +3363,8 @@
         if (n.stale) out.push({ text: 'Nexus not synced for more than 3 hours: the numbers may be old', bad: false });
         // Walang laman ang sagot ng Nexus para sa araw na may naka-store: nananatili ang dati hanggang tanggapin ng owner.
         if ((n.unconfirmed_empty_days || []).length) out.push({ text: 'Nexus returned nothing for ' + n.unconfirmed_empty_days.join(', ') + '; old numbers kept', bad: false });
+        // Nilaktawang item ng Nexus (sirang numero): hindi pagkabigo, pero dapat makita.
+        if (n.last_error && n.last_error.kind === 'skipped') out.push({ text: n.last_error.message + ' (their old numbers are kept)', bad: false });
         if (n.daily_pass && n.daily_pass.status === 'skipped_locked') out.push({ text: 'Nexus daily 7-day pass skipped (locked) at ' + n.daily_pass.at, bad: false });
         if (r && r.warning === 'unavailable') out.push({ text: 'Returned is not available (Nexus RTS)', bad: false });
         if (r && r.warning === 'unknown_source') out.push({ text: 'Unknown returned source setting: using J&T', bad: false });
