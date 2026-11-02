@@ -121,8 +121,8 @@ class OwnerPrivateController extends Controller
     }
 
     /**
-     * Sino ang nag-set ng RTS% (display lang, walang computation na bumabasa nito).
-     * Key: page||canonical item||effective_date||rts (2 decimals) → pangalan ng user.
+     * Sino ang nag-set ng RTS% at kailan (display lang, walang computation na bumabasa nito).
+     * Key: page||canonical item||effective_date||rts (2 decimals) → ['name' => user, 'at' => oras sa Manila].
      * Ang pangalan ay sa NAGSIMULA ng value sa effective-date timeline, hindi sa nag-carry
      * (promo/cost/remark save na nag-carry lang ng RTS). Kapag ang nagsimula ay scope na
      * promo/cogs, hindi niya tinype ang RTS → walang pangalan.
@@ -135,7 +135,7 @@ class OwnerPrivateController extends Controller
         try {
             $select = [
                 'l.id', 'l.page_name', 'l.item_name', 'l.effective_date',
-                'l.old_rts_pct', 'l.new_rts_pct', 'l.user_email',
+                'l.old_rts_pct', 'l.new_rts_pct', 'l.user_email', 'l.created_at',
                 DB::raw('COALESCE(ep.name, u.name) AS user_name'),
             ];
             $hasScope = Schema::hasColumn('page_item_settings_log', 'scope');
@@ -166,12 +166,12 @@ class OwnerPrivateController extends Controller
                             $name = trim(explode('@', (string)($r->user_email ?? ''))[0]);
                         }
                     }
-                    $runs[$pair] = ['val' => $val, 'name' => $name];
+                    $runs[$pair] = ['val' => $val, 'name' => $name, 'at' => self::setAtLabel($r->created_at ?? null)];
                 }
 
                 $key = $pair.'||'.substr((string)$r->effective_date, 0, 10).'||'.$val;
                 if ($runs[$pair]['name'] !== '') {
-                    $map[$key] = $runs[$pair]['name'];
+                    $map[$key] = ['name' => $runs[$pair]['name'], 'at' => $runs[$pair]['at']];
                 } else {
                     unset($map[$key]);
                 }
@@ -182,6 +182,76 @@ class OwnerPrivateController extends Controller
             \Log::warning('rtsSetByMap failed: '.$e->getMessage());
             return [];
         }
+    }
+
+    /** Oras ng isang log row sa Manila, maikli (hal. "Nov 2, 2026 3:05 PM"); null kapag wala o sira. */
+    private static function setAtLabel($createdAt): ?string
+    {
+        if ($createdAt === null || $createdAt === '') return null;
+        try {
+            return \Carbon\Carbon::parse((string) $createdAt, config('app.timezone'))->setTimezone('Asia/Manila')->format('M j, Y g:i A');
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
+    /**
+     * Sino ang nag-set ng Item Value (cogs) at ng CEO value (cogs_ceo) na ipinapakita, at kailan (display lang).
+     * $wanted / $wantedCeo: canonical item → petsa ng cogs / cogs_ceo row na ipinapakita. Ang log row ng item
+     * (alias-aware) sa petsang iyon na may value, ang pinakahuling id. Ang tugma ng value ay sa setByFor.
+     * Isang query lang kada data load, walang kada row: l.* (kaya walang schema check para sa mga opsyonal na column na
+     * new_item_value_ceo at source), at ang mga petsang ipinapakita lang. Walang table = exception = walang pangalan.
+     * Best effort: kapag pumalya, walang pangalan — hindi dapat masira ang page.
+     *
+     * @return array{cogs: array<string, array>, ceo: array<string, array>} item → ['name', 'at', 'val']
+     */
+    protected function cogsSetByMap(array $wanted, array $wantedCeo, \App\Services\ItemAliasResolver $aliases): array
+    {
+        $out = ['cogs' => [], 'ceo' => []];
+        $wanted    = array_filter($wanted, fn ($d) => $d !== null && $d !== '');
+        $wantedCeo = array_filter($wantedCeo, fn ($d) => $d !== null && $d !== '');
+        if (!$wanted && !$wantedCeo) return $out;
+
+        try {
+            $dates = array_values(array_unique(array_merge(array_values($wanted), array_values($wantedCeo))));
+            $rows = DB::table('page_item_settings_log as l')
+                ->leftJoin('users as u', 'u.email', '=', 'l.user_email')
+                ->leftJoin('employee_profiles as ep', 'ep.user_id', '=', 'u.id')
+                ->whereIn('l.effective_date', $dates)
+                ->orderBy('l.id')
+                ->select(['l.*', DB::raw('COALESCE(ep.name, u.name) AS user_name')])
+                ->get();
+
+            foreach ($rows as $r) {
+                $k = $aliases->canonicalKey((string) $r->item_name);
+                $d = substr((string) $r->effective_date, 0, 10);
+                foreach ([['cogs', $wanted, 'new_item_value'], ['ceo', $wantedCeo, 'new_item_value_ceo']] as [$side, $want, $col]) {
+                    if (($want[$k] ?? null) !== $d || ($r->$col ?? null) === null) continue;
+                    $who = trim((string) ($r->user_name ?? ''));
+                    if ($who === '') $who = trim((string) ($r->user_email ?? ''));
+                    // Walang user: ang cogs:sync-from-macro (o ibang command) ang sumulat.
+                    if ($who === '') $who = (($r->source ?? null) === 'cogs_sync') ? 'system (cogs sync)' : 'system';
+                    // Naka-order ayon sa id: ang huli ang pumapalit sa nauna.
+                    $out[$side][$k] = ['name' => $who, 'at' => self::setAtLabel($r->created_at ?? null), 'val' => (float) $r->$col];
+                }
+            }
+
+            return $out;
+        } catch (\Throwable $e) {
+            \Log::warning('cogsSetByMap failed: '.$e->getMessage());
+            return ['cogs' => [], 'ceo' => []];
+        }
+    }
+
+    /**
+     * [name, at] ng log row kapag pareho ang value nito sa ipinapakita (2 decimals); kung hindi (cascade ng apply-through,
+     * mirror sa cogs_ceo, o binago nang walang log) ay [null, null], kaya walang maling pangalan.
+     */
+    private static function setByFor(?array $hit, $shown): array
+    {
+        if ($hit === null || $shown === null) return [null, null];
+
+        return abs((float) $hit['val'] - (float) $shown) < 0.005 ? [$hit['name'], $hit['at']] : [null, null];
     }
 
     /**
@@ -2026,6 +2096,7 @@ class OwnerPrivateController extends Controller
         // Used for profit computations when the viewer is CEO. Falls back to
         // null per spec — no fallback to cogs sa profit calc.
         $cogsCeoMap = []; // canonical_item_key → unit_cost (CEO's view)
+        $cogsCeoLastDateMap = []; // canonical_item_key → YYYY-MM-DD ng ipinapakitang cogs_ceo row
         if (Schema::hasTable('cogs_ceo')) {
             $cogsCeoRows = DB::table('cogs_ceo')
                 ->where('date', '<=', $date)
@@ -2036,10 +2107,13 @@ class OwnerPrivateController extends Controller
                 if ($k === '') continue;
                 if (!isset($cogsCeoMap[$k])) {
                     $cogsCeoMap[$k] = $r->unit_cost !== null ? (float) $r->unit_cost : null;
+                    $cogsCeoLastDateMap[$k] = substr((string)($r->date ?? ''), 0, 10);
                 }
             }
         }
         $isCEO = $this->isCEO();
+        // Sino at kailan na-set ang Item Value at ang CEO value (hover). Ang CEO side ay CEO view lang (data layer).
+        $cogsSetBy = $this->cogsSetByMap($cogsLastDateMap, ($isCEO && $viewAs === 'ceo') ? $cogsCeoLastDateMap : [], $aliases);
 
         // ── page_item_settings: latest per (page, item, mode_cod_int) ≤ date ──
         // RTS% + Promo are scoped by (page, item, price). Different price =
@@ -2388,6 +2462,8 @@ class OwnerPrivateController extends Controller
             // uses cogs regardless of param.
             $useCeoForProfit = $isCEO && $viewAs === 'ceo';
             $itemValue       = $useCeoForProfit ? $itemValueCeo : $itemValueMarket;
+            $itemValueSetBy    = self::setByFor($cogsSetBy['cogs'][$dominantKey] ?? null, $itemValueMarket);
+            $itemValueCeoSetBy = $useCeoForProfit ? self::setByFor($cogsSetBy['ceo'][$dominantKey] ?? null, $itemValueCeo) : [null, null];
             // rts_pct can be NULL (promo-only saves walang RTS pa) — preserve null
             // para sa profit calc downstream (null → no profit shown, hindi 0%).
             $rtsPct          = ($settings && $settings['rts_pct'] !== null) ? (float)$settings['rts_pct'] : null;
@@ -2698,6 +2774,8 @@ class OwnerPrivateController extends Controller
             $projPctLastDay  = ($projProfitLastDay  !== null && $grossSalesLastDay  > 0) ? ($projProfitLastDay  / $grossSalesLastDay)  * 100.0 : null;
             $projPctLast3Day = ($projProfitLast3Day !== null && $grossSalesLast3Day > 0) ? ($projProfitLast3Day / $grossSalesLast3Day) * 100.0 : null;
             $projPctLast7Day = ($projProfitLast7Day !== null && $grossSalesLast7Day > 0) ? ($projProfitLast7Day / $grossSalesLast7Day) * 100.0 : null;
+            // Sino at kailan na-set ang RTS% na ipinapakita (hover).
+            $rtsSetBy = ($settings && $rtsPct !== null) ? ($rtsSetByMap[$pk.'||'.$dominantKey.'||'.substr((string)$settings['effective_date'], 0, 10).'||'.number_format($rtsPct, 2, '.', '')] ?? null) : null;
 
             $result[] = [
                 'page_name'             => $pg['page_label'],
@@ -2778,6 +2856,11 @@ class OwnerPrivateController extends Controller
                 // viewing as Marketing gets null (mirrors what Marketing sees).
                 'item_value_ceo'        => ($isCEO && $viewAs === 'ceo') ? $itemValueCeo : null,
                 'item_value_source'     => $itemValueMarket !== null ? 'cogs' : null,
+                // Sino at kailan (Manila) na-set ang ipinapakitang Item Value; ang CEO value ay CEO view lang.
+                'item_value_set_by'     => $itemValueSetBy[0],
+                'item_value_set_at'     => $itemValueSetBy[1],
+                'item_value_ceo_set_by' => $itemValueCeoSetBy[0],
+                'item_value_ceo_set_at' => $itemValueCeoSetBy[1],
                 'shipping_fee'          => $shippingFee,
                 'cod_fee'               => $codFeePerDelivered,
                 'settings_date'         => $settings ? $settings['effective_date'] : null,
@@ -2809,7 +2892,8 @@ class OwnerPrivateController extends Controller
                 'rts_gap_ratio'             => \App\Services\RtsProjection::gapRatio($miraGapAbs, $miraError, (int) $miraMatched),
                 'mira_rts_matched'          => $miraMatched,
                 'projected_profit_mira'     => $projProfitMira,
-                'rts_set_by'            => ($settings && $rtsPct !== null) ? ($rtsSetByMap[$pk.'||'.$dominantKey.'||'.substr((string)$settings['effective_date'], 0, 10).'||'.number_format($rtsPct, 2, '.', '')] ?? null) : null,
+                'rts_set_by'            => $rtsSetBy['name'] ?? null,
+                'rts_set_at'            => $rtsSetBy['at'] ?? null,
                 'item_value_comment'    => $settings ? ($settings['item_value_comment'] ?: null) : null,
                 'promo'                 => $settings ? ($settings['promo'] ?: null) : null,
                 'jnt_rts_pct'           => $jntRtsPct,
