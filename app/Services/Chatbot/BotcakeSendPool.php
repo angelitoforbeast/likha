@@ -448,6 +448,20 @@ class BotcakeSendPool extends TicketPool
         return $this->counts;
     }
 
+    /** Ang bersyong ito ay hindi kumukuha ng sequence ticket (chatbot:sequence-pool ang nagpapadala nito). */
+    protected function beatInfo(): array
+    {
+        return ['excludes_sequence' => 1];
+    }
+
+    /** Patay ang pool, o buhay at iniiwan ang sequence ticket: ligtas ipasa ang sequence step sa chatbot:sequence-pool. */
+    public static function leavesSequences(): bool
+    {
+        if (!self::alive()) return true;
+
+        return (int) (Cache::get(self::BEAT)['excludes_sequence'] ?? 0) === 1;
+    }
+
     public function beat(): void
     {
         parent::beat();
