@@ -11,6 +11,7 @@ use App\Services\ChatblastSetupCheck;
 use App\Services\ChatbotFields;
 use App\Services\PageSettings;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Throwable;
 
@@ -28,6 +29,8 @@ class ProblemsPanel
     public const USUAL_CACHE_SECONDS = 900;
     public const USUAL_DAYS = 7;
     public const EVENT_HOURS = 6;
+    /** Ang page na "nagbebenta": may order (macro_output, ayon sa ts_date) sa huling ORDER_DAYS araw ng Manila, ngayon kasama. */
+    public const ORDER_DAYS = 14;
     /** Ang mga kulay, pinakamabigat muna; ang puti ay hindi urgent. */
     public const LEVELS = ['red' => '🔴', 'orange' => '🟠', 'white' => '⚪'];
 
@@ -54,13 +57,15 @@ class ProblemsPanel
             'sending' => $this->safely(fn () => array_map(fn ($p) => $this->settings->pageKey($p), app(Chatblast::class)->sendingPages()), []),
             // Ang mga row na may parehong page ID: dalawang query, kaya naka-cache rin gaya ng iba (ang banner ay sa bawat screen).
             'same_ids' => $this->safely(fn () => $this->sameIds(), []),
+            // Ang mga page na may order sa huling ORDER_DAYS araw (isang naka-group na query); null kapag hindi nabasa.
+            'selling' => $this->safely(fn () => $this->selling(), null),
         ]);
         $echoes = $this->safely(fn () => $this->echoes(), []);
         $lines = array_merge(
             $this->safely(fn () => $this->sends(), []),
             $echoes,
             $own['events'], $own['slow'], $own['quiet'],
-            $this->safely(fn () => $this->setup($own['sending']), []),
+            $this->safely(fn () => $this->setup($own['sending'], $own['selling'] ?? null), []),
             $own['same_ids'] ?? [],
         );
         if (!$lines) return null;
@@ -294,14 +299,45 @@ class ProblemsPanel
         return $out;
     }
 
-    /** Ang X ng setup check: orange kapag pinapadalhan ng chatblast ang page, kung hindi ay puti (hindi urgent). */
-    private function setup(array $sending): array
+    /**
+     * Ang X ng setup check: orange kapag pinapadalhan ng chatblast ang page at may order ito sa huling ORDER_DAYS araw;
+     * puti (hindi urgent) ang tahimik na page (lumang page na halos walang mapapadalhan) at ang hindi pinapadalhan. Kapag
+     * hindi nabasa ang mga order ($selling null), orange pa rin gaya ng dati: mas mabuting maingay kaysa matago ang page
+     * na nagbebenta.
+     * @param array<string, true>|null $selling page key => true
+     */
+    private function setup(array $sending, ?array $selling): array
     {
         $out = [];
         foreach (app(ChatblastSetupCheck::class)->pages() as $p) {
-            $on = in_array($this->settings->pageKey($p['page']), $sending, true);
-            $out[] = self::line($p['page'], $on ? 'orange' : 'white', ($on ? 'Setup: ' : 'Not sending, setup incomplete: ') . $p['reason'],
+            $key = $this->settings->pageKey($p['page']);
+            $on = in_array($key, $sending, true);
+            $quiet = $on && $selling !== null && !isset($selling[$key]);
+            $out[] = self::line($p['page'], $on && !$quiet ? 'orange' : 'white',
+                match (true) {
+                    !$on => 'Not sending, setup incomplete: ',
+                    $quiet => 'Quiet (no order in ' . self::ORDER_DAYS . ' days), setup incomplete: ',
+                    default => 'Setup: ',
+                } . $p['reason'],
                 [['Page settings', '/chatblast/page-settings?q=' . urlencode($p['page'])]]);
+        }
+
+        return $out;
+    }
+
+    /**
+     * Ang mga page na may order sa huling ORDER_DAYS araw (ts_date sa Manila, ngayon kasama): isang naka-group na query
+     * (ang index ay ts_date, PAGE), at ang pangalan ay tinutugma sa PHP (pageKey), dahil may dobleng espasyo minsan ang PAGE.
+     * @return array<string, true>|null page key => true; null kapag walang macro_output
+     */
+    private function selling(): ?array
+    {
+        if (!Schema::hasTable('macro_output')) return null;
+        $page = DB::getQueryGrammar()->wrap('PAGE');
+        $out = [];
+        foreach (DB::table('macro_output')->where('ts_date', '>=', now('Asia/Manila')->subDays(self::ORDER_DAYS - 1)->toDateString())
+            ->whereNotNull('PAGE')->selectRaw("$page AS page")->groupBy('PAGE')->pluck('page') as $name) {
+            $out[$this->settings->pageKey((string) $name)] = true;
         }
 
         return $out;

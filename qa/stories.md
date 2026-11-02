@@ -3956,3 +3956,18 @@ Tests: `tests/Feature/Chatblast/AdGroupEditTest.php`, `tests/Feature/Chatblast/T
 |------|------|---------------------|------|----------|
 | S-217.5.1 | happy | Given an Ad-based page expanded, then "Manage in Edit" is a normal-size primary button next to the "N ads not in a group yet" count, and opens the Edit window at the Ad groups section | `pages217.mjs` "S-217.5.1 …" (2 checks) | 2026-11-03 passed |
 | S-217.5.2 | happy | Given the Default row, then it is labelled "Default (page values)" and shows the page's values exactly as the page row does | `pages217.mjs` "S-217.5.2 …" | 2026-11-03 passed |
+
+## Slice 221 – Quiet and obsolete pages
+
+As the owner, I want the problems banner to call a setup warning urgent only for a page that sells, so the urgent count means something.
+
+Slice 221 (narrowed by Amendment 221-1 to S-221.1; S-221.2 and S-221.3 removed). Threat model: page names come from page_settings and macro_output (trusted database); no new input, route, table, column, migration or config. Risk tier: medium (what staff are warned about). Tests: `tests/Feature/Chatblast/QuietSetupTest.php`.
+
+### S-221.1 The setup warning is urgent only for a page that sells (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-221.1.1 | happy | Given a page with a setup X that is "sending" and has at least one order (`macro_output`, by its order date) in the last 14 days, then its setup line is orange (urgent) as today | `test_S_221_1_1_a_sending_page_with_an_order_in_the_last_14_days_is_orange` (order 13 days ago, the oldest day of the window) | 2026-11-03 passed |
+| S-221.1.2 | happy | Given the same page with no order in the last 14 days, then its setup line is white and reads "Quiet (no order in 14 days), setup incomplete: <reason>", and it does not count as urgent | `test_S_221_1_2_a_sending_page_with_no_order_in_14_days_is_white_and_not_urgent` (order 14 days ago only) | 2026-11-03 passed |
+| S-221.1.3 | happy | Given a quiet page that gets an order, then within the banner's cache time (≤ 60 s) its setup line is orange again | `test_S_221_1_3_a_quiet_page_that_gets_an_order_is_orange_again_within_the_cache_time` | 2026-11-03 passed |
+| S-221.1.4 | edge | Given page names that differ only in case or spacing between the settings and the orders, then they are matched the way `PageSettings::pageKey` matches pages | `test_S_221_1_4_page_names_that_differ_in_case_or_spacing_are_matched_like_page_key` | 2026-11-03 passed |
+| S-221.1.5 | edge | Given 80 pages, then the order counts come from one grouped query per banner build (no per-page query), within the existing cache | `test_S_221_1_5_eighty_pages_take_one_grouped_order_query_per_banner_build_within_the_cache` | 2026-11-03 passed |
