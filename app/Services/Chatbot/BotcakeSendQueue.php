@@ -515,11 +515,15 @@ class BotcakeSendQueue
                 $out['redispatched']++;
             }
         }
-        // Ang luma (tapos, pumalya, skipped o kinansela = resumed) ay binubura nang paunti-unti, sa index (status, priority, id).
-        foreach (['resumed', 'failed', 'done'] as $status) {
-            $ids = DB::table(self::TABLE)->where('status', $status)->where('priority', self::SEQUENCE_PRIORITY)->where('created_at', '<', now()->subDays(self::KEEP_DAYS))
-                ->orderBy('id')->limit(5000)->pluck('id');
-            if ($ids->isNotEmpty()) $out['pruned'] += DB::table(self::TABLE)->whereIn('id', $ids->all())->delete();
+        // Ang luma (tapos, pumalya, skipped o kinansela = resumed) ay binubura nang paunti-unti, isang beses kada minuto: hanggang sa
+        // pinakabagong id na lampas KEEP_DAYS (isang basa sa index ng created_at), saka kada status sa index (status, priority, id).
+        if (Cache::add('sequence-prune:' . ChatbotSequences::site(), 1, 60)) {
+            $cutoff = DB::table(self::TABLE)->where('created_at', '<', now()->subDays(self::KEEP_DAYS))->orderByDesc('created_at')->orderByDesc('id')->value('id');
+            foreach ($cutoff === null ? [] : ['resumed', 'failed', 'done'] as $status) {
+                $ids = DB::table(self::TABLE)->where('status', $status)->where('priority', self::SEQUENCE_PRIORITY)->where('id', '<=', $cutoff)
+                    ->orderBy('id')->limit(5000)->pluck('id');
+                if ($ids->isNotEmpty()) $out['pruned'] += DB::table(self::TABLE)->whereIn('id', $ids->all())->delete();
+            }
         }
 
         return $out;
