@@ -307,6 +307,21 @@ class NexusStockReadTest extends ItemTestCase
         }
     }
 
+    public function test_unconfirmed_empty_days_and_a_skipped_daily_pass_are_in_the_stock_meta_and_the_numbers_stay(): void
+    {
+        $this->parcels('1 x GLOW TAPE', 1, 'G');
+        $this->nexusStockIn('GLOW TAPE', 5, '2026-11-02');
+        $this->appSetting('nexus_stock_unconfirmed_empty', json_encode(['2026-11-02', 'not a day', '2026-10-30']));
+        $this->appSetting('nexus_stock_daily_pass', json_encode(['at' => '2026-11-03 02:40:00', 'status' => 'skipped_locked']));
+
+        $json = $this->stock()->assertOk()->json();
+
+        $this->assertSame(['2026-10-30', '2026-11-02'], $json['stock_meta']['nexus']['unconfirmed_empty_days']);
+        $this->assertSame(['at' => '2026-11-03 02:40', 'status' => 'skipped_locked'], $json['stock_meta']['nexus']['daily_pass']);
+        $this->assertSame(4, $json['items']['glow tape']['stock'], 'ang lumang numero ay nananatili');
+        $this->assertFalse($json['stock_meta']['nexus']['stale'], 'ang stale ay sa last_synced_at lang');
+    }
+
     public function test_S_220_2_7_never_synced_says_so(): void
     {
         $this->appSetting('nexus_stock_last_synced_at', null);

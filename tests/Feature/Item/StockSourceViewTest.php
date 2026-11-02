@@ -54,6 +54,8 @@ class StockSourceViewTest extends ItemTestCase
                       "'Nexus not synced for more than 3 hours: the numbers may be old'",
                       "'Nexus not configured: stock = PO received − shipped'",
                       "'Nexus token missing — stock shows the old PO count'", 'this.stock.meta?.nexus?.previously_synced',
+                      "'Nexus returned nothing for ' + n.unconfirmed_empty_days.join(', ') + '; old numbers kept'",
+                      "'Nexus daily 7-day pass skipped (locked) at ' + n.daily_pass.at",
                       "'Returned is not available (Nexus RTS)'", "'Unknown returned source setting: using J&T'"] as $text) {
                 $this->assertStringContainsString($text, $html, $text);
             }

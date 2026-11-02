@@ -13,17 +13,21 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 
 /**
- * Nexus stock-in → nexus_stock_ins (isang row kada araw at pangalan). Isang GET /api/item-stock?date=D kada araw:
- * ang ?from=&to= ng Nexus ay kabuuan ng buong range (walang hati kada araw), kaya hindi ito mailalagay kada araw.
+ * Nexus stock-in → nexus_stock_ins (isang row kada araw at pangalan). Isang GET /api/item-stock?date=D kada araw.
+ *
+ * Ang sagot ng Nexus (app/Services/ItemStock.php) ay naglilista ng bawat item na may stock-in sa araw na iyon O may laman
+ * sa shelf ngayon; ang stock_in ng item ay listahan ng {date, lots, pieces} kada araw (o, sa lumang anyo, isang bilang).
+ * Kaya ang item na wala sa sagot ng araw D ay walang dumating noong D: 0 para sa D, tamang datos kada araw.
  *
  * Mga araw na tinatanong: mula sa nexus_stock_synced_through (inuulit: "ngayon" pa iyon nang i-store) o mula sa
  * item_stock_start sa unang takbo, hanggang ngayon (Manila); laging kasama ang kahapon, at ang mga araw na bumagsak sa
  * naunang --from / --days na takbo (nexus_stock_pending_days). Ang sagot ng isang araw ang totoo para sa araw na iyon:
  * overwrite (hindi dagdag), at ang naka-store na item na wala sa sagot ay ginagawang 0 — maliban sa item na nilaktawan
  * dahil sira ang numero (nananatili ang dati). Sirang sagot (pati puro sirang item) = babala, walang nagbabago.
- * Walang laman ang sagot ng naka-store na araw: babala sa unang takbo; tanggap (0 ang araw) kapag walang laman din
- * isang oras o higit pagkatapos, o kapag bago pa ang kahapon ang araw. Kapag dalawa o higit pang naka-store na araw
- * ang walang laman sa iisang takbo, sira ang Nexus: walang ginagawang 0 at hindi umaabante ang sync. Walang binubura kahit kailan.
+ *
+ * Walang laman ang sagot (items: []) ng araw na may naka-store: HINDI kailanman kusang ginagawang 0. Nananatili ang dati,
+ * itinatala ang araw sa nexus_stock_unconfirmed_empty (babala sa /item), at tuloy ang takbo (hindi ito pagkabigo).
+ * Ang owner lang ang nagpapa-0 nito: nexus:sync-stock --accept-empty=YYYY-MM-DD. Walang binubura kahit kailan.
  *
  * Ang token ay nasa Authorization header lang: hindi ito nilo-log, iniimbak o ibinabalik.
  */
@@ -36,10 +40,10 @@ class StockInSync
     public const LAST_ERROR     = 'nexus_stock_last_error';
     /** JSON na listahan ng mga araw na bumagsak (hal. sa --from o --days) at itatanong ulit ng susunod na takbo. */
     public const PENDING_DAYS   = 'nexus_stock_pending_days';
-    /** JSON {araw: unang oras na walang laman ang sagot} para sa naka-store na araw na naging walang laman. */
-    public const EMPTY_SEEN     = 'nexus_stock_empty_seen';
-    /** Ilang segundo bago tanggapin ang ikalawang walang-lamang sagot ng naka-store na araw (kahapon o ngayon). */
-    private const EMPTY_CONFIRM = 3600;
+    /** JSON na listahan ng mga araw na may naka-store pero walang laman ang sagot ng Nexus (hindi pa tinatanggap). */
+    public const UNCONFIRMED_EMPTY = 'nexus_stock_unconfirmed_empty';
+    /** JSON {at, status: ok | skipped_locked} ng huling araw-araw na 7-day pass. */
+    public const DAILY_PASS     = 'nexus_stock_daily_pass';
     private const MAX_COUNT     = 2147483647;
     private const TZ            = 'Asia/Manila';
 
@@ -78,18 +82,46 @@ class StockInSync
      */
     public function run(?string $from = null, ?int $days = null): array
     {
-        if (!self::configured()) {
-            return ['status' => 'not_configured', 'lines' => ['Nexus not configured (services.nexus.token is empty): nothing asked, nothing changed.']];
+        $guard = $this->guard($from);
+        if ($guard !== null) return $guard;
+        $start = (string) ItemStockService::startSetting();
+
+        $lock = Cache::lock(self::LOCK, 1800);
+        if (!$lock->get()) {
+            if ($days !== null) {
+                // Ang araw-araw na pass ay hindi tahimik na nawawala: itinatala, at lumalabas sa /item.
+                $this->put(self::DAILY_PASS, json_encode(['at' => Carbon::now(self::TZ)->format('Y-m-d H:i:s'), 'status' => 'skipped_locked']));
+                Log::warning('nexus:sync-stock daily pass skipped: another run holds the lock');
+            }
+            return ['status' => 'locked', 'lines' => ['Another nexus:sync-stock is already running: nothing asked.']];
         }
-        if (!Schema::hasTable(self::TABLE) || !Schema::hasTable('app_settings')) {
-            return ['status' => 'no_table', 'lines' => ['The nexus_stock_ins table is missing: run the migration first. Nothing asked.']];
+        try {
+            $res = $this->sync($start, $from, $days);
+            if ($days !== null) {
+                $this->put(self::DAILY_PASS, json_encode(['at' => Carbon::now(self::TZ)->format('Y-m-d H:i:s'), 'status' => $res['status']]));
+            }
+            return $res;
+        } finally {
+            $lock->release();
         }
-        $start = ItemStockService::startSetting();
-        if ($start === null) {
-            return ['status' => 'no_start', 'lines' => ['No valid item_stock_start in app_settings: nothing asked, nothing changed.']];
+    }
+
+    /**
+     * --accept-empty: itanong ulit ang isang araw; kapag wala pa ring laman ang sagot, gawing 0 ang mga row ng araw na iyon
+     * (bawat isa naka-log) at alisin sa listahan ng hindi kumpirmadong walang laman. May laman na = store gaya ng dati.
+     *
+     * @return array{status:string, lines:array<int,string>}
+     */
+    public function acceptEmpty(string $day): array
+    {
+        if (!self::validDate($day)) {
+            return ['status' => 'bad_from', 'lines' => ['--accept-empty must be a real date (Y-m-d). Nothing asked.']];
         }
-        if ($from !== null && !self::validDate($from)) {
-            return ['status' => 'bad_from', 'lines' => ['--from must be a real date (Y-m-d). Nothing asked.']];
+        $guard = $this->guard(null);
+        if ($guard !== null) return $guard;
+        $start = (string) ItemStockService::startSetting();
+        if ($day < $start || $day > Carbon::now(self::TZ)->toDateString()) {
+            return ['status' => 'bad_from', 'lines' => ["$day is outside the stock start ($start) to today. Nothing asked."]];
         }
 
         $lock = Cache::lock(self::LOCK, 1800);
@@ -97,10 +129,47 @@ class StockInSync
             return ['status' => 'locked', 'lines' => ['Another nexus:sync-stock is already running: nothing asked.']];
         }
         try {
-            return $this->sync($start, $from, $days);
+            $res = $this->day($day);
+            if (!$res['ok']) {
+                return ['status' => 'failed', 'lines' => ["$day: {$res['message']}. Nothing changed; the day stays on the list."]];
+            }
+            if (!empty($res['empty_stored'])) {
+                $n = DB::transaction(fn () => $this->store($day, [], null, []));
+                $this->dropUnconfirmed([$day]);
+                return ['status' => 'ok', 'lines' => ["$day: Nexus still answers empty; $n stored items set to 0."]];
+            }
+            $this->dropUnconfirmed([$day]);
+            return ['status' => 'ok', 'lines' => ["$day: Nexus answered {$res['rows']} items; stored as usual, nothing set to 0 for being empty."]];
         } finally {
             $lock->release();
         }
+    }
+
+    /** Ang mga araw na walang laman ang sagot pero may naka-store (para sa /item). @return array<int,string> */
+    public static function unconfirmedEmptyDays(?string $raw): array
+    {
+        $days = array_values(array_filter((array) json_decode((string) $raw, true), fn ($d) => is_string($d) && self::validDate($d)));
+        sort($days);
+
+        return $days;
+    }
+
+    private function guard(?string $from): ?array
+    {
+        if (!self::configured()) {
+            return ['status' => 'not_configured', 'lines' => ['Nexus not configured (services.nexus.token is empty): nothing asked, nothing changed.']];
+        }
+        if (!Schema::hasTable(self::TABLE) || !Schema::hasTable('app_settings')) {
+            return ['status' => 'no_table', 'lines' => ['The nexus_stock_ins table is missing: run the migration first. Nothing asked.']];
+        }
+        if (ItemStockService::startSetting() === null) {
+            return ['status' => 'no_start', 'lines' => ['No valid item_stock_start in app_settings: nothing asked, nothing changed.']];
+        }
+        if ($from !== null && !self::validDate($from)) {
+            return ['status' => 'bad_from', 'lines' => ['--from must be a real date (Y-m-d). Nothing asked.']];
+        }
+
+        return null;
     }
 
     private function sync(string $start, ?string $from, ?int $days): array
@@ -129,7 +198,6 @@ class StockInSync
         )));
         sort($askDays);
 
-        $emptySeen  = (array) json_decode((string) $this->setting(self::EMPTY_SEEN), true);
         $lines      = [];
         $failure    = null;      // unang error (ito ang itinatala)
         $mainFailed = false;     // may bumagsak na sa karaniwang hanay ($first..ngayon)
@@ -137,19 +205,22 @@ class StockInSync
         $stored     = 0;
         $failedDays = [];
         $okDays     = [];
-        $emptyDays  = [];        // naka-store na araw na walang laman ang sagot ngayong takbo
-        $toZero     = [];        // sa mga iyon, ang tanggap na (gagawing 0 sa dulo)
+        $emptyDays  = [];        // may naka-store pero walang laman ang sagot: nananatili ang dati
+        $filledDays = [];        // may laman ang sagot: hindi na "walang laman"
 
         foreach ($askDays as $day) {
-            $res = $this->day($day, $yesterday, $now, $emptySeen);
-            if (!empty($res['empty_stored'])) $emptyDays[] = $day;
+            $res = $this->day($day);
             if ($res['ok']) {
                 $okDays[] = $day;
-                if (!empty($res['empty_stored'])) $toZero[] = $day;
                 $stored += $res['rows'];
                 if ($day >= $first && !$mainFailed) $contiguous = $day;
-                $lines[] = "$day: " . (!empty($res['empty_stored']) ? 'empty, stored items to be set to 0'
-                    : "{$res['rows']} items" . ($res['skipped'] ? ", {$res['skipped']} skipped" : ''));
+                if (!empty($res['empty_stored'])) {
+                    $emptyDays[] = $day;
+                    $lines[] = "$day: Nexus returned nothing; the stored numbers are kept (unconfirmed empty day)";
+                } else {
+                    if ($res['rows'] > 0) $filledDays[] = $day;
+                    $lines[] = "$day: {$res['rows']} items" . ($res['skipped'] ? ", {$res['skipped']} skipped" : '') . ($res['zeroed'] ? ", {$res['zeroed']} set to 0" : '');
+                }
                 continue;
             }
             $failedDays[] = $day;
@@ -159,25 +230,19 @@ class StockInSync
             if ($res['stop']) break;
         }
 
-        // Dalawa o higit pang naka-store na araw na walang laman sa iisang takbo = sira ang Nexus, hindi totoong pagbura:
-        // walang ginagawang 0, at hindi gumagalaw ang synced_through at last_synced_at.
-        $fault = count($emptyDays) >= 2;
-        if ($fault) {
-            $failure = ['kind' => 'empty_for_stored_days', 'day' => $emptyDays[0],
-                        'message' => 'Nexus returned empty for ' . count($emptyDays) . ' stored days — not applied'];
-            $okDays     = array_values(array_diff($okDays, $toZero));
-            $failedDays = array_values(array_unique(array_merge($failedDays, $toZero)));
-            $lines[]    = $failure['message'] . ': ' . implode(', ', $emptyDays);
-        } else {
-            foreach ($toZero as $day) {
-                unset($emptySeen[$day]);
-                $n = DB::transaction(fn () => $this->store($day, [], null, []));
-                $lines[] = "$day: $n set to 0";
-            }
+        // Ang listahan ng hindi kumpirmadong walang laman: dagdag ang bago, alis ang nagkaroon na ng laman.
+        $list = array_values(array_diff(
+            array_unique(array_merge(self::unconfirmedEmptyDays($this->setting(self::UNCONFIRMED_EMPTY)), $emptyDays)),
+            $filledDays
+        ));
+        sort($list);
+        $this->put(self::UNCONFIRMED_EMPTY, json_encode($list));
+        if ($emptyDays) {
+            Log::warning('nexus:sync-stock Nexus returned nothing for days that have stored items; kept', ['days' => $emptyDays]);
         }
 
         $newThrough = $through;
-        if (!$fault && $contiguous !== null && ($through === null || $contiguous > $through)) {
+        if ($contiguous !== null && ($through === null || $contiguous > $through)) {
             $newThrough = $contiguous;
             $this->put(self::SYNCED_THROUGH, $contiguous);
         }
@@ -189,7 +254,6 @@ class StockInSync
         ));
         sort($keep);
         $this->put(self::PENDING_DAYS, json_encode($keep));
-        $this->put(self::EMPTY_SEEN, json_encode((object) $emptySeen));
         if ($failure === null) {
             $this->put(self::LAST_SYNCED, $now->format('Y-m-d H:i:s'));
             $this->put(self::LAST_ERROR, '');
@@ -206,11 +270,15 @@ class StockInSync
         return ['status' => 'failed', 'lines' => $lines];
     }
 
-    /**
-     * Isang araw: tanong, suri, at store.
-     * @param array<string,string> $emptySeen araw => unang oras na walang laman ang sagot (binabago dito)
-     */
-    private function day(string $day, string $yesterday, Carbon $now, array &$emptySeen): array
+    /** @param array<int,string> $days */
+    private function dropUnconfirmed(array $days): void
+    {
+        $list = array_values(array_diff(self::unconfirmedEmptyDays($this->setting(self::UNCONFIRMED_EMPTY)), $days));
+        $this->put(self::UNCONFIRMED_EMPTY, json_encode($list));
+    }
+
+    /** Isang araw: tanong, suri, at store. Ang walang-lamang sagot ng naka-store na araw ay hindi ginagalaw (empty_stored). */
+    private function day(string $day): array
     {
         $fail = fn (string $kind, string $message, bool $stop = false) => ['ok' => false, 'kind' => $kind, 'message' => $message, 'stop' => $stop];
 
@@ -226,6 +294,8 @@ class StockInSync
 
         $status = $resp->status();
         if ($status === 401 || $status === 403) return $fail('unauthorized', "Nexus refused the token (HTTP $status)", true);
+        // 60 tawag kada oras kada token sa Nexus: ang kasunod na araw ay tatanggihan din, kaya titigil na.
+        if ($status === 429) return $fail('rate_limited', 'Nexus says too many calls (HTTP 429); the rest is asked next run', true);
         if ($status !== 200) return $fail('http_error', "Nexus answered HTTP $status");
 
         $json = json_decode($resp->body(), true);
@@ -246,24 +316,10 @@ class StockInSync
         if (!$items) {
             $stored = DB::table(self::TABLE)->where('stock_date', $day)
                 ->where(fn ($q) => $q->where('stock_in_pieces', '>', 0)->orWhere('stock_in_lots', '>', 0))->exists();
-            if (!$stored) {
-                // Walang dumating at walang naka-store: normal na araw.
-                unset($emptySeen[$day]);
-                return ['ok' => true, 'rows' => 0, 'skipped' => 0, 'zeroed' => 0];
-            }
-            // Naka-store pero walang laman ngayon: tanggap kung bago pa ang kahapon, o kung walang laman din ito
-            // isang oras o higit bago (dalawang takbo); kung hindi, babala lang ngayong takbo.
-            $firstSeen = isset($emptySeen[$day]) ? Carbon::parse((string) $emptySeen[$day], self::TZ) : null;
-            $confirmed = $day < $yesterday || ($firstSeen !== null && $firstSeen->diffInSeconds($now, true) >= self::EMPTY_CONFIRM);
-            if (!$confirmed) {
-                $emptySeen[$day] ??= $now->format('Y-m-d H:i:s');
-                return $fail('empty_for_stored_day', 'Nexus answered with no items for a day that has stored items') + ['empty_stored' => true];
-            }
-            // Tanggap, pero ang pag-0 ay sa dulo ng takbo (sync), at hindi kung dalawa o higit pang naka-store na araw
-            // ang walang laman sa iisang takbo.
-            return ['ok' => true, 'rows' => 0, 'skipped' => 0, 'zeroed' => 0, 'empty_stored' => true];
+
+            // Walang naka-store: normal na araw. May naka-store: nananatili (owner lang ang nagpapa-0, --accept-empty).
+            return ['ok' => true, 'rows' => 0, 'skipped' => 0, 'zeroed' => 0, 'empty_stored' => $stored];
         }
-        unset($emptySeen[$day]);
 
         $asOf   = $this->asOf($json['as_of'] ?? null);
         $zeroed = DB::transaction(fn () => $this->store($day, $items, $asOf, $protected));
@@ -283,7 +339,7 @@ class StockInSync
         foreach ($raw as $i => $it) {
             $name = is_array($it) && is_string($it['item'] ?? null) ? self::trimName($it['item']) : '';
             $pieces = is_array($it) ? self::count($it['stock_in_pieces'] ?? null) : null;
-            $lots   = is_array($it) ? self::count($it['stock_in'] ?? null) : null;
+            $lots   = is_array($it) ? self::lots($it['stock_in'] ?? null, $day) : null;
             $badName = $name === '' || mb_strlen($name) > 255;
             if ($badName || $pieces === null || $lots === null) {
                 $skipped++;
@@ -311,6 +367,26 @@ class StockInSync
 
         return [$out, $skipped, array_values(array_unique($protected))];
     }
+
+    /**
+     * Lots ng araw: ang stock_in ng Nexus ay listahan ng {date, lots, pieces} kada araw (ang araw lang na tinanong ang
+     * dapat nandiyan); ang lumang anyo ay isang bilang. null / [] = 0. Iba = null (sira, laktawan ang item).
+     */
+    private static function lots(mixed $v, string $day): ?int
+    {
+        if (!is_array($v)) return self::count($v);
+        if (!array_is_list($v)) return null;
+        $sum = 0;
+        foreach ($v as $entry) {
+            if (!is_array($entry) || substr((string) ($entry['date'] ?? ''), 0, 10) !== $day) return null;
+            $n = self::count($entry['lots'] ?? null);
+            if ($n === null) return null;
+            $sum = min(self::MAX_COUNT, $sum + $n);
+        }
+
+        return $sum;
+    }
+
 
     /**
      * Upsert ng sagot ng araw; ang naka-store na wala sa sagot = 0 (naka-log), maliban sa nilaktawang item ($protected).

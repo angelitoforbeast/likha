@@ -9,25 +9,36 @@ use Illuminate\Console\Command;
  * Nexus stock-in → nexus_stock_ins (kada oras sa :10 Manila: kahapon at ngayon; araw-araw sa 02:40: ang huling 7 araw).
  * Ang unang takbo ay kusang bumabalik hanggang sa item_stock_start, isang araw kada request.
  * --from: itanong ulit mula sa isang araw (hindi bago ang start). --days=N: isama ang huling N araw.
+ * --accept-empty=YYYY-MM-DD: itanong ulit ang araw na walang laman ang sagot; kung wala pa rin, gawing 0 ang naka-store.
  */
 class NexusStockSync extends Command
 {
     protected $signature = 'nexus:sync-stock
         {--from= : Y-m-d, ask again from this day (never before the stock start)}
-        {--days= : also ask the last N days (the daily pass uses 7)}';
+        {--days= : also ask the last N days (the daily pass uses 7)}
+        {--accept-empty= : Y-m-d, a day Nexus answered empty for: ask again and, if still empty, set its stored items to 0}';
 
     protected $description = 'Store the Nexus stock-in per day and item (for the stock on /item)';
 
     public function handle(StockInSync $sync): int
     {
+        $accept = $this->option('accept-empty');
+        if (is_string($accept) && $accept !== '') {
+            return $this->report($sync->acceptEmpty($accept));
+        }
+
         $from = $this->option('from');
         $days = $this->option('days');
         if ($days !== null && $days !== '' && (!ctype_digit((string) $days) || (int) $days < 1 || (int) $days > 31)) {
             $this->warn('--days must be a whole number from 1 to 31. Nothing asked.');
             return self::FAILURE;
         }
-        $res = $sync->run(is_string($from) && $from !== '' ? $from : null, $days !== null && $days !== '' ? (int) $days : null);
 
+        return $this->report($sync->run(is_string($from) && $from !== '' ? $from : null, $days !== null && $days !== '' ? (int) $days : null));
+    }
+
+    private function report(array $res): int
+    {
         foreach ($res['lines'] as $line) {
             $res['status'] === 'failed' || $res['status'] === 'bad_from' ? $this->warn($line) : $this->line($line);
         }

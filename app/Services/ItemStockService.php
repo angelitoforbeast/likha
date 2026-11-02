@@ -205,7 +205,8 @@ class ItemStockService
         $now  = Carbon::now('Asia/Manila');
         $set  = Schema::hasTable('app_settings')
             ? DB::table('app_settings')
-                ->whereIn('key', [StockInSync::LAST_SYNCED, StockInSync::LAST_ERROR, ReturnedSources::SETTING])
+                ->whereIn('key', [StockInSync::LAST_SYNCED, StockInSync::LAST_ERROR, ReturnedSources::SETTING,
+                                 StockInSync::UNCONFIRMED_EMPTY, StockInSync::DAILY_PASS])
                 ->pluck('value', 'key')->all()
             : [];
         $src  = app(ReturnedSources::class)->forSetting(array_key_exists(ReturnedSources::SETTING, $set) ? $set[ReturnedSources::SETTING] : null);
@@ -218,6 +219,11 @@ class ItemStockService
         $error = json_decode((string) ($set[StockInSync::LAST_ERROR] ?? ''), true);
         $error = is_array($error) && isset($error['kind'])
             ? ['at' => (string) ($error['at'] ?? ''), 'kind' => (string) $error['kind'], 'message' => (string) ($error['message'] ?? '')]
+            : null;
+        // Ang huling araw-araw na 7-day pass: {at, status}; ipinapakita lang kapag hindi ito natuloy.
+        $dailyPass = json_decode((string) ($set[StockInSync::DAILY_PASS] ?? ''), true);
+        $dailyPass = is_array($dailyPass) && isset($dailyPass['status'])
+            ? ['at' => substr((string) ($dailyPass['at'] ?? ''), 0, 16), 'status' => (string) $dailyPass['status']]
             : null;
 
         $out = ['left' => [], 'stock_in' => [], 'returned' => [], 'remaining' => [], 'meta' => []];
@@ -288,6 +294,8 @@ class ItemStockService
                 'stale'           => $synced !== null && $synced->diffInSeconds($now, true) > self::STALE_SECONDS,
                 'last_error'      => $error,
                 'token_problem'   => ($error['kind'] ?? null) === 'unauthorized',
+                'unconfirmed_empty_days' => StockInSync::unconfirmedEmptyDays($set[StockInSync::UNCONFIRMED_EMPTY] ?? null),
+                'daily_pass'      => $dailyPass,
                 'remaining_as_of' => $remainingAsOf !== null ? substr($remainingAsOf, 0, 16) : null,
                 'remaining_stale' => $remainingAsOf !== null
                     && Carbon::parse($remainingAsOf, 'Asia/Manila')->diffInSeconds($now, true) > self::STALE_SECONDS,
