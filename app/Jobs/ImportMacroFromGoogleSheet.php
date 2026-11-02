@@ -27,10 +27,14 @@ class ImportMacroFromGoogleSheet implements ShouldQueue
     public int $timeout = 3600;
     public int $tries   = 1;
 
+    // Default sa klase (hindi sa constructor lang): ang payload na naka-queue bago idinagdag ito ay hindi naiiwang walang laman.
+    public ?int $userId = null;
+
     public function __construct(
         public int $runId,
-        public ?int $userId = null
+        ?int $userId = null
     ) {
+        $this->userId = $userId;
         // Sariling worker ang mga import ng orders (Likha at Macro): sunud-sunod, hindi kasabay ng ibang trabaho.
         $this->onConnection('database')->onQueue('orders');
     }

@@ -35,12 +35,17 @@ class SyncFromJntStatusByTrack implements ShouldQueue
     private const SAMPLE_MAX  = 300;  // rows na itatabi para sa preview UI
     private const FINAL       = ['Delivered', 'Returned'];
 
+    // Default sa klase (hindi sa constructor lang): ang payload na naka-queue bago idinagdag ito ay hindi naiiwang walang laman.
+    public bool $dryRun = true;
+
     public function __construct(
         public int $runId,
         public string $dateFrom,
         public string $dateTo,
-        public bool $dryRun = true,
-    ) {}
+        bool $dryRun = true,
+    ) {
+        $this->dryRun = $dryRun;
+    }
 
     public function handle(): void
     {

@@ -21,8 +21,12 @@ class SendOrderToForbeast implements ShouldQueue
 
     public int $timeout = 60;
 
-    public function __construct(public int $orderEncodeId, public int $version, public bool $probe = false)
+    // Default sa klase (hindi sa constructor lang): ang payload na naka-queue bago idinagdag ito ay hindi naiiwang walang laman.
+    public bool $probe = false;
+
+    public function __construct(public int $orderEncodeId, public int $version, bool $probe = false)
     {
+        $this->probe = $probe;
         $this->onConnection('database')->onQueue((string) config('order_encode.forbeast.queue', 'default'));
     }
 

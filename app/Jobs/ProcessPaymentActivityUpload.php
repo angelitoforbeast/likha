@@ -48,14 +48,23 @@ class ProcessPaymentActivityUpload implements ShouldQueue
     private ?Carbon $rangeStart = null;
     private ?Carbon $rangeEnd   = null;
 
+    // Default sa klase (hindi sa constructor lang): ang payload na naka-queue bago idinagdag ito ay hindi naiiwang walang laman.
+    public string $uploadedBy = 'system';
+    public ?string $diskName = null;
+    public ?int $uploadLogId = null;
+
     public function __construct(
         public string $storedPath,
         public string $originalName,
         public string $batchId,
-        public string $uploadedBy = 'system',
-        public ?string $diskName = null,
-        public ?int $uploadLogId = null
-    ) {}
+        string $uploadedBy = 'system',
+        ?string $diskName = null,
+        ?int $uploadLogId = null
+    ) {
+        $this->uploadedBy = $uploadedBy;
+        $this->diskName = $diskName;
+        $this->uploadLogId = $uploadLogId;
+    }
 
     public function handle(): void
     {

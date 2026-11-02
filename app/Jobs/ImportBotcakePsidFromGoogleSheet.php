@@ -27,9 +27,9 @@ class ImportBotcakePsidFromGoogleSheet implements ShouldQueue
 
     public int $timeout = 1200; // 20 minutes
 
-    protected ?string $cutoffDateTime;
-    protected ?int $runId;
-    protected bool $cleanSheet;
+    protected ?string $cutoffDateTime = null;
+    protected ?int $runId = null;
+    protected bool $cleanSheet = false;
 
     public function __construct(?string $cutoffDateTime = null, ?int $runId = null, bool $cleanSheet = false)
     {

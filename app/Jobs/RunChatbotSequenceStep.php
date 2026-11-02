@@ -25,12 +25,18 @@ class RunChatbotSequenceStep implements ShouldQueue, ShouldBeUniqueUntilProcessi
     public int $tries = 1;
     public int $uniqueFor = 3 * 3600; // mas mahaba sa pinakamahabang pila; ang job na nawala sa queue ay kinukuha ulit pagkatapos nito
 
+    // Default sa klase (hindi sa constructor lang): ang payload na naka-queue bago idinagdag ito ay hindi naiiwang walang laman.
+    public ?string $claim = null;
+    public ?string $earlier = null;
+
     /**
      * $claim: ang dispatched_at na itinala ng tick para sa job na ito; ang naunahan ng mas bagong claim ay walang ginagawa.
      * $earlier: ang stamp ng naunang claim ng step (kinuha ulit ng tick), para hindi na ulitin ang naipadala na.
      */
-    public function __construct(public int $subscriptionId, public ?string $claim = null, public ?string $earlier = null)
+    public function __construct(public int $subscriptionId, ?string $claim = null, ?string $earlier = null)
     {
+        $this->claim = $claim;
+        $this->earlier = $earlier;
         $this->onConnection(config('queue.chatbot_connection'))->onQueue(RunChatbotFlow::QUEUE);
     }
 

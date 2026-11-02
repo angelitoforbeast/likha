@@ -20,11 +20,16 @@ class ProcessJntCreateOrdersBatch implements ShouldQueue
 
     public int $timeout = 1200;
 
+    // Default sa klase (hindi sa constructor lang): ang payload na naka-queue bago idinagdag ito ay hindi naiiwang walang laman.
+    public ?int $userId = null;
+
     public function __construct(
         public int $runId,
         public array $macroOutputIds,
-        public ?int $userId = null,
-    ) {}
+        ?int $userId = null,
+    ) {
+        $this->userId = $userId;
+    }
 
     public function handle(): void
     {
