@@ -3879,6 +3879,26 @@ Tests: `tests/Feature/OwnerPrivate/SetByHoverTest.php` (item-summary rows, sqlit
 | S-216.2.3 | negative | Given a Botcake page, then the AI-load check (`ChatbotAiLoad`) is not asked for it and its AI never stops for load | `test_S_216_2_3_a_botcake_page_is_never_load_checked_and_its_ai_never_stops_for_load` | 2026-11-02 passed |
 | S-216.2.4 | edge | Given a page moved from Botcake to the gateway (or back), then rows after the move follow the new path; older rows are unchanged | `test_S_216_2_4_a_page_moved_between_botcake_and_the_gateway_follows_the_new_path_and_older_rows_stay` | 2026-11-02 passed |
 
+## Slice 218 – Comment answer once a day
+
+As the owner, I want a customer who comments many times on a Forbeast page in one day to get one Comment PM and one public reply that day, not one per comment.
+
+Slice 218. Threat model: untrusted comment events from the gateway (`from_id`, ids); trusted database and config. Medium: double sends under concurrency, so the check and the claim to `sending` run under one lock per page and commenter. No migration, no new table or column; no queued job class changes. Risk tier: medium.
+Tests: `tests/Feature/Chatblast/CommentRepliesTest.php` (Forbeast faked with `Http::fake`, sqlite).
+
+### S-218.1 One answer per customer per page per day (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-218.1.1 | happy | Given customer C's first comment today on page P, then the Comment PM and the public reply are sent as today | `test_S_218_1_1_a_customers_first_comment_today_gets_the_private_message_and_the_reply` | 2026-11-03 passed |
+| S-218.1.2 | happy | Given C was already answered on P today (a PM or a public reply sent, or an outcome that may have been posted: unknown/504), when C comments again on P (same or another post), then nothing is sent and the row is skipped with reason `daily_limit` ("already answered today") | `test_S_218_1_2_a_second_and_third_comment_today_on_the_page_get_nothing_and_are_skipped_daily_limit` (same and another post), `test_S_218_1_2_a_customer_answered_today_on_the_page_is_skipped_daily_limit` (8 earlier states: sent, reply only, PM only, unknown, already replied, PM failed + reply sent, still sending, waiting with PM sent) | 2026-11-03 passed |
+| S-218.1.3 | happy | Given C was answered on P yesterday at 23:50 Manila, when C comments at 00:10 Manila, then C is answered (the day is the Manila calendar day) | `test_S_218_1_3_the_day_is_the_manila_calendar_day` | 2026-11-03 passed |
+| S-218.1.4 | happy | Given C answered on page P today, when C comments on page Q, then C is answered on Q (the limit is per page) | `test_S_218_1_4_the_limit_is_per_page` | 2026-11-03 passed |
+| S-218.1.5 | negative | Given C's earlier comment today was skipped (bot off, not set, a reply to a reply, page author) or failed before anything was sent, then a later comment today is still answered | `test_S_218_1_5_an_earlier_comment_skipped_or_failed_before_sending_does_not_count` | 2026-11-03 passed |
+| S-218.1.6 | edge | Given two comments from C on P arrive at the same moment, then exactly one is answered and the other is skipped `daily_limit` (a lock or an atomic check per page and commenter) | `test_S_218_1_6_two_comments_at_the_same_moment_get_one_answer` (second worker during the first send), `test_S_218_1_6_a_comment_waits_while_another_worker_decides_for_the_same_customer` (lock held: released 5 s, no send) | 2026-11-03 passed |
+| S-218.1.7 | edge | Given a comment with no `from_id`, then it is answered as today (no limit can apply) and the result says so | `test_S_218_1_7_a_comment_without_from_id_is_answered_as_today` (null and empty) | 2026-11-03 passed |
+| S-218.1.8 | edge | Given a comment waiting in the queue because the page's minute was full (429 / 20 per minute), then the limit is checked when it is sent, not only when it arrived | `test_S_218_1_8_a_comment_waiting_for_the_next_minute_is_checked_when_it_is_sent` | 2026-11-03 passed |
+| S-218.1.9 | happy | Given the place the owner sees comment outcomes today (the reasons list / health or inbox views that read `REASONS`), then `daily_limit` shows as "already answered today" | `test_S_218_1_9_the_replies_view_says_already_answered_today` (Replies, Comments view; Health counts by status only) | 2026-11-03 passed |
+
 ## Slice 219 – A deploy never breaks the jobs already waiting in the queue
 
 As the owner, I want a job queued by the previous version of a class to run after a deploy exactly as a fresh dispatch of the new version would.
