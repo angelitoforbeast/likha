@@ -1033,7 +1033,7 @@
                     <span style="display:inline-flex;align-items:flex-start;gap:4px;">
                       <div style="flex:1;">
                         <template x-if="row.rts_pct !== null">
-                          <div>
+                          <div :title="!owCompact ? owTip('rts_set', row) : null">
                             <span style="font-weight:700;color:#000;"
                                   x-text="row.rts_pct.toFixed(1)+'%'"></span>
                             <template x-if="row.settings_date">
@@ -1151,7 +1151,7 @@
                     <span style="display:inline-flex;align-items:flex-start;gap:4px;">
                       <div style="flex:1;">
                         <template x-if="row.item_value !== null">
-                          <div>
+                          <div :title="!owCompact ? owTip('item_val', row) : null">
                             <span style="color:#111;" x-text="money(row.item_value)"></span>
                             <template x-if="row.item_value_source === 'cogs'">
                               <div style="font-size:9px;color:#cbd5e1;">cogs</div>
@@ -2581,7 +2581,7 @@
           if (row.rts_pct === null || row.rts_pct === undefined) return null;
           if (row.settings_date) L.push('from ' + row.settings_date);
           if (row.rts_comment)   L.push('💬 ' + row.rts_comment);
-          if (row.rts_set_by)    L.push('Set by ' + row.rts_set_by);
+          if (row.rts_set_by)    L.push('Set by ' + row.rts_set_by + (row.rts_set_at ? ' · ' + row.rts_set_at : ''));
         } else if (colId === 'mira_rts') {
           if (row.projected_rts_pct == null) return null;
           L.push(this.miraTip(row));
@@ -2596,6 +2596,11 @@
           if (row.item_value_source === 'cogs') L.push('cogs');
           if (row.item_value_source === 'manual' && row.settings_date) L.push('from ' + row.settings_date);
           if (row.item_value_source === 'manual' && row.item_value_comment) L.push('💬 ' + row.item_value_comment);
+          // Sino at kailan (Manila, galing sa edit log); ang CEO value ay nasa source lang ng CEO view.
+          if (row.item_value_set_by) L.push('Set by ' + row.item_value_set_by + (row.item_value_set_at ? ' · ' + row.item_value_set_at : ''));
+          @if(!empty($effectiveIsCEO))
+          if (row.item_value_ceo_set_by) L.push('🔒 CEO value set by ' + row.item_value_ceo_set_by + (row.item_value_ceo_set_at ? ' · ' + row.item_value_ceo_set_at : ''));
+          @endif
         } else if (colId === 'action') {
           if (!row.action_comment) return null;
           L.push(row.action_comment);
