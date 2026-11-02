@@ -22,7 +22,8 @@ use Illuminate\Support\Facades\Schema;
  * overwrite (hindi dagdag), at ang naka-store na item na wala sa sagot ay ginagawang 0 — maliban sa item na nilaktawan
  * dahil sira ang numero (nananatili ang dati). Sirang sagot (pati puro sirang item) = babala, walang nagbabago.
  * Walang laman ang sagot ng naka-store na araw: babala sa unang takbo; tanggap (0 ang araw) kapag walang laman din
- * isang oras o higit pagkatapos, o kapag bago pa ang kahapon ang araw. Walang binubura kahit kailan.
+ * isang oras o higit pagkatapos, o kapag bago pa ang kahapon ang araw. Kapag dalawa o higit pang naka-store na araw
+ * ang walang laman sa iisang takbo, sira ang Nexus: walang ginagawang 0 at hindi umaabante ang sync. Walang binubura kahit kailan.
  *
  * Ang token ay nasa Authorization header lang: hindi ito nilo-log, iniimbak o ibinabalik.
  */
@@ -136,14 +137,19 @@ class StockInSync
         $stored     = 0;
         $failedDays = [];
         $okDays     = [];
+        $emptyDays  = [];        // naka-store na araw na walang laman ang sagot ngayong takbo
+        $toZero     = [];        // sa mga iyon, ang tanggap na (gagawing 0 sa dulo)
 
         foreach ($askDays as $day) {
             $res = $this->day($day, $yesterday, $now, $emptySeen);
+            if (!empty($res['empty_stored'])) $emptyDays[] = $day;
             if ($res['ok']) {
                 $okDays[] = $day;
+                if (!empty($res['empty_stored'])) $toZero[] = $day;
                 $stored += $res['rows'];
                 if ($day >= $first && !$mainFailed) $contiguous = $day;
-                $lines[] = "$day: {$res['rows']} items" . ($res['skipped'] ? ", {$res['skipped']} skipped" : '') . ($res['zeroed'] ? ", {$res['zeroed']} set to 0" : '');
+                $lines[] = "$day: " . (!empty($res['empty_stored']) ? 'empty, stored items to be set to 0'
+                    : "{$res['rows']} items" . ($res['skipped'] ? ", {$res['skipped']} skipped" : ''));
                 continue;
             }
             $failedDays[] = $day;
@@ -153,8 +159,25 @@ class StockInSync
             if ($res['stop']) break;
         }
 
+        // Dalawa o higit pang naka-store na araw na walang laman sa iisang takbo = sira ang Nexus, hindi totoong pagbura:
+        // walang ginagawang 0, at hindi gumagalaw ang synced_through at last_synced_at.
+        $fault = count($emptyDays) >= 2;
+        if ($fault) {
+            $failure = ['kind' => 'empty_for_stored_days', 'day' => $emptyDays[0],
+                        'message' => 'Nexus returned empty for ' . count($emptyDays) . ' stored days — not applied'];
+            $okDays     = array_values(array_diff($okDays, $toZero));
+            $failedDays = array_values(array_unique(array_merge($failedDays, $toZero)));
+            $lines[]    = $failure['message'] . ': ' . implode(', ', $emptyDays);
+        } else {
+            foreach ($toZero as $day) {
+                unset($emptySeen[$day]);
+                $n = DB::transaction(fn () => $this->store($day, [], null, []));
+                $lines[] = "$day: $n set to 0";
+            }
+        }
+
         $newThrough = $through;
-        if ($contiguous !== null && ($through === null || $contiguous > $through)) {
+        if (!$fault && $contiguous !== null && ($through === null || $contiguous > $through)) {
             $newThrough = $contiguous;
             $this->put(self::SYNCED_THROUGH, $contiguous);
         }
@@ -234,11 +257,11 @@ class StockInSync
             $confirmed = $day < $yesterday || ($firstSeen !== null && $firstSeen->diffInSeconds($now, true) >= self::EMPTY_CONFIRM);
             if (!$confirmed) {
                 $emptySeen[$day] ??= $now->format('Y-m-d H:i:s');
-                return $fail('empty_for_stored_day', 'Nexus answered with no items for a day that has stored items');
+                return $fail('empty_for_stored_day', 'Nexus answered with no items for a day that has stored items') + ['empty_stored' => true];
             }
-            unset($emptySeen[$day]);
-            $zeroed = DB::transaction(fn () => $this->store($day, [], null, []));
-            return ['ok' => true, 'rows' => 0, 'skipped' => 0, 'zeroed' => $zeroed];
+            // Tanggap, pero ang pag-0 ay sa dulo ng takbo (sync), at hindi kung dalawa o higit pang naka-store na araw
+            // ang walang laman sa iisang takbo.
+            return ['ok' => true, 'rows' => 0, 'skipped' => 0, 'zeroed' => 0, 'empty_stored' => true];
         }
         unset($emptySeen[$day]);
 

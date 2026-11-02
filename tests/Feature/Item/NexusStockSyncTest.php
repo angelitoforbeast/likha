@@ -525,6 +525,36 @@ class NexusStockSyncTest extends ItemTestCase
         $this->assertNotEmpty(array_filter($this->logs, fn ($l) => str_contains($l, 'zeroed') && str_contains($l, '2026-11-01')));
     }
 
+    public function test_two_or_more_stored_days_answering_empty_in_one_run_is_a_nexus_fault_and_nothing_is_zeroed(): void
+    {
+        $this->alreadySynced();
+        foreach (['2026-10-28' => 4, '2026-10-30' => 6, '2026-11-01' => 9] as $d => $n) $this->nexusStockIn('GLOW TAPE', $n, $d);
+        $this->fakeNexus(['2026-11-02' => [$this->item('ROPE', 1)]]);       // ang 3 naka-store na araw: walang laman
+
+        [$code] = $this->sync(['--days' => '7']);
+
+        $this->assertSame(1, $code);
+        $this->assertSame([4, 6, 9], DB::table('nexus_stock_ins')->where('item_name', 'GLOW TAPE')->orderBy('stock_date')->pluck('stock_in_pieces')->map(fn ($v) => (int) $v)->all());
+        $this->assertEmpty(array_filter($this->logs, fn ($l) => str_contains($l, 'zeroed')));
+        $err = json_decode((string) $this->settingValue('nexus_stock_last_error'), true);
+        $this->assertSame('empty_for_stored_days', $err['kind']);
+        $this->assertSame('Nexus returned empty for 3 stored days — not applied', $err['message']);
+        $this->assertSame('2026-11-03', $this->settingValue('nexus_stock_synced_through'));
+        $this->assertSame('2026-11-03 09:10:00', $this->settingValue('nexus_stock_last_synced_at'));
+
+        // Mamaya, maayos na ang sagot ng Nexus: ang mga araw ay naitatama at nawawala ang babala.
+        Carbon::setTestNow(Carbon::parse('2026-11-03 11:10:00', 'Asia/Manila'));
+        $this->fakeNexus(['2026-10-28' => [$this->item('GLOW TAPE', 4)], '2026-10-30' => [$this->item('GLOW TAPE', 6)],
+                          '2026-11-01' => [$this->item('GLOW TAPE', 9)], '2026-11-02' => [$this->item('ROPE', 1)]]);
+        [$code] = $this->sync();
+
+        $this->assertSame(0, $code);
+        $this->assertContains('2026-10-28', $this->requestedDates(), 'ang mga araw ay itinatanong ulit (pending)');
+        $this->assertSame('', (string) $this->settingValue('nexus_stock_last_error'));
+        $this->assertSame('2026-11-03 11:10:00', $this->settingValue('nexus_stock_last_synced_at'));
+        $this->assertSame([4, 6, 9], DB::table('nexus_stock_ins')->where('item_name', 'GLOW TAPE')->orderBy('stock_date')->pluck('stock_in_pieces')->map(fn ($v) => (int) $v)->all());
+    }
+
     public function test_the_daily_pass_asks_the_last_7_days_and_the_hourly_stays_on_yesterday_and_today(): void
     {
         Artisan::call('schedule:list');
