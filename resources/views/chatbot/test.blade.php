@@ -81,7 +81,7 @@
     // ad-options:start
     // Ang Ad dropdown ng Ad-based na page: ang mga ID ng bawat group (sa ayos ng mga group), saka ang mga ad na wala pa sa
     // group; sa bawat isa, ang On muna (saka ang ayos ng server). Bawat ad: pangalan, status at ID. Ang Page-based: wala.
-    const adStatus = a => a.status === 'on' ? 'On' : a.status === 'off' ? 'Off since ' + a.off_since + ' (' + a.off_days + ' day' + (a.off_days === 1 ? '' : 's') + ')' : 'No report data';
+    const adStatus = a => a.status === 'on' ? 'On' : a.status === 'off' ? 'Off since ' + a.off_since + (a.off_days == null ? '' : ' (' + a.off_days + ' day' + (a.off_days === 1 ? '' : 's') + ')') : 'No report data';
     function adOptions(d) {
         if (!d || d.mode !== 'ad') return [];
         const onFirst = list => [...(list || [])].sort((a, b) => (b.status === 'on') - (a.status === 'on'));
@@ -98,7 +98,8 @@
             $('t-ad').replaceChildren(el('option', {value: '', text: 'No ad (as before)'}), ...ads.map(g => el('optgroup', {label: g.label}, g.ads.map(a => el('option', {value: a.value, text: a.text})))));
             $('t-ad-box').classList.toggle('hidden', !ads.length); $('t-ad-box').classList.toggle('flex', !!ads.length);
         });
-    $('t-page').addEventListener('change', () => { showPageFlow(); loadGroups(); $('t-log').replaceChildren(); stopSkip(); });
+    // Ang ad at group ng dating page ay hindi naipapadala habang kinukuha pa ang sa bagong page.
+    $('t-page').addEventListener('change', () => { $('t-ad').replaceChildren(); $('t-group').replaceChildren(); showPageFlow(); loadGroups(); $('t-log').replaceChildren(); stopSkip(); });
     showPageFlow();
     loadGroups();
 

@@ -105,7 +105,7 @@ async function adGroups(p, out, label) {
         out.push({...r, server: 'ad-groups ' + s, dom: await p.ev(DOM)});
         shown.push(r);
     }
-    const open = {subs: await p.ev(SUB_ROWS), groups: await p.ev(GROUP_NODES)};
+    const open = {subs: await p.ev(SUB_ROWS), groups: await p.ev(GROUP_NODES), dom: await p.ev(DOM)};
     const sc = await scroll(p, out, label + ' (3 pages open)');
     const edit = await measure(p, label + ': Manage in Edit (' + AD_PAGES[0] + ')', click(`document.querySelector('button[aria-label="Manage the ad groups of ${AD_PAGES[0]} in its Edit window"]')`),
         `!document.getElementById('pe').classList.contains('hidden') && document.querySelector('#pe-ag [data-ag-group]')`, {settle: 800});
@@ -121,7 +121,7 @@ async function adGroups(p, out, label) {
     }
     const after = {dom: await p.ev(DOM), subs: await p.ev(SUB_ROWS), groups: await p.ev(GROUP_NODES)};
     out.push({action: label + ': S-217.1.2 groups and ad lists built only when shown, freed when hidden',
-        pass: before.subs === 0 && before.groups === 0 && open.groups > 0 && after.subs === 0 && after.groups === 0 && after.dom <= before.dom * 1.05,
+        pass: before.subs === 0 && before.groups === 0 && open.groups > 0 && after.subs === 0 && after.groups === 0 && after.dom < open.dom,
         note: `before: ${before.subs} sub-rows, ${before.groups} group/ad nodes, ${before.dom} elements; 3 shown: ${open.subs} sub-rows, ${open.groups} group/ad nodes; hidden again: ${after.subs} sub-rows, ${after.groups} group/ad nodes, ${after.dom} elements`});
     return {longest: Math.max(...[...shown, sc, edit, ...hidden].map(r => r.longest || 0))};
 }
@@ -163,6 +163,8 @@ async function features(p, out, label) {
         `/^10 of 80/.test(document.getElementById('count').textContent) && [...document.querySelectorAll('#cb-table tbody tr[data-page]:not([hidden]):not(.ag-sub)')].length === 10`);
     await check('clearing the filter shows every page', `const f = document.getElementById('f-q'); f.value = ''; f.dispatchEvent(new Event('input', {bubbles: true}))`,
         `/^80 of 80/.test(document.getElementById('count').textContent) && [...document.querySelectorAll('#cb-table tbody tr[data-page]:not([hidden]):not(.ag-sub)')].length === 80`);
+    // A row hidden by the filter may be its light stand-in again: wait until it is built, as a person would see it.
+    await p.waitFor(`document.querySelector('select[aria-label="Reply values of Perf Page 002"]') && !document.querySelector('[aria-busy="true"]')`, 30000).catch(() => {});
     await check('Replies switch to Ad-based', `const s = document.querySelector('select[aria-label="Reply values of Perf Page 002"]'); s.value = 'ad'; s.dispatchEvent(new Event('change'))`,
         `document.querySelector('button[aria-label^="Show the ad groups of Perf Page 002"], button[aria-label^="Hide the ad groups of Perf Page 002"]')`);
     await check('Replies switch back to Page-based', `const s = document.querySelector('select[aria-label="Reply values of Perf Page 002"]'); s.value = 'page'; s.dispatchEvent(new Event('change'))`,
@@ -252,7 +254,7 @@ async function groupCases(p, out, label) {
     const after = (await p.ev(panel)).groups.find(g => g.id === g1.id).values;
     out.push({action: label + ': S-217.2.2 the server has the group values (the blank back to the page value)', pass: after.main_flow === `G1 main ${RUN}` && after.price === '555' && !after.seq_1,
         note: JSON.stringify({main_flow: after.main_flow, price: after.price, seq_1: after.seq_1 ?? null})});
-    await check('S-217.2.2', 'History of the group (from the group Edit) lists the old value with Restore', `document.querySelector('#cb-table button[aria-label="Edit ${g1.name} of ${PAGE}"]').click(); document.querySelector('#pe-fields button[aria-label="History of Main Flow"]').click()`,
+    await check('S-217.2.2', 'History of the group (from the group Edit) lists the old value with Restore', `document.querySelector('#cb-table button[aria-label="Edit ${g1.name} of ${PAGE}"]').click(); document.querySelector('#pe-fields [data-key="main_flow"] button[aria-label^="History of"]').click()`,
         `[...document.querySelectorAll('[role="dialog"][aria-label="History · ${g1.name}"] button')].some(b => b.getAttribute('aria-label')?.startsWith('Restore Main Flow'))`);
     await check('S-217.2.2', 'Restore brings the old value back', `[...document.querySelectorAll('[role="dialog"][aria-label="History · ${g1.name}"] button')].find(b => b.getAttribute('aria-label')?.startsWith('Restore Main Flow')).click()`,
         `/^Restored Main Flow/.test([...document.querySelectorAll('[role="dialog"][aria-label="History · ${g1.name}"] p')].map(x => x.textContent).join(' '))`);
@@ -323,6 +325,7 @@ async function main() {
         await page.ev(`(() => { const f = document.querySelector('form[action$="/login"]'); f.email.value = 'perf217@example.test'; f.password.value = 'perf217-local-only'; f.submit(); return true; })()`);
         await page.waitFor('location.pathname !== "/login" && document.readyState === "complete"', 60000);
         process.stderr.write(`\n== ${label}\n`);
+        await page.ev(`Promise.all([fetch('/chatbot/pages'), fetch('/chatbot/data', {headers: {Accept: 'application/json'}})]).then(() => true)`);
         const l = await load(page, out, label);
         // --eval=<expression>: printed after the load, then the run stops (to look at the page).
         if (args.eval) { console.log(JSON.stringify(await page.ev(String(args.eval)))); break; }

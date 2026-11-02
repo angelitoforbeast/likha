@@ -20,7 +20,7 @@ use Illuminate\Support\Facades\Auth;
  */
 class ChatbotAdGroupController extends Controller
 {
-    private const MAX_VALUES = 200; // kada Save ng Edit ng group: higit pa sa lahat ng field ng page
+    private const MAX_VALUES = 300; // kada Save ng Edit ng group: higit pa sa lahat ng field ng page (pati 99 Seq at 99 Seq Img)
 
     public function __construct(private AdGroups $groups, private PageSettings $settings, private ChatbotFields $fields)
     {
@@ -156,7 +156,8 @@ class ChatbotAdGroupController extends Controller
         $id = $this->id($request);
         if ($request->has('values')) {
             $in = $request->input('values');
-            if ($id === null || !is_array($in) || $in === [] || array_is_list($in) || count($in) > self::MAX_VALUES) return response()->json(['error' => 'Pick a group and the values to save.'], 422);
+            if ($id === null || !is_array($in) || $in === [] || array_is_list($in)) return response()->json(['error' => 'Pick a group and the values to save.'], 422);
+            if (count($in) > self::MAX_VALUES) return response()->json(['error' => 'At most ' . self::MAX_VALUES . ' values per save.'], 422);
             $values = [];
             foreach ($in as $key => $value) {
                 if (!is_scalar($value) && $value !== null) return response()->json(['error' => 'Values are text.'], 422);

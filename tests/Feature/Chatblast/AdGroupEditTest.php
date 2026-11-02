@@ -82,6 +82,7 @@ class AdGroupEditTest extends ChatblastTestCase
     {
         $this->actingAs($this->user());
         $id = $this->group('Serum', ['111', '222'], ['main_flow' => 'Old MF', 'seq_1' => 'Group Seq']);
+        $other = $this->group('Soap', ['333'], ['main_flow' => 'Other MF']);
 
         // A paste with a blank and "Paste blanks as empty" on: the blank empties the group's own value (back to the page value).
         $this->postJson('/chatbot/ad-groups/value', ['page' => 'Page P', 'id' => $id, 'values' => ['main_flow' => 'New MF', 'price' => '499', 'seq_1' => '']])
@@ -101,6 +102,8 @@ class AdGroupEditTest extends ChatblastTestCase
         // "Paste blanks as empty" off: the window leaves the blank out, so the value stays (the same as the page).
         $this->postJson('/chatbot/ad-groups/value', ['page' => 'Page P', 'id' => $id, 'values' => ['price' => '599']])->assertOk();
         $this->assertSame(['main_flow' => 'Old MF', 'price' => '599'], app(AdGroups::class)->groups('Page P')[$id]['values']);
+        $this->assertSame(['main_flow' => 'Other MF'], app(AdGroups::class)->groups('Page P')[$other]['values'], 'the other group is untouched');
+        $this->assertSame(['Page MF', '199', 'Page Seq'], array_map(fn ($k) => app(PageSettings::class)->get('Page P', 'chatbot', $k), ['main_flow', 'price', 'seq_1']), 'the page values are untouched');
     }
 
     public function test_S_217_2_2_a_bad_value_in_the_group_edit_saves_nothing(): void
@@ -111,6 +114,9 @@ class AdGroupEditTest extends ChatblastTestCase
         $this->postJson('/chatbot/ad-groups/value', ['page' => 'Page P', 'id' => $id, 'values' => ['main_flow' => 'New MF', 'picture' => 'not a link']])->assertStatus(422);
         $this->postJson('/chatbot/ad-groups/value', ['page' => 'Page P', 'id' => $id, 'values' => ['main_flow' => ['x']]])->assertStatus(422);
         $this->postJson('/chatbot/ad-groups/value', ['page' => 'Page P', 'id' => $id, 'values' => []])->assertStatus(422);
+        $this->postJson('/chatbot/ad-groups/value', ['page' => 'Page P', 'id' => $id, 'values' => ['New MF']])->assertStatus(422);
+        $many = array_fill_keys(array_map(fn ($i) => 'seq_' . $i, range(1, 301)), 'x');
+        $this->postJson('/chatbot/ad-groups/value', ['page' => 'Page P', 'id' => $id, 'values' => $many])->assertStatus(422)->assertJson(['error' => 'At most 300 values per save.']);
         $this->assertSame($before, PageSetting::count());
         $this->assertSame('Old MF', app(AdGroups::class)->groups('Page P')[$id]['values']['main_flow']);
     }

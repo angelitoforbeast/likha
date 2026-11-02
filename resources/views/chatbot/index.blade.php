@@ -764,6 +764,7 @@
         lazyFrame = 0;
         const t0 = performance.now();
         let built = 0;
+        const states = rowStates();
         for (const tr of [...lazyNear].sort((a, b) => !!b.cbInView - !!a.cbInView)) {
             if (!tr.cbInView && built && performance.now() - t0 > BUILD_MS) break;
             lazyNear.delete(tr);
@@ -772,7 +773,7 @@
             if (tr.hidden) continue;
             unwatch(tr);
             // Ang signature ngayon (hal. dumating ang Check habang kapalit pa ito), kaya hindi ito binubuo ulit sa susunod na render.
-            const st = rowStates()(entry.r);
+            const st = states(entry.r);
             Object.assign(entry, {sig: RowCache.signature(entry.r, st), base: RowCache.withoutCheck(entry.r, st), main: RowCache.signature(entry.r, {...st, ag: null}),
                 nodes: rowNodes(entry.r), lazy: false});
             rowState(entry);
@@ -787,7 +788,7 @@
     /** Ang buong row na napakalayo na: ibinabalik sa kapalit na kasing-taas nito (walang gumagalaw sa nakikita). */
     function fold(tr, h) {
         const entry = rowCache.get(tr.dataset.page), page = tr.dataset.page;
-        if (!entry || entry.lazy || entry.replacing || entry.nodes[0] !== tr || !tr.isConnected || page === openRow || AG.isOpen(page)
+        if (!entry || !entry.nodes || entry.lazy || entry.replacing || entry.nodes[0] !== tr || !tr.isConnected || page === openRow || AG.isOpen(page)
             || (editing && editing.r.page === page) || entry.nodes.some(n => n.contains(document.activeElement))) return;
         const ph = lazyRow(entry.r, h || lazyH);
         ph.hidden = tr.hidden;
@@ -2040,7 +2041,7 @@
         const box = c.kind === 'image'
             ? el('div', {class: 'flex items-center gap-2'}, [el('img', {alt: '', loading: 'lazy', referrerpolicy: 'no-referrer', class: 'invisible h-10 w-10 shrink-0 rounded border border-slate-200 object-cover'}), input])
             : input;
-        const history = el('button', {type: 'button', class: 'text-xs text-blue-700 underline hover:text-blue-900', text: 'History', 'aria-label': 'History of ' + c.label});
+        const history = el('button', {type: 'button', class: 'text-xs text-blue-700 underline hover:text-blue-900', text: 'History', 'aria-label': g ? 'History of ' + g.name + ' (every value)' : 'History of ' + c.label});
         history.addEventListener('click', () => g ? AG.history(r.page, g) : openHistory(r.page, c));
         const links = [history];
         if (commentTemplates[c.key]) {
