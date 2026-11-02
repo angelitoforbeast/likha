@@ -74,6 +74,8 @@ New tests: 19 sync, 16 returned, 29 read, 5 cache, 6 view, 1 perf (skipped by de
 
 After the review fixes (fe33bc88): failures ExampleTest, ItemTableFitScriptTest and Astra S-26.18, all in the base list; BigBroadcast S-167.1 passed. No new failure. `tests/Feature/Item`: 325 tests, 1 failure (ItemTableFitScriptTest, base), 1 skipped; the six 220 files: 88 tests, all passed, 1 skipped. New tests since the first result: 7 sync, 3 read, 1 cache, 1 perf guard (the view test gained assertions) = 12, so 88 in all.
 
+After the empty-days guard (item 12): `tests/Feature/Item` 326 tests, 1 failure (ItemTableFitScriptTest, base), 1 skipped; the six 220 files 89 tests, all passed, 1 skipped. The full suite was not re-run for this one-test change.
+
 ## Review fixes (after the first result)
 
 Live preview on production (read-only, by the reviewer): the returned query took 835 ms using
@@ -92,6 +94,7 @@ Live preview on production (read-only, by the reviewer): the returned query took
 | 9 | Failed days of a `--from` run were not retried | `nexus_stock_pending_days`: failed days outside the next normal window are kept and asked first by the next run until they succeed | `test_days_that_fail_in_a_from_run_are_asked_again_by_the_next_hourly_run` |
 | 10 | NBSP and other Unicode spaces | `normalizeName` and the bridge treat `[\s\p{Z}]` as space; `trimName` trims them from the stored name's ends | `test_nbsp_and_other_unicode_spaces_are_normalised_and_trimmed` |
 | 11 | The perf run had defaults (127.0.0.1:3306 root) | Every `PERF_DB_*` value is required; the run fails when host (loopback-equal), port and database equal any app connection | `test_the_perf_target_needs_every_value_and_is_never_the_apps_own_database` |
+| 12 (follow-up) | The 7-day pass could zero a week if Nexus answered empty by mistake | Zeroing of accepted empty days happens at the end of the run. If 2 or more stored days answer empty in one run, none is zeroed, `last_error` is `empty_for_stored_days` ("Nexus returned empty for N stored days — not applied"), synced_through and last_synced_at stay, and the days go to the pending list; one stored day keeps the rules of item 2 | `test_two_or_more_stored_days_answering_empty_in_one_run_is_a_nexus_fault_and_nothing_is_zeroed` (3 stored days in a `--days=7` pass: nothing zeroed, warning recorded; a later run with good answers clears it) |
 
 The whole-page render pins in `SuppliersGroupTest` were re-pinned twice more for the new view strings (the old table
 partial is still untouched).
@@ -120,8 +123,8 @@ partial is still untouched).
 - **From the review (added)**: S-220.1.14 (a skipped item keeps its row), S-220.1.15 (a stored day that stays empty is
   accepted), S-220.1.16 (daily 7-day pass), S-220.1.17 (pending days), S-220.1.18 (Unicode spaces), S-220.3.10 (exact
   first, ambiguous family), S-220.6.13 (token missing after a sync), S-220.7.6 (remaining per name's own as_of),
-  S-220.9.6 (one cold computation), S-220.9.7 (perf target guard); S-220.2.4 now also covers an answer whose every item
-  is invalid.
+  S-220.9.6 (one cold computation), S-220.9.7 (perf target guard), S-220.1.19 (2+ stored days empty in one run = Nexus
+  fault, nothing applied); S-220.2.4 now also covers an answer whose every item is invalid.
 
 ## Config keys
 
@@ -235,8 +238,8 @@ To repeat the measurement: start a throwaway MySQL, then
 2. **Free-text Nexus names**: a name that matches no Likha item adds nothing; the unmatched list is the only signal.
 3. **The zeroing rule** trusts a non-empty Nexus answer for a day as complete. If Nexus ever returns a partial list for
    a day, the missing items for that day go to 0 until the next good answer (each zeroing is logged). An empty answer
-   for a day before yesterday is accepted at once, so the daily 7-day pass would zero up to a week of rows if Nexus
-   answered empty by mistake for those days (each zeroing is logged; the next good answer restores them).
+   for one stored day before yesterday is accepted at once; two or more stored days empty in one run are treated as a
+   Nexus fault and nothing is applied, so a mistaken empty Nexus can zero at most one stored day per run.
 4. **Corrections older than 7 days** are only picked up with `nexus:sync-stock --from=…` by hand.
 5. **Nexus remaining** is the latest per name and may be missing for items Nexus did not list recently: a dash.
 6. **Phone width (S-220.6.9)** is checked on the markup only (wrapping CSS, scrolling list); no browser run was made.

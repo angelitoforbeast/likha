@@ -3985,6 +3985,7 @@ Tests (`tests/Feature/Item/`): `NexusStockSyncTest`, `ReturnedStockTest`, `Nexus
 | S-220.1.16 | happy | (added, review) A daily pass at 02:40 Manila (`--days=7`) asks the last 7 days again, for stock-in the warehouse backdates; the hourly run stays on yesterday and today | `test_the_daily_pass_asks_the_last_7_days_and_the_hourly_stays_on_yesterday_and_today` | 2026-11-03 passed |
 | S-220.1.17 | edge | (added, review) Days that fail in a `--from` or `--days` run are kept in `nexus_stock_pending_days` and asked again by the next run until they succeed | `test_days_that_fail_in_a_from_run_are_asked_again_by_the_next_hourly_run` | 2026-11-03 passed |
 | S-220.1.18 | edge | (added, review) NBSP and other Unicode spaces (\p{Z}) count as spaces in the name key and are trimmed from the ends of the stored name | `test_nbsp_and_other_unicode_spaces_are_normalised_and_trimmed` | 2026-11-03 passed |
+| S-220.1.19 | negative | (added, review) Two or more stored days answering empty in one run is a Nexus fault: none is zeroed, the warning "Nexus returned empty for N stored days — not applied" is recorded, synced_through and last_synced_at stay, and the days are asked again; a later run with good answers clears the warning. A single stored day keeps the S-220.1.15 rules | `test_two_or_more_stored_days_answering_empty_in_one_run_is_a_nexus_fault_and_nothing_is_zeroed` | 2026-11-03 passed |
 
 ### S-220.2 A failed or empty sync never zeroes stock; "last synced" is visible (P1)
 | Case | Type | Given / When / Then | Test | Last run |
