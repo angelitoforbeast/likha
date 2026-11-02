@@ -24,6 +24,13 @@
               x-text="(stock.ready && stockFor(G.item_name) && stockFor(G.item_name).stock_needs_count) ? 'Count the stock first'
                       : ((stock.ready && stockFor(G.item_name)) ? num(stockFor(G.item_name).stock) : '—') + ' / ' + (stockFor(G.item_name) ? num(stockFor(G.item_name).incoming) : '—')"></span>
       </div>
+      {{-- Nexus lang: saan galing ang stock, at ang hawak ng Nexus ngayon (cross-check, display lang). --}}
+      <template x-if="!stockPending() && stockNexus() && stockFor(G.item_name)">
+        <div class="il-sub">
+          <div x-show="stockBreakdown(G.item_name) !== ''" x-text="stockBreakdown(G.item_name)"></div>
+          <div :title="nexusCrossTip()" x-text="nexusCrossText(G.item_name)"></div>
+        </div>
+      </template>
     </div>
   </template>
 

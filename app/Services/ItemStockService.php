@@ -22,7 +22,7 @@ use Illuminate\Support\Facades\Schema;
  *
  *   stock_raw = natanggap mula START − umalis mula START;  stock = max(0, stock_raw)
  *     natanggap = Nexus stock-in (nexus_stock_ins) + returned (J&T o Nexus RTS) kapag naka-configure ang Nexus;
- *     kung hindi (walang services.nexus.token), ang dating PO received_qty. Spec: docs/specs/220-nexus-stock.md.
+ *     kung hindi (walang services.nexus.token), ang dating PO received_qty.
  *   order_qty = max(0, ceil(hold + upd × (lead + palugit) − incoming − stock))
  *   doi       = round((stock + incoming − hold) × days / units, 1)  — ito ang ginagamit sa kulay at order_by
  *
