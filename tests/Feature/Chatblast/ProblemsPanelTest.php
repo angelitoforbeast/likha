@@ -36,6 +36,8 @@ class ProblemsPanelTest extends ChatblastTestCase
             $this->page($name, $id);
             DB::table('page_settings')->insert(['page_name' => $name, 'provider' => 'chatbot', 'key' => 'flow_id', 'value' => '1', 'active' => true,
                 'created_at' => '2026-10-01 00:00:00', 'updated_at' => '2026-10-01 00:00:00']);
+            // May order sa huling 14 araw: ang X ng setup ng page na pinapadalhan ay urgent pa rin (spec 221).
+            DB::table('macro_output')->insert(['PAGE' => $name, 'ts_date' => '2026-10-27']);
         }
     }
 

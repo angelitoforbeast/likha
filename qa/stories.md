@@ -4092,3 +4092,18 @@ Tests (`tests/Feature/Item/`): `NexusStockSyncTest`, `ReturnedStockTest`, `Nexus
 | S-220.9.5 | negative | A failed or partial sync does not refresh the cache | `test_S_220_9_5_a_failed_or_partial_sync_does_not_refresh_the_cache` | 2026-11-03 passed |
 | S-220.9.6 | edge | (added, review) Concurrent cold requests compute the stock inputs once: the others wait on a cache lock (up to `services.nexus.cold_wait`, 15 s) and take the stored value; past the wait they compute anyway; the lock is freed after | `test_S_220_9_4_a_cold_request_waits_for_another_computing_request_and_the_lock_is_freed_after` | 2026-11-03 passed |
 | S-220.9.7 | negative | (added, review) The perf run needs every `PERF_DB_*` value (no default) and refuses the app's own database connection | `test_the_perf_target_needs_every_value_and_is_never_the_apps_own_database` | 2026-11-03 passed |
+
+## Slice 221 – Quiet and obsolete pages
+
+As the owner, I want the problems banner to call a setup warning urgent only for a page that sells, so the urgent count means something.
+
+Slice 221 (narrowed by Amendment 221-1 to S-221.1; S-221.2 and S-221.3 removed). Threat model: page names come from page_settings and macro_output (trusted database); no new input, route, table, column, migration or config. Risk tier: medium (what staff are warned about). Tests: `tests/Feature/Chatblast/QuietSetupTest.php`.
+
+### S-221.1 The setup warning is urgent only for a page that sells (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-221.1.1 | happy | Given a page with a setup X that is "sending" and has at least one order (`macro_output`, by its order date) in the last 14 days, then its setup line is orange (urgent) as today | `test_S_221_1_1_a_sending_page_with_an_order_in_the_last_14_days_is_orange` (order 13 days ago, the oldest day of the window) | 2026-11-03 passed |
+| S-221.1.2 | happy | Given the same page with no order in the last 14 days, then its setup line is white and reads "Quiet (no order in 14 days), setup incomplete: <reason>", and it does not count as urgent | `test_S_221_1_2_a_sending_page_with_no_order_in_14_days_is_white_and_not_urgent` (order 14 days ago only) | 2026-11-03 passed |
+| S-221.1.3 | happy | Given a quiet page that gets an order, then within the banner's cache time (≤ 60 s) its setup line is orange again | `test_S_221_1_3_a_quiet_page_that_gets_an_order_is_orange_again_within_the_cache_time` | 2026-11-03 passed |
+| S-221.1.4 | edge | Given page names that differ only in case or spacing between the settings and the orders, then they are matched the way `PageSettings::pageKey` matches pages | `test_S_221_1_4_page_names_that_differ_in_case_or_spacing_are_matched_like_page_key` | 2026-11-03 passed |
+| S-221.1.5 | edge | Given 80 pages, then the order counts come from one grouped query per banner build (no per-page query), within the existing cache | `test_S_221_1_5_eighty_pages_take_one_grouped_order_query_per_banner_build_within_the_cache` | 2026-11-03 passed |
