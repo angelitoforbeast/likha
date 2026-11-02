@@ -42,7 +42,11 @@ class QueuedJobPayloadTest extends TestCase
 
     private function payload(string $class, array $args): string
     {
-        Carbon::setTestNow('2026-11-03 01:00:00'); // HandleComment keeps a time
+        // Pinned here, not read from phpunit.xml or .env.testing: the recorded bytes carry these values (the connection and
+        // queue the constructors set, and HandleComment's until timestamp).
+        config(['queue.chatbot_connection' => 'sync', 'order_encode.forbeast.queue' => 'default', 'app.timezone' => 'Asia/Manila']);
+        date_default_timezone_set('Asia/Manila');
+        Carbon::setTestNow(Carbon::parse('2026-11-03 01:00:00', 'Asia/Manila')); // HandleComment keeps a time
 
         return serialize(new $class(...$args));
     }
