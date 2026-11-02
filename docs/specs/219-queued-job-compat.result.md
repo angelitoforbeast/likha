@@ -100,6 +100,12 @@ Only `HandleComment` changed in app code (its `$until` default), so no full suit
 QueuedJobPayloadTest 2, the 6 Sequence classes (ReRun with its 1 MySQL-only skip), the 14 listed suites (QueueRedisHorizon
 with its 1 skip) and CommentRepliesTest 32.
 
+### After merging live main 81d106ac (spec 218, comment answer once a day)
+
+Merge `cdf7c02b` (`--no-ff`); the only conflict was `qa/stories.md`, kept both (Slice 218, then Slice 219). Their code
+change is `app/Services/Chatbot/CommentReplies.php` only, so no full suite. Green on the merge: the 2 spec 219 classes,
+the 6 Sequence classes (ReRun 1 skip), the 14 listed suites (QueueRedisHorizon 1 skip) and CommentRepliesTest 50.
+
 ## Deploy notes
 
 - No migration. No supervisor or Horizon change. No config or env change.
