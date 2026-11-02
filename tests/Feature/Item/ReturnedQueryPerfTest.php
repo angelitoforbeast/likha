@@ -11,8 +11,9 @@ use Tests\TestCase;
 
 /**
  * Sukat ng cold /item stock sa MySQL na may dami ng production. HINDI bahagi ng karaniwang suite: skipped maliban kung
- * PERF_220=1 at may PERF_DB_HOST / PERF_DB_PORT / PERF_DB_USER / PERF_DB_PASSWORD / PERF_DB_DATABASE ng isang
- * itatapong MySQL (hal. Docker). Binubura at ginagawa ulit nito ang mga table sa database na iyon.
+ * PERF_220=1 at nakatakda ang LAHAT ng PERF_DB_HOST / PERF_DB_PORT / PERF_DB_USER / PERF_DB_PASSWORD / PERF_DB_DATABASE ng isang
+ * itatapong MySQL (hal. Docker); walang default, at tinatanggihan kapag ito ang database ng app. Binubura at ginagawa
+ * ulit nito ang mga table sa database na iyon.
  *
  * Dami (Jan–Nov 2026): ~3,000 J&T waybill kada araw (~920k from_jnts rows, 3% may dobleng row), ~25% Returned na
  * may signingtime, ~0.5% Returned na walang signingtime; macro_output = isang row kada waybill + 8% pangalawang row
@@ -20,20 +21,63 @@ use Tests\TestCase;
  */
 class ReturnedQueryPerfTest extends TestCase
 {
-    protected function setUp(): void
-    {
-        parent::setUp();
-        if (getenv('PERF_220') !== '1') $this->markTestSkipped('perf only: set PERF_220=1 and PERF_DB_*');
+    private const ENV = ['PERF_DB_HOST', 'PERF_DB_PORT', 'PERF_DB_USER', 'PERF_DB_PASSWORD', 'PERF_DB_DATABASE'];
 
-        config(['database.connections.perf' => [
-            'driver' => 'mysql', 'host' => getenv('PERF_DB_HOST') ?: '127.0.0.1', 'port' => getenv('PERF_DB_PORT') ?: '3306',
-            'database' => getenv('PERF_DB_DATABASE') ?: 'perf', 'username' => getenv('PERF_DB_USER') ?: 'root',
-            'password' => (string) getenv('PERF_DB_PASSWORD'), 'charset' => 'utf8mb4', 'collation' => 'utf8mb4_unicode_ci',
-            'prefix' => '', 'strict' => true, 'engine' => null,
+    /**
+     * Ang target ng perf run, o ang dahilan kung bakit tinatanggihan: kulang na PERF_DB_* (walang default), o
+     * pareho ang host, port at database ng isang connection ng app mismo (hindi ito tatakbo sa totoong database).
+     *
+     * @param array<string,string|false> $env
+     * @param array<string,array> $connections config('database.connections')
+     * @return array<string,string>|string
+     */
+    public static function perfTarget(array $env, array $connections): array|string
+    {
+        foreach (self::ENV as $name) {
+            if (!is_string($env[$name] ?? false) || trim((string) $env[$name]) === '') return "$name is not set";
+        }
+        $host = fn ($h) => in_array(strtolower(trim((string) $h)), ['localhost', '127.0.0.1', '::1', '[::1]'], true) ? 'loopback' : strtolower(trim((string) $h));
+        foreach ($connections as $name => $c) {
+            if (!in_array($c['driver'] ?? '', ['mysql', 'mariadb', 'pgsql', 'sqlsrv'], true)) continue;
+            if ($host($c['host'] ?? '') === $host($env['PERF_DB_HOST'])
+                && (string) ($c['port'] ?? '') === trim((string) $env['PERF_DB_PORT'])
+                && (string) ($c['database'] ?? '') === trim((string) $env['PERF_DB_DATABASE'])) {
+                return "the target is the app's own database connection '$name'";
+            }
+        }
+
+        return ['host' => trim((string) $env['PERF_DB_HOST']), 'port' => trim((string) $env['PERF_DB_PORT']),
+                'username' => (string) $env['PERF_DB_USER'], 'password' => (string) $env['PERF_DB_PASSWORD'],
+                'database' => trim((string) $env['PERF_DB_DATABASE'])];
+    }
+
+    private function usePerfDatabase(): void
+    {
+        if (getenv('PERF_220') !== '1') $this->markTestSkipped('perf only: set PERF_220=1 and every PERF_DB_*');
+        $target = self::perfTarget(array_combine(self::ENV, array_map('getenv', self::ENV)), (array) config('database.connections'));
+        if (is_string($target)) $this->fail("Refusing the perf run: $target.");
+
+        config(['database.connections.perf' => $target + [
+            'driver' => 'mysql', 'charset' => 'utf8mb4', 'collation' => 'utf8mb4_unicode_ci', 'prefix' => '', 'strict' => true, 'engine' => null,
         ]]);
         DB::setDefaultConnection('perf');
         config(['services.nexus.token' => 'perf-not-a-token']);
         Carbon::setTestNow(Carbon::parse('2026-11-03 10:10:00', 'Asia/Manila'));
+    }
+
+    public function test_the_perf_target_needs_every_value_and_is_never_the_apps_own_database(): void
+    {
+        $env  = ['PERF_DB_HOST' => '127.0.0.1', 'PERF_DB_PORT' => '33220', 'PERF_DB_USER' => 'root', 'PERF_DB_PASSWORD' => 'x', 'PERF_DB_DATABASE' => 'perf'];
+        $conn = ['sqlite' => ['driver' => 'sqlite', 'database' => ':memory:'],
+                 'mysql'  => ['driver' => 'mysql', 'host' => 'localhost', 'port' => '3306', 'database' => 'likha']];
+
+        $this->assertIsArray(self::perfTarget($env, $conn));
+        foreach (self::ENV as $name) {
+            $this->assertSame("$name is not set", self::perfTarget([$name => false] + $env, $conn), $name);
+            $this->assertSame("$name is not set", self::perfTarget([$name => ' '] + $env, $conn), $name);
+        }
+        $same = ['PERF_DB_PORT' => '3306', 'PERF_DB_DATABASE' => 'likha'] + $env;   // 127.0.0.1 = localhost
+        $this->assertSame("the target is the app's own database connection 'mysql'", self::perfTarget($same, $conn));
     }
 
     protected function tearDown(): void
@@ -126,6 +170,7 @@ class ReturnedQueryPerfTest extends TestCase
 
     public function test_cold_time_of_the_returned_query_and_the_stock_inputs_on_production_volume(): void
     {
+        $this->usePerfDatabase();
         $this->seedVolume();
         $until = '2026-11-03 10:10:00';
         $out = [
