@@ -69,7 +69,24 @@ payloads with the recorded bytes: identical for all 29.
 The guard's docblock records the known gap: a new **required** constructor parameter on a job that is already queued is not
 covered (there is no default to restore); such a change needs a default or a drained queue before the deploy.
 
-TESTCOUNTS
+### Counts (sqlite)
+
+| | Tests | Assertions | Failures | Skipped |
+|---|---|---|---|---|
+| f5d6d450 (live main) | 4,169 | 45,427 | 4 | 5 |
+| This branch | 4,175 | 45,655 | 4 | 5 |
+
+- **No new failure.** The 4 are the known ones: BigBroadcastTest S-167.1, ExampleTest, ItemTableFitScriptTest,
+  AstraAddressRulesTest S-26.18.
+- **The 6 new tests pass:** QueuedJobCompatTest 4, QueuedJobPayloadTest 2.
+- **Green in the same run:**
+  - the 6 Sequence classes (ReRun with 1 MySQL-only skip);
+  - the 14 listed suites;
+  - ForbeastHoldTest 17;
+  - the classes behind the 15 jobs: BotcakePsidBackfill, BotcakePsidImport, BotcakePsidSchedule, BotcakeSyncSchedule,
+    BotcakeWindowRead, ChatblastSetupCheck, ChatbotContentCheck, CommentReplies, AdsDataRefusal,
+    AdsManagerUploadCharacterization, ImportStart, NightImportCommand, ForbeastOrders, BotcakePanel, SyncAll,
+    PaymentDateOrder.
 
 ## Deploy notes
 
