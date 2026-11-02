@@ -18,8 +18,8 @@ accepted with three answers and one change before the build:
 | `database/migrations/2026_11_16_100000_create_nexus_stock_ins_table.php` | New table `nexus_stock_ins`: stock_date, name_key (sha1 of the NFC/trim/one-space/lowercase name), item_name (raw, ≤ 255), stock_in_lots, stock_in_pieces, remaining, as_of, timestamps; unique (stock_date, name_key). |
 | `database/migrations/2026_11_16_100100_seed_stock_returned_source_setting.php` | Seeds `app_settings.stock_returned_source = jnt` only when the row is missing; down removes it only if it is still `jnt`. |
 | `config/services.php`, `.env.example` | `services.nexus.url` (default the Nexus server), `.token`, `.timeout`, `.cold_wait` (15 s, not in env); `NEXUS_API_URL`, `NEXUS_API_TOKEN`, `NEXUS_API_TIMEOUT` with empty values. |
-| `app/Services/Nexus/StockInSync.php` | The sync: guards (no token, no table, no start, `--from` invalid, lock held), days from `nexus_stock_synced_through` (or the start) through today, one GET per day, validation, upsert per day in a transaction, zeroing of stored items missing from a valid non-empty answer, settings rows, logs without the token. |
-| `app/Console/Commands/NexusStockSync.php` | `nexus:sync-stock {--from=} {--days=}`; exit 1 on a failed/partial run, 0 when not configured or already running. |
+| `app/Services/Nexus/StockInSync.php` | The sync: guards (no token, no table, no start, `--from` invalid, lock held), days from `nexus_stock_synced_through` (or the start) through today, one GET per day, validation, upsert per day in a transaction, zeroing of stored items missing from a valid non-empty answer, the per-day `stock_in` list of the real Nexus answer, empty stored days kept and listed, `--accept-empty`, 429 stops the run, the daily-pass status, settings rows, logs without the token. |
+| `app/Console/Commands/NexusStockSync.php` | `nexus:sync-stock {--from=} {--days=}` {--accept-empty=}; exit 1 on a failed/partial run, 0 when not configured or already running. |
 | `routes/console.php` | `nexus:sync-stock` hourly at :10 Manila, `withoutOverlapping(30)`; `nexus:sync-stock --days=7` daily at 02:40 Manila, `withoutOverlapping(60)`. |
 | `app/Services/Stock/ReturnedSource.php`, `ReturnedResult.php` | The returned-source interface and its result (available, pieces, likhaKeys, flags, note). |
 | `app/Services/Stock/JntReturnedSource.php` | J&T Returned by signingtime: one grouped query (below); latest from_jnts row per waybill; same shipped-after-start rule and cancelled filter as shipped; per macro_output row × "N x" qty; null and future signingtime counted in flags and logged. |
@@ -62,6 +62,7 @@ Their Nexus-mode counterparts are new tests in `NexusStockReadTest`:
 | Base 86db0060 | 4,194 | 4 | 4,190 | 0 |
 | Head (pre-merge, 828b0b10) | 4,270 | 2 | 4,267 | 1 (`ReturnedQueryPerfTest`, opt-in) |
 | Head after the review fixes (fe33bc88, includes the merge of c4543c88) | 4,293 | 3 | 4,289 | 1 (`ReturnedQueryPerfTest` cold-time test, opt-in) |
+| Head after review 2 (c51c0571) | 4,298 | 3 | 4,294 | 1 (perf, opt-in) |
 
 Base failures: BigBroadcast S-167.1, ExampleTest, ItemTableFitScriptTest (catalog column widths), Astra S-26.18.
 Head failures: ExampleTest and ItemTableFitScriptTest, both in the base list. BigBroadcast S-167.1 and Astra S-26.18 passed on this run (neither touches /item; both are slow, load-sensitive tests). No new failure. Head = base + 76 new tests; 206 passed plainly and 4,062 with the printer warning (the skipped perf test is among the latter in the artisan printer).
@@ -76,6 +77,8 @@ After the review fixes (fe33bc88): failures ExampleTest, ItemTableFitScriptTest 
 
 After the empty-days guard (item 12): `tests/Feature/Item` 326 tests, 1 failure (ItemTableFitScriptTest, base), 1 skipped; the six 220 files 89 tests, all passed, 1 skipped. The full suite was not re-run for this one-test change.
 
+After review 2 (c51c0571): full suite failures ExampleTest, ItemTableFitScriptTest and Astra S-26.18, all in the base list; no new failure. `tests/Feature/Item` 330 tests, 1 failure (ItemTableFitScriptTest, base), 1 skipped; the six 220 files 93 tests, all passed, 1 skipped.
+
 ## Review fixes (after the first result)
 
 Live preview on production (read-only, by the reviewer): the returned query took 835 ms using
@@ -84,7 +87,7 @@ Live preview on production (read-only, by the reviewer): the returned query took
 | # | Finding | Fix | Test |
 |---|---|---|---|
 | 1 (major) | A skipped item (bad pieces) was missing from the answer and its stored row was zeroed | `parseItems` returns the name_keys of skipped items with a valid name; `store()` never zeroes them | `test_a_skipped_item_keeps_its_stored_row_and_the_skip_is_logged` ("48.0", 48.5, −3, "abc": the 48 stays, skip logged, nothing zeroed) |
-| 2 (major) | A day that became empty in Nexus failed forever | Accepted when empty again ≥ 1 h after the first empty answer (`nexus_stock_empty_seen`), or at once when the day is before yesterday: the day's rows go to 0, each logged (day, name_key, old pieces), the run is a success; the first empty answer is a warning | `test_a_stored_day_that_answers_empty_twice_an_hour_apart_is_accepted_and_zeroed` (10:10 warn, 11:09:59 warn, 11:10 accept), `test_a_stored_day_before_yesterday_that_answers_empty_is_accepted_at_once` |
+| 2 (major) | A day that became empty in Nexus failed forever | Superseded by review 2 below (the timed acceptance was removed) | — |
 | 3 (major) | Family mappings collapsed variants onto one key | `ItemNameBridge`: exact base key first, then a loose match (no spaces/dashes/underscores), then the family; each only when it fits one Likha key, else unmatched and marked "ambiguous" (also shown on the page) | `test_S_220_3_2_two_variants_mapped_to_one_family_keep_their_own_stock_and_a_family_name_is_ambiguous`, view test |
 | 4 | A non-empty answer with only invalid items counted as success | Treated as malformed: warning, nothing changes, synced-through and last-synced don't advance | `test_S_220_2_4_a_non_empty_answer_with_only_invalid_items_is_malformed_and_changes_nothing` |
 | 5 | A missing token on a site that synced before was silent | `stock_meta.nexus.previously_synced` (a Nexus row or `nexus_stock_last_synced_at`); the page shows a red "Nexus token missing — stock shows the old PO count"; a site that never synced keeps the quiet note | `test_a_missing_token_after_an_earlier_sync_is_flagged_and_a_site_that_never_synced_stays_quiet`, `test_S_220_6_12_…`, view test |
@@ -94,22 +97,52 @@ Live preview on production (read-only, by the reviewer): the returned query took
 | 9 | Failed days of a `--from` run were not retried | `nexus_stock_pending_days`: failed days outside the next normal window are kept and asked first by the next run until they succeed | `test_days_that_fail_in_a_from_run_are_asked_again_by_the_next_hourly_run` |
 | 10 | NBSP and other Unicode spaces | `normalizeName` and the bridge treat `[\s\p{Z}]` as space; `trimName` trims them from the stored name's ends | `test_nbsp_and_other_unicode_spaces_are_normalised_and_trimmed` |
 | 11 | The perf run had defaults (127.0.0.1:3306 root) | Every `PERF_DB_*` value is required; the run fails when host (loopback-equal), port and database equal any app connection | `test_the_perf_target_needs_every_value_and_is_never_the_apps_own_database` |
-| 12 (follow-up) | The 7-day pass could zero a week if Nexus answered empty by mistake | Zeroing of accepted empty days happens at the end of the run. If 2 or more stored days answer empty in one run, none is zeroed, `last_error` is `empty_for_stored_days` ("Nexus returned empty for N stored days — not applied"), synced_through and last_synced_at stay, and the days go to the pending list; one stored day keeps the rules of item 2 | `test_two_or_more_stored_days_answering_empty_in_one_run_is_a_nexus_fault_and_nothing_is_zeroed` (3 stored days in a `--days=7` pass: nothing zeroed, warning recorded; a later run with good answers clears it) |
+| 12 (follow-up) | The 7-day pass could zero a week if Nexus answered empty by mistake | Superseded by review 2 below (the mass-empty guard was removed) | — |
 
-The whole-page render pins in `SuppliersGroupTest` were re-pinned twice more for the new view strings (the old table
+The whole-page render pins in `SuppliersGroupTest` were re-pinned for each set of new view strings (the old table
 partial is still untouched).
+
+### Review 2: empty days, the Nexus answer shape
+
+**What the Nexus code says** (`app/Services/ItemStock.php` at e356be1, `ItemStockController`, `AsksForDays`):
+
+- A `?date=D` answer lists every item that **came in on D or is on the shelf now** (stock-in rows of the day, plus
+  `Barcode::inStock()`), under its Product Master name. An item with no arrival on D and nothing on the shelf is not
+  listed. So an item missing from D's answer had no arrival on D: storing 0 for D is correct per-day data, not a wipe,
+  and the item's other days are untouched. Rule 3 stays as it was; the test now shows it (a shelf-only item stored as 0,
+  the missing item 0 for that day, its other day kept).
+- **`stock_in` is a list** `[{date, lots, pieces}]` per day, not a lot count, and `stock_in_pieces` is its sum. The
+  sync read `stock_in` as a number, so every real item would have been skipped and every day reported malformed. Fixed:
+  lots are summed over the entries for the asked day (an entry for another date or bad lots skips the item); the old
+  single-number form is still read. Note for the open question on 1.2: the range call does carry per-day entries in
+  `stock_in`, so a backfill by ranges is possible later; the sync keeps one `?date=` per day as decided.
+- An empty `items` therefore means nothing came in AND nothing is on the shelf at all: in practice an outage, never a
+  real "the only entry was deleted" day. That supports never auto-zeroing.
+- Nexus allows **60 calls an hour per token** (429 after). The first backfill (33) plus the hourly 2 fits; a long
+  `--from` would not. A 429 now stops the run (kind `rate_limited`) and the rest is asked next run.
+- `to` after Nexus's today is a 422; the sync never asks past today (Manila).
+
+| # | Finding | Fix | Test |
+|---|---|---|---|
+| R2-1 (major) | An outage just after midnight answering 200 with no items zeroed yesterday silently | An empty answer for a day with stored rows never zeroes them: the rows stay, the day goes on `nexus_stock_unconfirmed_empty`, /item says "Nexus returned nothing for <days>; old numbers kept". Zeroing only by `nexus:sync-stock --accept-empty=YYYY-MM-DD`: it asks that day again and zeroes (each row logged) only if still empty, then drops the day from the list; items again → stored, dropped; Nexus failing → no change. The 1-hour/2-answer acceptance, the before-yesterday acceptance and the mass-empty guard are removed (`nexus_stock_empty_seen` is gone) | `test_an_empty_answer_for_a_stored_day_keeps_the_rows_is_listed_and_does_not_fail_the_run` (00:10 on 11-04, yesterday 48 kept), `test_accept_empty_zeroes_a_day_only_when_nexus_still_answers_empty`, read and view tests |
+| R2-2 (major) | Two really emptied days wedged the sync | An empty stored day is not a failure: synced_through and last_synced_at advance, the day is not put on the pending list, the stale warning depends only on last_synced_at. The daily 7-day pass re-asks it; items again → stored and dropped from the list | `test_an_empty_answer_for_a_stored_day_keeps_the_rows_is_listed_and_does_not_fail_the_run`, `test_the_daily_pass_stores_a_day_that_has_items_again_and_drops_it_from_the_list` |
+| R2-4 | A daily pass that could not get the lock was silent | `nexus_stock_daily_pass` = `{at, status}` (`skipped_locked`, logged; `ok`/`failed` after a run); /item says "Nexus daily 7-day pass skipped (locked) at …" until the next daily pass runs | `test_a_daily_pass_that_cannot_get_the_lock_is_recorded_not_silent`, read and view tests |
+| R2-5 | The Nexus answer shape (above) | Per-day `stock_in` list read; 429 stops the run | `test_the_real_nexus_shape_counts_the_lots_of_the_asked_day_and_the_old_number_shape_still_works`, `test_a_429_stops_the_run_and_the_rest_is_asked_next_run`, `test_an_item_missing_from_a_later_valid_answer_for_a_stored_day_is_set_to_0_and_logged` |
+
+Kept: an item missing from a valid non-empty answer is zeroed (logged), skipped items are protected, all-invalid
+answers are malformed. The test fixtures now send the real Nexus shape.
 
 ## Story changes
 
 - **S-220.1.2**: one `?date=` request per day from the start (33 as of 2026-11-03), each window one day; the stored
-  per-day pieces sum to what Nexus returned per day. The range call sums over the days asked and cannot fill a per-day
-  table (confirmed in the Nexus code).
+  per-day pieces sum to what Nexus returned per day. (The Nexus code shows the range call's `stock_in` does carry
+  per-day entries, so a range backfill is possible later; one request per day was kept as decided.)
 - **S-220.1.12 (added)**: a stored item missing from a later valid, non-empty answer for the same day is set to 0 (not
   deleted) and logged with day, name_key and old pieces.
 - **S-220.1.13 (added)**: `--from=Y-m-d` re-asks older days by hand, never before the start.
-- **S-220.2.4**: an empty answer for a day with no stored rows is a quiet success (a day with no arrivals); it is a
-  warning, with no change and no advance of last-synced, only for a day that has stored rows, malformed JSON, or an
-  answer for another date.
+- **S-220.2.4**: an empty answer for a day with no stored rows is a quiet success; for a day with stored rows see
+  S-220.1.15 (kept, listed, not a failure). Malformed JSON, an answer for another date, or an answer whose every item
+  is invalid: a warning, no change, no advance.
 - **S-220.4.7**: the status of a waybill is its from_jnts row with the highest id (the row the J&T track sync updates).
 - **S-220.6.2**: "the last day" is today in Manila; stock does not depend on the page's end date (as before).
 - **S-220.6.3 / 2.7 wording**: the new view is English (pinned by `ItemPageTest`): "Count the stock first" for
@@ -120,11 +153,15 @@ partial is still untouched).
 - **S-220.9.3**: TTL 15 minutes.
 - **Done-when, examples B and D**: they needed no change (no PO received in either); with S-220.6.12 every base stock
   test stays as it is and pins the PO mode.
-- **From the review (added)**: S-220.1.14 (a skipped item keeps its row), S-220.1.15 (a stored day that stays empty is
-  accepted), S-220.1.16 (daily 7-day pass), S-220.1.17 (pending days), S-220.1.18 (Unicode spaces), S-220.3.10 (exact
-  first, ambiguous family), S-220.6.13 (token missing after a sync), S-220.7.6 (remaining per name's own as_of),
-  S-220.9.6 (one cold computation), S-220.9.7 (perf target guard), S-220.1.19 (2+ stored days empty in one run = Nexus
-  fault, nothing applied); S-220.2.4 now also covers an answer whose every item is invalid.
+- **From the review (added)**: S-220.1.14 (a skipped item keeps its row), S-220.1.16 (daily 7-day pass), S-220.1.17
+  (pending days), S-220.1.18 (Unicode spaces), S-220.3.10 (exact first, ambiguous family), S-220.6.13 (token missing
+  after a sync), S-220.7.6 (remaining per name's own as_of), S-220.9.6 (one cold computation), S-220.9.7 (perf target
+  guard); S-220.2.4 now also covers an answer whose every item is invalid.
+- **From review 2**: the timed acceptance (old S-220.1.15) and the mass-empty guard (old S-220.1.19) are removed.
+  New S-220.1.15 (an empty stored day is kept, listed and not a failure), S-220.1.19 (`--accept-empty`), S-220.1.20
+  (the daily pass drops a day that has items again), S-220.1.21 (a skipped daily pass is recorded), S-220.1.22 (the
+  real Nexus `stock_in` shape), S-220.1.23 (429 stops the run). S-220.1.12 now states the per-day meaning of a missing
+  item.
 
 ## Config keys
 
@@ -138,7 +175,8 @@ partial is still untouched).
 | `nexus_stock_synced_through` | app_settings | — | Last date through which every day succeeded. |
 | `nexus_stock_last_error` | app_settings | — | JSON `{at, kind, message, day}`; empty after a success. |
 | `nexus_stock_pending_days` | app_settings | — | JSON list of days that failed outside the normal window (`--from`, `--days`); asked again by the next run. |
-| `nexus_stock_empty_seen` | app_settings | — | JSON {day: first time a stored day answered empty}; the second empty answer an hour later is accepted. |
+| `nexus_stock_unconfirmed_empty` | app_settings | — | JSON list of days Nexus answered empty although rows are stored; the rows are kept and /item warns. Cleared per day by `--accept-empty` or by a later answer with items. |
+| `nexus_stock_daily_pass` | app_settings | — | JSON `{at, status}` of the last daily 7-day pass (`ok`, `failed`, `skipped_locked`); /item warns on `skipped_locked`. |
 | `services.nexus.cold_wait` | config | 15 (s) | How long a cold /item/stock waits for another request computing the same stock inputs. |
 | `item_stock_start` | app_settings | existing | Unchanged (2026-10-02 on Likha). |
 
@@ -169,6 +207,7 @@ Incepxion: no token, so `nexus:sync-stock` prints "Nexus not configured" and /it
 2. Open "N Nexus names not matched" above the To order table. Each name there adds nothing to any item: rename it in
    Nexus or add an item mapping.
 3. Before ever setting `stock_returned_source = nexus`: run `php artisan stock:returned-compare` and compare the totals.
+4. If /item says "Nexus returned nothing for <days>; old numbers kept": check those days in Nexus. If the stock-in really is gone, run `php artisan nexus:sync-stock --accept-empty=YYYY-MM-DD` for each day; otherwise wait, the daily pass picks them up when Nexus answers again.
 
 ## 9.2 measurement: the returned query on production-like volume
 
@@ -236,14 +275,18 @@ To repeat the measurement: start a throwaway MySQL, then
    `idx_from_jnts_signing_status` (read-only preview), less than the synthetic 1.5 s; concurrent cold requests now
    compute once.
 2. **Free-text Nexus names**: a name that matches no Likha item adds nothing; the unmatched list is the only signal.
-3. **The zeroing rule** trusts a non-empty Nexus answer for a day as complete. If Nexus ever returns a partial list for
-   a day, the missing items for that day go to 0 until the next good answer (each zeroing is logged). An empty answer
-   for one stored day before yesterday is accepted at once; two or more stored days empty in one run are treated as a
-   Nexus fault and nothing is applied, so a mistaken empty Nexus can zero at most one stored day per run.
+3. **The zeroing rule** trusts a non-empty Nexus answer for a day as complete (Nexus lists every item that came in that
+   day or is on the shelf). If Nexus ever returns a partial non-empty list for a day, the missing items for that day go
+   to 0 until the next good answer (each zeroing is logged). An empty answer never zeroes anything; a day that really
+   lost all its stock-in needs `nexus:sync-stock --accept-empty=YYYY-MM-DD` by hand, and until then /item warns and
+   keeps the old numbers.
 4. **Corrections older than 7 days** are only picked up with `nexus:sync-stock --from=…` by hand.
 5. **Nexus remaining** is the latest per name and may be missing for items Nexus did not list recently: a dash.
 6. **Phone width (S-220.6.9)** is checked on the markup only (wrapping CSS, scrolling list); no browser run was made.
 7. **`item_type_mappings` rows whose item_name carries an "N x" prefix** never match a base key on either side (as in
    the bridge the spec describes). Likha has 0 mapping rows today.
-8. **A pending day that keeps failing** keeps the run "not complete", so the 3-hour warning shows until that day answers.
+8. **A pending day that keeps failing** (an HTTP error, not an empty answer) keeps the run "not complete", so the
+   3-hour warning shows until that day answers.
+10. **Nexus rate limit**: 60 calls an hour per token. A `--from` over more than about 55 days stops at the 429 and the
+    rest is asked by the following runs.
 9. **17 of 55 Nexus names did not match** in the live preview: they add nothing until renamed or mapped (owner check 2).
