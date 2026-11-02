@@ -154,6 +154,25 @@ query that is about 5 ms of database time per send in one process; the real ceil
 | N | Sequence tickets were already pruned by `sweepSequence` (resumed, failed, done; a skipped send is `done`, a cancelled one `resumed`); now per status on the index, in chunks of 5,000. | `test_N_old_sequence_tickets_are_pruned…` |
 | O | Measured with `DB::listen` around the pool alone, after one warm-up send (the per-process schema checks of the reply columns run once in a pool's life): **11 statements per send in the pool** (claim `SELECT` + `UPDATE` + row `SELECT`, `replyOpen`, subscription, customer values, last chat, `calledSequence`, `finishSequence`, reply `INSERT`, tag rows `INSERT`) and **10 in the resume job**. The first send of a process adds 9 schema reads. Ceilings asserted: 12 and 12. | `test_O_the_pool_runs_a_stated_number_of_queries_per_send` |
 
+## Round 4 (minors, on 7e99db3f)
+
+| # | Fix | Test |
+|---|---|---|
+| 1 | Without the new columns (migration not run) the attempt guard is kept in the cache (`chatbot-seq-attempt:<site>:<id>`, same format, same rules), so a job killed during an inline call is not sent again: at least as safe as base. With the columns, the row is used, as before. | `SequenceDurabilityTest::test_R4_1_without_the_column…` (marked during the call, cleared at the end; a left-over "call went out" is not sent again) |
+| 2 | `unlink()` (used by the page transfer's hold, release, import and activate, and by subscribe, unsubscribe, resume-paused, advance and complete) clears only `send_request_id`. `attempt` is cleared only by the step's own end. | `test_R4_2_a_page_hold_during_a_running_step_leaves_its_attempt` |
+| 3 | The idle pool asks "is anything waiting?" only when its last progress is older than 60 s (`IDLE_CHECK_SECONDS`), not on every claim round. | `test_R4_3_an_idle_pool_reads_for_waiting_tickets_at_most_once_a_minute` (0 reads in 20 rounds, 1 after a minute) |
+| 4 | The "no progress" warning is logged once per stall (a second key remembers the stall it was logged for). | `test_R4_4_and_5…` (two ticks, one line) |
+| 5 | The sequence pool's beat key and stalled key carry the site (`ChatbotSequences::site()`, a hash of `app.url`), like the running marker and the attempt fallback. `TicketPool` reads the beat through `beatKey()` (the reply and AI pools keep their constant). | `test_R4_4_and_5…` (another `app.url` sees neither the beat nor the stall) |
+| 6 | The prune runs at most once a minute (`Cache::add` per site). It finds the newest id older than `KEEP_DAYS` once (through the `created_at` index), then deletes `status = ? AND priority = 3 AND id <= cutoff` per status, in chunks of 5,000, through `(status, priority, id)`. Portable. | `test_N_and_6_old_sequence_tickets_are_pruned_up_to_an_id_cutoff_at_most_once_a_minute` |
+| 7 | Deploy step 1 rewritten: both columns and the index, a quiet hour, `lock_wait_timeout = 5` in the migration on MySQL, and the note for a local round 2 migration. | — |
+| 8 | The step job's comment names the attempt in the subscription row, not the removed cache constant. | — |
+
+Run on sqlite after round 4: the 6 Sequence classes (Durability 14, Handoff 11, Safety 28, ReRun 12 with 1 skipped,
+Visibility 3, Bench 10), the 14 listed suites, PageOwnersScreenTest, and the other suites on the shared pool base
+(`TicketPool`: BigBroadcast, BotLaneShare, BotRepliesBeforeBlasts, BotcakeAsyncSend, the AI pool and provider suites):
+all green. The full suite was not re-run for round 4 (only these files changed; the `TicketPool` change is a method that
+returns the same constant for the other pools).
+
 ## Bench (Done when)
 
 Fake handler and clocks, 4 simulated workers at each job's measured time, the API answering after 2.9 s, the pool every
@@ -221,8 +240,14 @@ Accepted:
 
 ## Deploy steps (both sites; not done, for the release)
 
-1. Migrate by hand: `php artisan migrate --force --path=database/migrations/2026_11_15_100000_add_send_request_to_chatbot_sequence_subscriptions.php`
-   (adds one nullable column and its index; until it runs nothing changes).
+1. Migrate by hand, at a quiet hour (not 08:00–23:00 Manila):
+   `php artisan migrate --force --path=database/migrations/2026_11_15_100000_add_send_request_to_chatbot_sequence_subscriptions.php`.
+   It adds two nullable columns to `chatbot_sequence_subscriptions`, `send_request_id` (string 36, with an index) and
+   `attempt` (string 80), each only when missing; no row changes. On MySQL it sets `SET SESSION lock_wait_timeout = 5`
+   first, so a long transaction on the table makes it fail fast instead of blocking the table; run it again a few minutes
+   later if it does. Until it runs nothing changes (the hand-off stays off, and the step keeps its cache-based guard).
+   Anyone who ran the round 2 version of this migration locally (only `send_request_id`) must roll it back
+   (`php artisan migrate:rollback --path=…`) and run it again; the guarded version also adds the missing column on its own.
 2. Deploy the code, `php artisan config:cache`.
 3. Restart `likha-botcake-send` (supervisor), so the reply pool's beat carries `excludes_sequence`.
 4. Add and start the new supervisor program on each site (Likha and Incepxion), modelled on `likha-botcake-send`:
