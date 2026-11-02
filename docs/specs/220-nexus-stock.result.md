@@ -67,6 +67,8 @@ Head failures: ExampleTest and ItemTableFitScriptTest, both in the base list. Bi
 The "warning" on most tests in both runs is a `file_get_contents(<worktree path>)` notice from the `artisan test`
 printer in a worktree; the same files through `vendor/bin/phpunit` report OK without it.
 
+Merge of live main c4543c88 (spec 217, no /item file in common; conflict in `qa/stories.md` only, both slices kept): merge commit 15ff5475. On the merge, `tests/Feature/Item`: 313 tests, 1 failure (ItemTableFitScriptTest, base), 1 skipped (perf); the 220 and stock files: 105 tests, all passed, 1 skipped.
+
 New tests: 19 sync, 16 returned, 29 read, 5 cache, 6 view, 1 perf (skipped by default) = 76.
 
 ## Story changes
