@@ -387,6 +387,8 @@
     // lang ng field; ang Save (o ang pagsara ng cell editor) ang nagse-save.
     const commentTemplates = @json(\App\Services\Chatbot\CommentCheck::templates());
     const REPLY_KEYS = ['comment_reply_1', 'comment_reply_2', 'comment_reply_3'];
+    // Ang hindi value ng ad group (pagkakakilanlan at mga switch ng page, at ang binubuo): wala sa Edit ng group.
+    const GROUP_EXCLUDED = @json(\App\Services\Chatbot\AdGroups::EXCLUDED);
 
     function el(tag, attrs = {}, children = []) {
         const e = document.createElement(tag);
@@ -860,7 +862,7 @@
 
     // ---- Reply values: Page-based (ang default: page values sa lahat) o Ad-based (ang mga ad group ng page) ----
     const AG = ChatbotAdGroups.create({csrf, urls: {index: url.agUrl, save: url.agUrl, add: url.agAddUrl, del: url.agDeleteUrl, history: url.agHistoryUrl,
-        restore: url.agRestoreUrl, mode: url.agModeUrl, value: url.agValueUrl, removeAd: url.agRemoveAdUrl, ad: url.agAdUrl}, onChange: page => { agVersion.set(page, (agVersion.get(page) || 0) + 1); if (editing || pe) agStale = true; else render(); }});
+        restore: url.agRestoreUrl, mode: url.agModeUrl, value: url.agValueUrl, removeAd: url.agRemoveAdUrl, ad: url.agAdUrl}, onChange: page => { agVersion.set(page, (agVersion.get(page) || 0) + 1); if (editing || pe) agStale = true; else render(); }, edit: (r, g) => openGroupEdit(r, g)});
     // Nagbago ang Ad groups habang bukas ang Edit (o may ine-edit na cell): ang table ay ipinipinta pagsara ng Edit, hindi
     // sa likod nito sa bawat sulat.
     let agStale = false;
@@ -906,7 +908,7 @@
         const td = (cls = '') => el('td', {class: cls + ' border-b border-slate-100 px-3 py-2 align-top'});
         return el('tr', {'data-page': r.page, class: 'ag-sub' + (r.page === openRow ? ' cb-open' : '')}, [
             el('td', {class: 'stick-1 border-b border-slate-100 px-3 py-2 align-top text-xs break-words'}, [
-                el('div', {class: 'flex items-start gap-1 font-medium'}, [el('span', {'aria-hidden': 'true', class: 'text-slate-400', text: '↳'}), 'Default']),
+                el('div', {class: 'flex items-start gap-1 font-medium'}, [el('span', {'aria-hidden': 'true', class: 'text-slate-400', text: '↳'}), 'Default (page values)']),
                 el('div', {class: 'text-slate-500', text: 'The page values: customers whose ad is in no group, or with no ad.'})]),
             td('stick-2'), cell(r, columns.find(c => c.key === 'flow'), 'stick-3'), td('stick-4'), td(), td(), td(),
             ...botCols().map(c => cell(r, c)),
@@ -1950,8 +1952,10 @@
         list.forEach((t, i) => { t.style.height = heights[i] + 'px'; });
     }
     /** Bawat field: ang value ngayon, at kung binago (changed) o hindi link sa image field (flagged, hindi sine-save). */
+    // Ang mga field na nasa Edit ngayon (ang Edit ng group ay walang field para sa hindi value ng group).
+    const peCols = () => editCols().filter(c => peInput(c.key));
     function peState() {
-        return editCols().map(c => {
+        return peCols().map(c => {
             // Ikinukumpara sa trimmed na dating value: ang lumang value na may espasyo sa dulo ay hindi "binago" pagbukas.
             const value = peInput(c.key).value.trim(), old = pe.orig[c.key], same = value === old.trim();
             const flagged = value !== '' && !same && c.kind === 'image' && !ChatbotPaste.isImageLink(value);
@@ -1968,17 +1972,25 @@
             const was = row.querySelector('.pe-was');
             was.textContent = x.flagged ? 'Not a link (http:// or https://): will not be saved.' : x.linked ? ChatbotPaste.linkWarning(x.c, botCols()) : x.changed ? 'Was: ' + (x.old === '' ? '(empty)' : x.old) : '';
             was.className = 'pe-was whitespace-pre-line break-words text-xs ' + (x.flagged ? 'text-red-600' : x.linked ? 'text-amber-700' : 'text-slate-500');
+            // Edit ng group: ang blangko ay ang default (ang page value, malabo).
+            row.querySelector('.pe-default')?.classList.toggle('hidden', x.value !== '');
             const img = row.querySelector('img');
             if (img) { const ok = ChatbotPaste.isImageLink(x.value); img.classList.toggle('invisible', !ok); if (ok && img.getAttribute('src') !== x.value) img.src = x.value; }
         }
         $('pe-save').disabled = !n;
         $('pe-save').textContent = n ? 'Save ' + plural(n, 'change') : 'Save';
     }
-    function openPe(r) {
-        pe = {r, orig: {}, beforePaste: {}, map: null};
+    /**
+     * Ang Edit ng isang page, o ng isang ad group nito (g): parehong window, paste box at AI mapping (parehong endpoint);
+     * sa group, ang mga field ay ang mga value ng group (blangko = ang page value), at ang Save ay sa endpoint ng value ng
+     * group (history at Restore ng group).
+     */
+    function openPe(r, g = null) {
+        pe = {r, g, orig: {}, beforePaste: {}, map: null};
         peSeq++;
         $('pe-map').classList.add('hidden');
-        $('pe-name').textContent = r.page;
+        $('pe-name').textContent = g ? r.page + ' · ' + g.name : r.page;
+        $('pe-preview').classList.toggle('hidden', !!g); // ang Preview ay ang page values
         $('pe-id').textContent = r.page_id || '';
         $('pe-fb').replaceChildren(fbAnchor(r));
         const start = $('pe-start').value;
@@ -1989,7 +2001,15 @@
         $('pe-notes').replaceChildren();
         $('pe-error').textContent = '';
         $('pe-start-box').classList.remove('hidden');
-        $('pe-fields').replaceChildren(...botCols().map(peField));
+        $('pe-fields').replaceChildren(...botCols().filter(c => !g || c.kind === 'auto' || !GROUP_EXCLUDED.includes(c.key)).map(peField));
+        if (g) {
+            $('pe').classList.remove('hidden');
+            $('pe-fields').scrollTop = 0;
+            growAll();
+            paintPe();
+            $('pe-paste').focus();
+            return;
+        }
         // Ad groups: dito ginagawa at inaayos (Ad-based lang); sa table, tinitingnan.
         const agHost = el('div', {class: 'mt-1'});
         $('pe-fields').append(el('section', {id: 'pe-ag', class: 'py-3 text-xs text-slate-600'}, [el('h3', {id: 'pe-ag-title', tabindex: '-1', class: 'text-sm font-semibold text-slate-800 focus:outline-none', text: 'Ad groups'}),
@@ -2004,7 +2024,9 @@
     }
     /** Isang field ng modal (label, input, History at template), na may value ng page nang buksan. */
     function peField(c) {
-        const r = pe.r, v = pe.orig[c.key] = String(r.cells[c.key] ?? ''), fid = 'pe-f-' + c.key;
+        const r = pe.r, g = pe.g, v = pe.orig[c.key] = String((g ? (g.values || {})[c.key] : r.cells[c.key]) ?? ''), fid = 'pe-f-' + c.key;
+        if (c.kind === 'auto' && g) return el('div', {class: 'pe-field py-2', 'data-key': c.key}, [
+            el('div', {class: 'mb-1 text-xs font-medium text-slate-600', text: c.label}), el('div', {class: 'text-xs text-slate-500', text: 'Built from the group\'s item'})]);
         if (c.kind === 'auto') return el('div', {class: 'pe-field py-2', 'data-key': c.key}, [
             el('div', {class: 'mb-1 text-xs font-medium text-slate-600', text: c.label}),
             el('div', {class: 'whitespace-pre-line break-words rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-sm text-slate-700', text: v}),
@@ -2019,7 +2041,7 @@
             ? el('div', {class: 'flex items-center gap-2'}, [el('img', {alt: '', loading: 'lazy', referrerpolicy: 'no-referrer', class: 'invisible h-10 w-10 shrink-0 rounded border border-slate-200 object-cover'}), input])
             : input;
         const history = el('button', {type: 'button', class: 'text-xs text-blue-700 underline hover:text-blue-900', text: 'History', 'aria-label': 'History of ' + c.label});
-        history.addEventListener('click', () => openHistory(r.page, c));
+        history.addEventListener('click', () => g ? AG.history(r.page, g) : openHistory(r.page, c));
         const links = [history];
         if (commentTemplates[c.key]) {
             // Ang Comment Reply: ang tatlong variant nang sabay. Pumupuno lang; ang Save pa rin ang nagse-save.
@@ -2033,20 +2055,33 @@
             });
             links.unshift(tpl);
         }
+        const def = String(r.cells[c.key] ?? '');
         return el('div', {class: 'pe-field py-2', 'data-key': c.key}, [
             el('div', {class: 'mb-1 flex items-center justify-between gap-2'}, [el('label', {for: fid, class: 'text-xs font-medium text-slate-600', text: c.label}), el('div', {class: 'flex gap-3'}, links)]),
-            box, el('div', {class: 'pe-was'})]);
+            box, g ? el('div', {class: 'pe-default whitespace-pre-line break-words text-xs text-slate-400'}, [el('span', {class: 'italic', text: 'uses default: '}), def === '' ? '(empty)' : def]) : null,
+            el('div', {class: 'pe-was'})]);
     }
     function closePe(force = false) {
         if (!pe) return;
-        if (!force && peDirty() && !confirm('Discard the changes to ' + pe.r.page + '?')) return;
+        if (!force && peDirty() && !confirm('Discard the changes to ' + (pe.g ? '"' + pe.g.name + '"' : pe.r.page) + '?')) return;
+        const back = pe.back ? pe.r : null;
         $('pe').classList.add('hidden');
-        AG.unmount(pe.r.page);
+        if (!pe.g) AG.unmount(pe.r.page);
         pe = null;
         // Ang mga field at ang Ad groups ng saradong Edit ay hindi naiiwan sa page (libu-libong element sa Ad-based na page).
         $('pe-fields').replaceChildren();
         $('pe-map-list').replaceChildren();
         if (agStale) { agStale = false; render(); }
+        // Ang Edit ng group na binuksan mula sa Manage in Edit: pabalik sa Edit ng page, sa Ad groups.
+        if (back) manageAdGroups(current(back));
+    }
+    /** Ang Edit ng isang ad group (mula sa row nito sa table o sa Manage in Edit). */
+    function openGroupEdit(r, g) {
+        const back = !!pe && !pe.g;
+        if (pe && peDirty() && !confirm('Discard the changes to ' + (pe.g ? '"' + pe.g.name + '"' : pe.r.page) + '?')) return;
+        if (pe) { pe.back = false; closePe(true); }
+        openPe(current(r), AG.group(r.page, g.id) || g);
+        pe.back = back;
     }
     /** Ibinabalik ang mga field bago ang huling paste, para ang bagong paste ay pumalit at hindi magpatong. */
     function peRestore() {
@@ -2057,7 +2092,7 @@
     function pePaste() {
         peRestore();
         const text = $('pe-paste').value, notes = [];
-        const current = Object.fromEntries(editCols().map(c => [c.key, peInput(c.key).value]));
+        const current = Object.fromEntries(peCols().map(c => [c.key, peInput(c.key).value]));
         const plan = ChatbotPaste.plan({text, columns: botCols(), targets: [{page: pe.r.page, cells: pe.orig}], startKey: $('pe-start').value, blanksEmpty: $('pe-blanks').checked, firstRowOnly: true});
         $('pe-start-box').classList.toggle('hidden', plan.byName);
         if (text.trim() && plan.error) notes.push(plan.error);
@@ -2125,7 +2160,7 @@
         pe.map.cells.forEach((v, i) => {
             if (String(v).trim() === '') return;
             const sel = el('select', {class: 'pe-map-field max-w-full rounded border border-slate-300 px-1 py-0.5 text-xs text-gray-900', 'aria-label': 'Field for value ' + (i + 1)},
-                [el('option', {value: '', text: 'None (skip)'}), ...editCols().map(c => el('option', {value: c.key, text: c.label}))]);
+                [el('option', {value: '', text: 'None (skip)'}), ...peCols().map(c => el('option', {value: c.key, text: c.label}))]);
             sel.value = pe.map.keys[i] || '';
             sel.addEventListener('change', () => { pe.map.keys[i] = sel.value || null; pe.map.conf[i] = 'high'; pe.map.note[i] = ''; peMapPaint(); });
             items.push(el('li', {class: 'pe-map-item flex flex-wrap items-center gap-x-2 gap-y-1 rounded border px-2 py-1', 'data-cell': String(i)}, [
@@ -2157,7 +2192,7 @@
         $('pe-map-missing').classList.toggle('hidden', !miss); $('pe-map-missing').classList.toggle('flex', !!miss);
         $('pe-map-missing-text').textContent = miss ? miss.text : '';
         $('pe-map-add').textContent = miss ? miss.button : '';
-        const item = ChatbotPaste.itemMismatch(pe.map.cells, pe.map.cells.map((_, i) => pe.map.keys[i] || null), pe.orig.item_name_in_jnt_dashboard);
+        const item = ChatbotPaste.itemMismatch(pe.map.cells, pe.map.cells.map((_, i) => pe.map.keys[i] || null), pe.orig.item_name_in_jnt_dashboard || String(pe.r.cells.item_name_in_jnt_dashboard ?? ''));
         $('pe-map-item').textContent = item ? 'The pasted texts mention ' + item.pasted + "; this page's item is " + item.page + '. Check you copied the right row.' : '';
     }
     /** "Add Seq 21–22": ang mga kulang na Seq / Seq Img column sa "+ Column", saka ang mga cell sa kanila. Walang value na sine-save. */
@@ -2175,8 +2210,8 @@
         if (!pe) return; // sarado na ang modal
         // Laging idinadagdag sa bukas na modal ang mga bagong column (pinalitan na ng load() ang columns), kahit may bagong paste.
         for (const c of editCols()) {
-            if (peInput(c.key)) continue;
-            $('pe-fields').insertBefore(peField(c), $('pe-ag')); // sa itaas ng Ad groups
+            if (peInput(c.key) || (pe.g && GROUP_EXCLUDED.includes(c.key))) continue;
+            $('pe-fields').insertBefore(peField(c), $('pe-ag')); // sa itaas ng Ad groups (ang Edit ng group: sa dulo)
             $('pe-start').append(el('option', {value: c.key, text: c.label}));
         }
         if (pe.map !== map) { paintPe(); return; } // may bagong paste: ang lumang mapping ay hindi na ginagalaw
@@ -2228,6 +2263,14 @@
         if (!changes.length) return;
         $('pe-save').disabled = true;
         $('pe-error').textContent = '';
+        if (pe.g) {
+            // Ang group: isang request, lahat o wala (ang blangko = ang page value ulit).
+            const {r, g} = pe, res = await AG.saveValues(r.page, g, Object.fromEntries(changes.map(x => [x.key, x.value])));
+            if (res.error) { $('pe-error').textContent = res.error; $('pe-save').disabled = false; return; }
+            closePe(true);
+            notice('Saved ' + plural(changes.length, 'value') + ' of "' + g.name + '" on ' + r.page + '.', 'text-green-700');
+            return;
+        }
         const res = await saveCells(changes);
         if (res.error) { $('pe-error').textContent = res.error; $('pe-save').disabled = false; return; }
         closePe(true);

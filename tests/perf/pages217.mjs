@@ -178,6 +178,100 @@ async function features(p, out, label) {
     return results.every(Boolean);
 }
 
+/**
+ * S-217.2 (the group Edit), 3.1 (the order shown), 4.1 (the Ad dropdown of /chatbot/test) and 5 (Manage in Edit, Default)
+ * in real Chrome on Perf Page 007 (Ad-based, 6 groups). The paste's AI answer is faked (page.fakeMap); everything else is
+ * the real page and server. Native questions (confirm) are answered yes.
+ */
+async function groupCases(p, out, label) {
+    const RUN = Date.now().toString(36), PAGE = 'Perf Page 007';
+    const shown = id => `!document.getElementById('${id}').classList.contains('hidden')`;
+    const panel = `fetch('/chatbot/ad-groups?page=' + encodeURIComponent(${JSON.stringify(PAGE)}), {headers: {Accept: 'application/json'}}).then(r => r.json())`;
+    const check = async (cs, action, run, ok, timeout = 15000) => {
+        let pass = false, note = '';
+        try { await p.ev(`(async () => { ${run}; return true; })()`); pass = !!(await p.waitFor(ok, timeout)); } catch (e) { note = e.message.slice(0, 220); }
+        out.push({action: label + ': ' + cs + ' ' + action, pass, note});
+        return pass;
+    };
+    const input = key => `document.querySelector('#pe-fields [data-key="${key}"] .pe-in')`;
+    await p.goto(BASE + '/chatbot/pages');
+    await p.waitFor(settled, 120000);
+    await p.ev(`(() => { document.querySelector('#cb-table tr[data-page="${PAGE}"]').scrollIntoView({block: 'start'}); return true; })()`);
+    await p.waitFor(`document.querySelector('button[aria-label^="Show the ad groups of ${PAGE}"]')`, 30000);
+    await p.ev(`(() => { document.querySelector('button[aria-label^="Show the ad groups of ${PAGE}"]').click(); return true; })()`);
+    await p.waitFor(`document.querySelector('#cb-table tr.ag-sub[data-ag-group]')`, 30000);
+    const data = await p.ev(panel);
+    const g1 = data.groups[0], g2 = data.groups[1];
+
+    await check('S-217.3.1', 'the table shows the groups in the server\'s order (running first)', 'true',
+        `JSON.stringify([...document.querySelectorAll('#cb-table tr.ag-sub[data-ag-group]')].map(tr => Number(tr.dataset.agGroup))) === ${JSON.stringify(JSON.stringify(data.groups.filter(g => !g.hidden).map(g => g.id)))}`);
+    await check('S-217.2.1', 'each group row in the list has an Edit button', 'true',
+        `[...document.querySelectorAll('#cb-table tr.ag-sub[data-ag-group]')].every(tr => tr.querySelector('button[aria-label^="Edit "][aria-label$=" of ${PAGE}"]'))`);
+    await check('S-217.5.2', 'the Default row is "Default (page values)" with the page row\'s values', 'true', `(() => {
+        const d = document.querySelector('#cb-table tr.ag-sub[data-page="${PAGE}"]'), pg = document.querySelector('#cb-table tr[data-page="${PAGE}"]:not(.ag-sub)');
+        const vals = tr => [...tr.querySelectorAll('td.cb-cell[data-key]')].map(td => td.dataset.key + '=' + (td.querySelector('.cb-txt, span.truncate')?.textContent ?? ''));
+        return d.textContent.includes('Default (page values)') && JSON.stringify(vals(d)) === JSON.stringify(vals(pg)) && vals(d).length > 20; })()`);
+    await check('S-217.5.1', 'Manage in Edit is a normal-size primary button next to the count', 'true', `(() => {
+        const b = [...document.querySelectorAll('#cb-table tr.ag-sub button')].find(x => x.textContent === 'Manage in Edit');
+        return b && b.classList.contains('cb-btn-primary') && !b.classList.contains('cb-btn-sm') && /ads? not in a group yet/.test(b.previousElementSibling?.textContent || ''); })()`);
+    await check('S-217.5.1', 'Manage in Edit opens the Edit window at the Ad groups section', `[...document.querySelectorAll('#cb-table tr.ag-sub button')].find(x => x.textContent === 'Manage in Edit').click()`,
+        `${shown('pe')} && document.getElementById('pe-name').textContent === '${PAGE}' && document.querySelector('#pe-ag [data-ag-group]') && (() => { const a = document.getElementById('pe-ag').getBoundingClientRect(), f = document.getElementById('pe-fields').getBoundingClientRect(); return a.top < f.bottom && a.bottom > f.top; })()`);
+    await check('S-217.2.1', 'Manage in Edit has an Edit for each group, and it opens the group Edit', `document.querySelector('#pe-ag button[aria-label="Edit ${g2.name} of ${PAGE}"]').click()`,
+        `${shown('pe')} && document.getElementById('pe-name').textContent === '${PAGE} · ${g2.name}' && !document.getElementById('pe-ag')`);
+    await check('S-217.2.1', 'closing it goes back to the page Edit', `document.getElementById('pe-close').click()`,
+        `${shown('pe')} && document.getElementById('pe-name').textContent === '${PAGE}' && document.getElementById('pe-ag')`);
+    await p.ev(`(() => { document.getElementById('pe-close').click(); return true; })()`);
+    await p.waitFor(`!${shown('pe')}`);
+
+    // The group Edit from the list: title, the page Edit's fields, own values, and empty = "uses default" with the page value.
+    const pageRow = await p.ev(`fetch('/chatbot/data', {headers: {Accept: 'application/json'}}).then(r => r.json()).then(d => ({cells: d.rows.find(r => r.page === ${JSON.stringify(PAGE)}).cells, cols: d.columns}))`);
+    const own = g1.values, emptyKey = Object.keys(pageRow.cells).find(k => !own[k] && pageRow.cells[k] && !/^(flow|shop_details)$/.test(k) && !/img|picture/.test(k));
+    await check('S-217.2.1', 'the group Edit opens titled with the page and the group', `document.querySelector('#cb-table button[aria-label="Edit ${g1.name} of ${PAGE}"]').click()`,
+        `${shown('pe')} && document.getElementById('pe-name').textContent === '${PAGE} · ${g1.name}'`);
+    await check('S-217.2.1', 'it shows the page Edit\'s fields, the group\'s own values, and the page value muted where empty', 'true', `(() => {
+        const keys = [...document.querySelectorAll('#pe-fields .pe-field')].map(f => f.dataset.key), want = ${JSON.stringify(pageRow.cols.filter(c => c.key !== 'flow').map(c => c.key))};
+        const def = document.querySelector('#pe-fields [data-key="${emptyKey}"] .pe-default');
+        return JSON.stringify(keys) === JSON.stringify(want) && ${input('main_flow')}.value === ${JSON.stringify(own.main_flow || '')}
+            && ${input(emptyKey)}.value === '' && def && !def.classList.contains('hidden') && def.textContent === 'uses default: ' + ${JSON.stringify(pageRow.cells[emptyKey])}; })()`);
+    await check('S-217.2.3', 'the group Edit has no field for the identity and switch keys', 'true',
+        `![...document.querySelectorAll('#pe-fields .pe-field')].some(f => ['token', 'provider', 'active', 'page_id', 'mode', 'gateway', 'botcake_id'].includes(f.dataset.key)) && !document.querySelector('#pe-fields .pe-in[id="pe-f-shop_details"]')`);
+
+    // S-217.2.2: a row from Google Sheets, mapped by the (faked) AI through /chatbot/paste-map, preview, Apply, Save.
+    p.fakeMap = {0: 'main_flow', 1: 'price', 2: 'seq_1'};
+    p.pasteMaps.length = 0;
+    await check('S-217.2.2', 'a pasted row goes to /chatbot/paste-map as for the page, and the preview shows', `const t = document.getElementById('pe-paste'); t.value = 'G1 main ${RUN}\\t555\\t'; t.dispatchEvent(new Event('input'))`,
+        `${shown('pe-map')} && document.querySelectorAll('#pe-map-list .pe-map-item').length === 2 && !document.getElementById('pe-map-apply').disabled`);
+    out.push({action: label + ': S-217.2.2 the paste-map request is the page\'s (page name and the pasted cells)', pass: p.pasteMaps.length === 1 && p.pasteMaps[0].page_name === PAGE && JSON.stringify(p.pasteMaps[0].cells) === JSON.stringify([`G1 main ${RUN}`, '555', '']),
+        note: JSON.stringify(p.pasteMaps.map(m => ({page_name: m.page_name, cells: m.cells})))});
+    await check('S-217.2.5', 'Apply with "Paste blanks as empty" off fills the values and leaves the blank\'s field as it was', `document.getElementById('pe-blanks').checked = false; document.getElementById('pe-map-apply').click()`,
+        `${input('main_flow')}.value === 'G1 main ${RUN}' && ${input('price')}.value === '555' && ${input('seq_1')}.value === ${JSON.stringify(own.seq_1 || '')}`);
+    await check('S-217.2.5', 'with "Paste blanks as empty" on, the blank empties the field (uses default), as on the page', `const b = document.getElementById('pe-blanks'); b.checked = true; b.dispatchEvent(new Event('change'))`,
+        `${input('seq_1')}.value === '' && !document.querySelector('#pe-fields [data-key="seq_1"] .pe-default').classList.contains('hidden')`);
+    await check('S-217.2.2', 'Save writes the group values', `document.getElementById('pe-save').click()`,
+        `${shown('pe')} === false && /^Saved 3 values of "${g1.name}"/.test(document.getElementById('notice').textContent)`);
+    const after = (await p.ev(panel)).groups.find(g => g.id === g1.id).values;
+    out.push({action: label + ': S-217.2.2 the server has the group values (the blank back to the page value)', pass: after.main_flow === `G1 main ${RUN}` && after.price === '555' && !after.seq_1,
+        note: JSON.stringify({main_flow: after.main_flow, price: after.price, seq_1: after.seq_1 ?? null})});
+    await check('S-217.2.2', 'History of the group (from the group Edit) lists the old value with Restore', `document.querySelector('#cb-table button[aria-label="Edit ${g1.name} of ${PAGE}"]').click(); document.querySelector('#pe-fields button[aria-label="History of Main Flow"]').click()`,
+        `[...document.querySelectorAll('[role="dialog"][aria-label="History · ${g1.name}"] button')].some(b => b.getAttribute('aria-label')?.startsWith('Restore Main Flow'))`);
+    await check('S-217.2.2', 'Restore brings the old value back', `[...document.querySelectorAll('[role="dialog"][aria-label="History · ${g1.name}"] button')].find(b => b.getAttribute('aria-label')?.startsWith('Restore Main Flow')).click()`,
+        `/^Restored Main Flow/.test([...document.querySelectorAll('[role="dialog"][aria-label="History · ${g1.name}"] p')].map(x => x.textContent).join(' '))`);
+    const restored = (await p.ev(panel)).groups.find(g => g.id === g1.id).values;
+    out.push({action: label + ': S-217.2.2 the restored value is the group\'s again', pass: restored.main_flow === own.main_flow, note: 'main_flow: ' + JSON.stringify((restored.main_flow || '').slice(0, 40))});
+    await p.ev(`(() => { document.querySelector('[role="dialog"][aria-label="History · ${g1.name}"] button[aria-label="Close"]').click(); document.getElementById('pe-close').click(); return true; })()`);
+
+    // S-217.4.1: the Ad dropdown of /chatbot/test.
+    await p.goto(BASE + '/chatbot/test');
+    const pick = page => `(() => { const s = document.getElementById('t-page'); s.value = ${JSON.stringify(page)}; s.dispatchEvent(new Event('change')); return true; })()`;
+    await check('S-217.4.1', 'an Ad-based page has the Ad dropdown: its groups, then the ads not in a group, On first', pick(PAGE),
+        `${shown('t-ad-box')} && [...document.querySelectorAll('#t-ad optgroup')].map(o => o.label).join('|') === ${JSON.stringify([...data.groups.map(g => g.name), 'Not in a group'].join('|'))}
+            && [...document.querySelectorAll('#t-ad optgroup')].every(o => { const on = [...o.children].map(x => / · On · /.test(x.textContent)); return on.indexOf(false) === -1 || !on.slice(on.indexOf(false)).includes(true); })`);
+    await check('S-217.4.3', 'a Page-based page has no Ad dropdown', pick('Perf Page 001'), `!${shown('t-ad-box')}`);
+    const ad = g1.ads[0].ad_id;
+    await check('S-217.4.2', 'a test as a customer from an ad in a group says which group', `${pick(PAGE)}; await new Promise(r => setTimeout(r, 1500)); document.getElementById('t-ad').value = '${ad}'; document.getElementById('t-msg').value = 'Hi'; document.getElementById('t-form').requestSubmit()`,
+        `document.getElementById('t-log').textContent.includes('Ad ${ad} → group ${g1.name}')`, 30000);
+}
+
 async function main() {
     const env = {...process.env, ...JSON.parse(spawnSync(PHP, ['tests/perf/set217.php', 'env'], {cwd: root, encoding: 'utf8'}).stdout)};
     if (!existsSync(join(root, 'storage/perf217/db.sqlite'))) throw new Error('Run php tests/perf/set217.php migrate and seed first.');
@@ -213,12 +307,17 @@ async function main() {
         const page = await Page.open(cdp, {width: 1600, height: 1000});
         if (phone) await page.send('Emulation.setDeviceMetricsOverride', {width: 390, height: 844, deviceScaleFactor: 2, mobile: true});
         if (args.cpu) await page.send('Emulation.setCPUThrottlingRate', {rate: Number(args.cpu)});
-        // The layout's Tailwind CDN script: answered with the locally built stylesheet (no outside connection).
-        await page.send('Fetch.enable', {patterns: [{urlPattern: '*cdn.tailwindcss.com*'}]});
+        // The layout's Tailwind CDN script: answered with the locally built stylesheet (no outside connection). The AI of
+        // the Edit paste (/chatbot/paste-map): answered here with page.fakeMap (cell => key), and the request is kept.
+        await page.send('Fetch.enable', {patterns: [{urlPattern: '*cdn.tailwindcss.com*'}, {urlPattern: '*/chatbot/paste-map*'}]});
+        page.pasteMaps = [];
         cdp.on(msg => {
             if (msg.sessionId !== page.sid || msg.method !== 'Fetch.requestPaused') return;
-            page.send('Fetch.fulfillRequest', {requestId: msg.params.requestId, responseCode: 200, responseHeaders: [{name: 'Content-Type', value: 'application/javascript'}],
-                body: Buffer.from(twJs).toString('base64')}).catch(() => {});
+            const map = msg.params.request.url.includes('/chatbot/paste-map');
+            if (map) page.pasteMaps.push(JSON.parse(msg.params.request.postData || '{}'));
+            const body = map ? JSON.stringify({mapping: Object.entries(page.fakeMap || {}).map(([cell, key]) => ({cell: Number(cell), key, confidence: 'high'}))}) : twJs;
+            page.send('Fetch.fulfillRequest', {requestId: msg.params.requestId, responseCode: 200, responseHeaders: [{name: 'Content-Type', value: map ? 'application/json' : 'application/javascript'}],
+                body: Buffer.from(body).toString('base64')}).catch(() => {});
         });
         await page.goto(BASE + '/login');
         await page.ev(`(() => { const f = document.querySelector('form[action$="/login"]'); f.email.value = 'perf217@example.test'; f.password.value = 'perf217-local-only'; f.submit(); return true; })()`);
@@ -228,6 +327,7 @@ async function main() {
         // --eval=<expression>: printed after the load, then the run stops (to look at the page).
         if (args.eval) { console.log(JSON.stringify(await page.ev(String(args.eval)))); break; }
         if (args.features) { out.push({action: label + ': S-217.1.3 every feature of the screen still works', pass: await features(page, out, label)}); break; }
+        if (args.groups) { await groupCases(page, out, label); break; }
         const s = await scroll(page, out, label);
         const ag = await adGroups(page, out, label);
         const ok = l.serverMs < SERVER_MS && l.usable < USABLE_MS && l.afterLoad < TASK_MS && s.longest < TASK_MS;
@@ -237,6 +337,7 @@ async function main() {
         if (page.errors.length) out.push({action: label + ': page errors', pass: false, note: JSON.stringify(page.errors.slice(-3))});
         // The features on the desktop run (they write values, so once per run).
         if (!phone) out.push({action: label + ': S-217.1.3 every feature of the screen still works', pass: await features(page, out, label)});
+        if (!phone) await groupCases(page, out, label);
         await cdp.send('Target.closeTarget', {targetId: page.targetId});
     }
     printTable(results);
