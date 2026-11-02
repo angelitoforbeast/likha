@@ -69,6 +69,8 @@ abstract class AiKeyPoolTestCase extends ChatbotAiProviderTestCase
     /** Ang default na sagot ng Forbeast: lahat ng record ay stored, at lahat ng page ay ok. */
     protected function forbeastAnswer(HttpRequest $r)
     {
+        // Ang padala ng sagot ng gateway page (hindi ang ai-usage o ai-load): tinanggap.
+        if (preg_match('#/v1/pages/\d+/messages$#', $r->url())) return Http::response(['ok' => true]);
         if ($this->forbeast) {
             $a = array_shift($this->forbeast);
             return $a instanceof \Closure ? $a($r) : $a;
@@ -120,6 +122,22 @@ abstract class AiKeyPoolTestCase extends ChatbotAiProviderTestCase
     protected function lastRow(): object
     {
         return DB::table('chatbot_ai_requests')->orderByDesc('id')->first();
+    }
+
+    /** Ang page ay dumadaan sa gateway (chatbot.provider = gateway): ang page lang na ito ang may usage at AI load sa Forbeast. */
+    protected function onGateway(string $page, string $gateway = 'forbeast'): void
+    {
+        config(['services.gateway.key' => 'gw_test_key_not_real', 'services.incepxionbot.key' => 'gw_test_incepxion_key_not_real']);
+        $s = app(\App\Services\PageSettings::class);
+        $s->set($page, 'chatbot', 'provider', 'gateway', false, null, true);
+        $s->set($page, 'chatbot', 'gateway', $gateway, false, null, true);
+    }
+
+    /** @return array<int, string> ang mga text na naipadala para sa PSID, sa Botcake o sa gateway */
+    protected function sent(string $psid = '7001'): array
+    {
+        return Http::recorded(fn (HttpRequest $r) => (str_contains($r->url(), '/flows/send_content') || preg_match('#/v1/pages/\d+/messages$#', $r->url())) && ($r->data()['psid'] ?? null) === $psid)
+            ->map(fn ($p) => $p[0]->data()['data']['content']['messages'][0]['text'] ?? $p[0]->data()['messages'][0]['text'] ?? '')->values()->all();
     }
 
     /** Ang page ay sa $provider muna, saka ang $fallback (listahan, "," ang hati). */

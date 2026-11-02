@@ -21,9 +21,14 @@ class ChatbotAiUsage
     public const PENDING = 'pending';
     public const NO_GATEWAY = 'no_gateway';
 
-    /** Ang gateway na tatanggap ng usage ng page (chatbot.gateway, o ang default), kapag may URL at site key ito; o null. */
+    /**
+     * Ang gateway na tatanggap ng usage ng page (chatbot.gateway, o ang default), kapag may URL at site key ito; o null.
+     * Ang page lang na dumadaan sa gateway (ang parehong tingin ng padala, ChatbotProvider::for): ang Botcake page ay wala
+     * sa Forbeast, kaya page_not_found lang ang bawat padala at tanong ng load nito.
+     */
     public static function gatewayOf(string $page): ?string
     {
+        if (ChatbotProvider::name($page) !== ChatbotProvider::GATEWAY) return null;
         $g = Gateways::active($page);
 
         return Gateways::setUp($g) && Gateways::config($g)['site_key'] !== '' ? $g : null;

@@ -23,6 +23,8 @@ class AiLoadTest extends AiKeyPoolTestCase
         $this->travelTo('2026-11-15 10:00:00');
         $this->addKey('openai', 'pool-1', self::KEY_A);
         $this->live('Page Uno');
+        // Ang load ay tinatanong lang para sa page na dumadaan sa gateway (spec 216).
+        $this->onGateway('Page Uno');
     }
 
     /** Ang sagot ng Forbeast: ang page ay $state (ang iba ay ok). */
@@ -116,7 +118,8 @@ class AiLoadTest extends AiKeyPoolTestCase
         $this->travel(2)->minutes();
         config(['services.gateway.url' => '', 'services.incepxionbot.url' => '']);
         $this->says('four', 'Page Uno', '7004');
-        $this->assertSame(['Reply: answer by 1111'], $this->sent('7004'));
+        // Walang URL ang gateway: hindi rin maipadala ang sagot, pero tumakbo ang AI (walang tanong ng load).
+        $this->assertSame(['openai', null], [$this->lastRow()->provider, $this->lastRow()->error]);
         $this->assertCount(2, $this->loadCalls());
     }
 
@@ -125,8 +128,10 @@ class AiLoadTest extends AiKeyPoolTestCase
         $rows = [];
         for ($i = 1; $i <= 150; $i++) {
             $rows[] = ['page_name' => 'Bulk Page ' . $i, 'provider' => 'botcake', 'key' => 'page_id', 'value' => (string) (500000 + $i), 'is_secret' => false, 'active' => true, 'created_at' => now(), 'updated_at' => now()];
+            $rows[] = ['page_name' => 'Bulk Page ' . $i, 'provider' => 'chatbot', 'key' => 'provider', 'value' => 'gateway', 'is_secret' => false, 'active' => true, 'created_at' => now(), 'updated_at' => now()];
         }
         DB::table('page_settings')->insert($rows);
+        $this->onGateway(self::TECH);
         Artisan::call('chatbot:ai-load');
         $calls = $this->loadCalls();
         $this->assertCount(2, $calls);
