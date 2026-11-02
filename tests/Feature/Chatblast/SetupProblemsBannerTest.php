@@ -30,6 +30,8 @@ class SetupProblemsBannerTest extends ChatblastTestCase
         foreach (['Page Uno' => '1001', 'Page Dos' => '1002', 'Page Tres' => '1003', 'Page Kwatro' => '1004', 'Page Singko' => '1005'] as $name => $id) {
             $this->page($name, $id);
             DB::table('botcake_chats')->insert(['page_id' => $id, 'page_name' => $name, 'psid' => '9' . $id, 'received_at' => '2026-10-27 08:00:00']);
+            // May order sa huling 14 araw: ang X ng setup ng page na pinapadalhan ay urgent pa rin (spec 221).
+            DB::table('macro_output')->insert(['PAGE' => $name, 'ts_date' => '2026-10-27']);
         }
     }
 
