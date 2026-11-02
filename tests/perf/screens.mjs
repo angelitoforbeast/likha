@@ -120,7 +120,7 @@ export async function startTrace(cdp) {
 }
 
 /** The functions with the most time in a CPU profile (self and with their callees). */
-function topFunctions(profile) {
+export function topFunctions(profile) {
     const byId = new Map(profile.nodes.map(n => [n.id, n])), parent = new Map();
     for (const n of profile.nodes) for (const c of n.children || []) parent.set(c, n.id);
     const name = n => n.callFrame.functionName + ' ' + n.callFrame.url.split('/').pop().split('?')[0] + ':' + n.callFrame.lineNumber;
