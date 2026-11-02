@@ -256,7 +256,8 @@ class NexusStockReadTest extends ItemTestCase
         $this->nexusOn();
         $on = $this->stock()->assertOk()->json();
 
-        $this->assertSame(['mode' => 'po_received', 'nexus' => ['configured' => false]], $off['stock_meta']);
+        // May naitabing Nexus row na: walang token pero dati nang na-sync = babala sa page.
+        $this->assertSame(['mode' => 'po_received', 'nexus' => ['configured' => false, 'previously_synced' => true]], $off['stock_meta']);
         $this->assertSame(50, $off['items']['tape']['stock']);                 // PO received, gaya ng dati
         $this->assertSame(-2, $off['items']['rope']['stock_raw']);             // walang returned sa lumang paraan
         foreach (['stock_in', 'returned', 'shipped', 'returned_over_shipped', 'nexus_remaining', 'nexus_diff'] as $f) {
@@ -468,6 +469,39 @@ class NexusStockReadTest extends ItemTestCase
     }
 
     // ── S-220.7 Nexus remaining cross-check ──────────────────────────────────
+
+    public function test_a_missing_token_after_an_earlier_sync_is_flagged_and_a_site_that_never_synced_stays_quiet(): void
+    {
+        config(['services.nexus.token' => '']);
+        $this->appSetting('nexus_stock_last_synced_at', null);
+        $this->order('1 x TAPE', 'Page A', 'TH', '2026-09-10');
+
+        $this->assertSame(['mode' => 'po_received', 'nexus' => ['configured' => false, 'previously_synced' => false]],
+            $this->stock()->assertOk()->json('stock_meta'), 'hindi pa kailanman na-sync (Incepxion): tahimik');
+
+        $this->appSetting('nexus_stock_last_synced_at', '2026-11-01 10:10:00');
+        $this->assertTrue($this->stock()->assertOk()->json('stock_meta.nexus.previously_synced'), 'may last_synced_at');
+
+        $this->appSetting('nexus_stock_last_synced_at', null);
+        $this->nexusStockIn('TAPE', 1, '2026-10-01');
+        $this->assertTrue($this->stock()->assertOk()->json('stock_meta.nexus.previously_synced'), 'may Nexus row');
+    }
+
+    public function test_remaining_uses_each_names_own_latest_as_of_and_leaves_out_a_renamed_names_frozen_value(): void
+    {
+        $this->parcels('1 x GLOW TAPE', 1, 'G');
+        $this->parcels('1 x ROPE', 1, 'R');
+        $this->nexusStockIn('GLOW TAPE', 0, '2026-11-03', 0, 80, '2026-11-03 10:09:00');
+        $this->nexusStockIn('Glow-Tape', 10, '2026-10-20', 1, 30, '2026-10-20 10:00:00');   // lumang pangalan: nakatigil
+        $this->nexusStockIn('Rope', 0, '2026-11-03', 0, 5, '2026-11-03 10:09:00');
+        $this->nexusStockIn('R-ope', 0, '2026-11-02', 0, 4, '2026-11-03 10:08:30');          // parehong takbo: idinadagdag
+
+        $items = $this->stock()->assertOk()->json('items');
+
+        $this->assertSame([80, '2026-11-03 10:09', true, false], [$items['glow tape']['nexus_remaining'], $items['glow tape']['nexus_remaining_as_of'],
+            $items['glow tape']['nexus_remaining_mixed'], $items['glow tape']['nexus_remaining_stale']]);
+        $this->assertSame([9, '2026-11-03 10:08', false], [$items['rope']['nexus_remaining'], $items['rope']['nexus_remaining_as_of'], $items['rope']['nexus_remaining_mixed']]);
+    }
 
     public function test_S_220_7_1_to_7_4_remaining_and_the_difference_with_its_as_of_and_a_dash_when_missing(): void
     {

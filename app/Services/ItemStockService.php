@@ -45,6 +45,8 @@ class ItemStockService
     private const INPUTS_TTL     = 900;
     /** Lampas dito mula sa huling matagumpay na sync = luma (3 oras). */
     public const STALE_SECONDS   = 10800;
+    /** Ang mga "remaining" ng isang item na hindi lalayo nang higit dito sa pinakabago ay iisang takbo ng sync. */
+    private const SAME_RUN_SECONDS = 3600;
 
     /** @return array<string,mixed> */
     public function build(string $start, string $end, bool $withCeoValue): array
@@ -153,7 +155,8 @@ class ItemStockService
             'categories'  => $this->categories(),
             'items'       => $items ?: new \stdClass(),
             'values'      => $this->values($start, $end, $withCeoValue) ?: new \stdClass(),
-            'stock_meta'  => $nexus ? $src['meta'] : ['mode' => 'po_received', 'nexus' => ['configured' => false]],
+            'stock_meta'  => $nexus ? $src['meta']
+                : ['mode' => 'po_received', 'nexus' => ['configured' => false, 'previously_synced' => $this->nexusPreviouslySynced()]],
         ];
     }
 
@@ -163,7 +166,8 @@ class ItemStockService
         $returnedOk = $src['meta']['returned']['available'] === true;
         $shipped    = (int) ($left['units'][$k] ?? 0);
         $returned   = (int) ($src['returned'][$k] ?? 0);
-        $remaining  = $src['remaining'][$k] ?? null;
+        $rem        = $src['remaining'][$k] ?? null;
+        $remaining  = $rem['n'] ?? null;
 
         return [
             'stock_in'              => $ready ? (int) ($src['stock_in'][$k] ?? 0) : null,
@@ -171,8 +175,22 @@ class ItemStockService
             'shipped'               => $ready ? $shipped : null,
             'returned_over_shipped' => $ready && $returnedOk ? $returned > $shipped : null,
             'nexus_remaining'       => $remaining,
+            'nexus_remaining_as_of' => $rem['as_of'] ?? null,
+            'nexus_remaining_stale' => $rem['stale'] ?? null,
+            'nexus_remaining_mixed' => $rem['mixed'] ?? null,
             'nexus_diff'            => $remaining !== null && $stock !== null ? $stock - $remaining : null,
         ];
+    }
+
+    /** Walang token pero may bakas ng naunang Nexus sync: ang page ay nagbababala (hindi tahimik). */
+    private function nexusPreviouslySynced(): bool
+    {
+        if (Schema::hasTable('app_settings')
+            && trim((string) DB::table('app_settings')->where('key', StockInSync::LAST_SYNCED)->value('value')) !== '') {
+            return true;
+        }
+
+        return Schema::hasTable(StockInSync::TABLE) && DB::table(StockInSync::TABLE)->exists();
     }
 
     /**
@@ -237,11 +255,25 @@ class ItemStockService
                 if ($k !== null && $k !== '') $out['returned'][$k] = ($out['returned'][$k] ?? 0) + (int) $pieces;
             }
 
+            // Kada Likha key: ang pinakabagong remaining ng bawat pangalan; ang pangalang mas luma nang higit sa isang
+            // oras kaysa sa pinakabago ng item (hal. pinalitang pangalan, nakatigil na) ay hindi idinadagdag.
+            $byKey = [];
             foreach ($in['remaining'] as [$name, $remaining, $asOf]) {
                 $k = $bridge->likhaKey($name);
                 if ($k === null) continue;
-                $out['remaining'][$k] = ($out['remaining'][$k] ?? 0) + $remaining;
+                $byKey[$k][] = [$remaining, $asOf];
                 if ($remainingAsOf === null || $asOf > $remainingAsOf) $remainingAsOf = $asOf;
+            }
+            foreach ($byKey as $k => $list) {
+                $cut = Carbon::parse(max(array_column($list, 1)), 'Asia/Manila')->subSeconds(self::SAME_RUN_SECONDS)->format('Y-m-d H:i:s');
+                $cur = array_values(array_filter($list, fn ($r) => $r[1] >= $cut));
+                $oldest = min(array_column($cur, 1));
+                $out['remaining'][$k] = [
+                    'n'     => array_sum(array_column($cur, 0)),
+                    'as_of' => substr($oldest, 0, 16),
+                    'stale' => Carbon::parse($oldest, 'Asia/Manila')->diffInSeconds($now, true) > self::STALE_SECONDS,
+                    'mixed' => count($cur) < count($list),
+                ];
             }
             $out['left'] = $left;
         }
@@ -275,7 +307,31 @@ class ItemStockService
         $key   = 'item_stock:inputs:v1:' . strtolower(request()->getHost()) . ':' . $stockStart . ':' . $source->key()
                . ':' . ($syncedAt ?? 'never') . ':' . $today;
 
-        return Cache::remember($key, self::INPUTS_TTL, function () use ($stockStart, $source, $now, $today) {
+        $hit = Cache::get($key);
+        if (is_array($hit)) return $hit;
+
+        // Isang kuwenta lang kahit sabay-sabay ang cold request: ang iba ay naghihintay sa lock at kinukuha ang naitabi.
+        // Kapag lumampas ang paghihintay, kinukuwenta na rin (tama pa rin ang sagot, mas mabagal lang). Ang orasan ng
+        // paghihintay ay microtime, hindi Carbon, kaya hindi ito nakadepende sa oras ng app.
+        $compute  = fn () => $this->nexusInputsFresh($stockStart, $source, $now, $today);
+        $lock     = Cache::lock($key . ':lock', 120);
+        $deadline = microtime(true) + max(0, (int) config('services.nexus.cold_wait', 15));
+        while (!$lock->get()) {
+            usleep(100000);
+            $hit = Cache::get($key);
+            if (is_array($hit)) return $hit;
+            if (microtime(true) >= $deadline) return Cache::remember($key, self::INPUTS_TTL, $compute);
+        }
+        try {
+            return Cache::remember($key, self::INPUTS_TTL, $compute);
+        } finally {
+            $lock->release();
+        }
+    }
+
+    private function nexusInputsFresh(string $stockStart, ReturnedSource $source, Carbon $now, string $today): array
+    {
+        return (function () use ($stockStart, $source, $now, $today) {
             $hasTable = Schema::hasTable(StockInSync::TABLE);
             $stockIn  = [];
             $remain   = [];
@@ -306,7 +362,7 @@ class ItemStockService
                 'stock_in'  => $stockIn,
                 'remaining' => $remain,
             ];
-        });
+        })();
     }
 
     /**

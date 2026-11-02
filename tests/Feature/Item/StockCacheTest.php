@@ -107,6 +107,30 @@ class StockCacheTest extends ItemTestCase
         $this->assertSame(8, $this->stockOf($c));
     }
 
+    public function test_S_220_9_4_a_cold_request_waits_for_another_computing_request_and_the_lock_is_freed_after(): void
+    {
+        config(['services.nexus.cold_wait' => 1]);
+        $key   = 'item_stock:inputs:v1:localhost:2026-09-25:jnt:20261103101000:2026-11-03';
+        $other = Cache::lock($key . ':lock', 60);
+        $this->assertTrue($other->get(), 'ibang request ang kumukuwenta');
+
+        $t = microtime(true);
+        [$json] = $this->fetchStock();
+
+        $this->assertGreaterThanOrEqual(0.9, microtime(true) - $t, 'naghintay sa lock ng iba');
+        $this->assertSame(8, $this->stockOf($json), 'tama pa rin pagkatapos maghintay');
+        $other->release();
+
+        // Isang kuwenta lang: ang sumunod ay galing sa cache (walang shipped/returned query).
+        [, $q] = $this->fetchStock();
+        $this->assertCount(1, array_filter($q, fn ($s) => str_contains($s, 'from_jnts')));
+
+        // Ang karaniwang cold request ay nagbibitaw ng lock pagkatapos.
+        Cache::flush();
+        $this->fetchStock();
+        $this->assertTrue(Cache::lock($key . ':lock', 1)->get());
+    }
+
     public function test_S_220_9_5_a_failed_or_partial_sync_does_not_refresh_the_cache(): void
     {
         $this->fetchStock();

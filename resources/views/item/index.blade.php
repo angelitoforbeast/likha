@@ -3356,6 +3356,8 @@
       // Mga babala (pula = token, kahel = iba): ipinapakita sa linya at sa tabi ng Qty to order.
       stockSourceIssues(){
         const n = this.stockNexus(), r = this.stock.meta?.returned, out = [];
+        // Walang token pero dati nang may Nexus sync (hindi Incepxion): malakas na babala, hindi tahimik.
+        if (!n && this.stock.meta?.nexus?.previously_synced) out.push({ text: 'Nexus token missing — stock shows the old PO count', bad: true });
         if (!n) return out;
         if (n.token_problem) out.push({ text: 'Nexus token needs fixing', bad: true });
         if (n.stale) out.push({ text: 'Nexus not synced for more than 3 hours: the numbers may be old', bad: false });
@@ -3386,8 +3388,9 @@
         if (S.nexus_remaining == null) return 'Nexus on shelf —';
         const d = S.nexus_diff;
         return 'Nexus on shelf ' + this.num(S.nexus_remaining)
-          + (n.remaining_as_of ? ' (as of ' + n.remaining_as_of + ')' : '')
-          + (n.remaining_stale ? ' (old)' : '')
+          + (S.nexus_remaining_as_of ? ' (as of ' + S.nexus_remaining_as_of + ')' : '')
+          + (S.nexus_remaining_stale ? ' (old)' : '')
+          + (S.nexus_remaining_mixed ? ' (an older Nexus name left out)' : '')
           + (d == null ? '' : ', difference ' + (d > 0 ? '+' : d < 0 ? '−' : '') + this.num(Math.abs(d)));
       },
       nexusCrossTip(){ return 'Nexus also counts the stock from before the start, so a difference is expected'; },

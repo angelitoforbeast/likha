@@ -53,6 +53,7 @@ class StockSourceViewTest extends ItemTestCase
             foreach (["'Nexus last synced '", "'Nexus not synced yet'", "'Nexus token needs fixing'",
                       "'Nexus not synced for more than 3 hours: the numbers may be old'",
                       "'Nexus not configured: stock = PO received − shipped'",
+                      "'Nexus token missing — stock shows the old PO count'", 'this.stock.meta?.nexus?.previously_synced',
                       "'Returned is not available (Nexus RTS)'", "'Unknown returned source setting: using J&T'"] as $text) {
                 $this->assertStringContainsString($text, $html, $text);
             }
@@ -88,7 +89,8 @@ class StockSourceViewTest extends ItemTestCase
         $this->assertStringContainsString('x-text="stockBreakdown(G.item_name)"', $html);
         $this->assertStringContainsString('x-text="nexusCrossText(G.item_name)"', $html);
         foreach (["'stock-in '", "' + returned '", "' − shipped '", "'Nexus on shelf '", "' (as of '", "', difference '",
-                  "'Nexus also counts the stock from before the start, so a difference is expected'", "' (old)'"] as $text) {
+                  "'Nexus also counts the stock from before the start, so a difference is expected'", "' (old)'",
+                  "' (an older Nexus name left out)'", 'S.nexus_remaining_as_of', 'S.nexus_remaining_stale'] as $text) {
             $this->assertStringContainsString($text, $html, $text);
         }
         // Malalaking numero: lahat ng numero ay dumadaan sa num() (toLocaleString).
