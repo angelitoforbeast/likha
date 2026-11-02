@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Jobs\Concerns\RestoresMissingDefaults;
 use App\Models\JntChatblastGsheetSetting;
 use Carbon\Carbon;
 use Google\Client as GoogleClient;
@@ -17,7 +18,7 @@ use Illuminate\Support\Facades\Log;
 
 class ExportJntStatusToGsheet implements ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use Dispatchable, InteractsWithQueue, Queueable, RestoresMissingDefaults; // SerializesModels, at ang payload na mas luma sa klase
 
     public int $timeout = 1200; // 20 mins
 

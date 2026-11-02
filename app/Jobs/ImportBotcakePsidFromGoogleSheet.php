@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Jobs\Concerns\RestoresMissingDefaults;
 use App\Models\BotcakePsidSetting;
 use App\Models\BotcakePsidImportRun;
 use App\Models\BotcakePsidImportEvent;
@@ -19,7 +20,7 @@ use Illuminate\Support\Facades\Log;
 
 class ImportBotcakePsidFromGoogleSheet implements ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use Dispatchable, InteractsWithQueue, Queueable, RestoresMissingDefaults; // SerializesModels, at ang payload na mas luma sa klase
 
     // Isang import lang sa isang pagkakataon (button, oras-oras at 03:00), para walang dobleng sulat sa J.
     public const LOCK_KEY = 'botcake-psid-import';

@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Jobs\Concerns\RestoresMissingDefaults;
 use App\Services\Jnt\JntClient;
 use App\Services\Jnt\JntTracker;
 use Illuminate\Bus\Queueable;
@@ -26,7 +27,7 @@ use Throwable;
  */
 class SyncFromJntStatusByTrack implements ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use Dispatchable, InteractsWithQueue, Queueable, RestoresMissingDefaults; // SerializesModels, at ang payload na mas luma sa klase
 
     public int $timeout = 3600; // 1 oras
     public int $tries = 1;

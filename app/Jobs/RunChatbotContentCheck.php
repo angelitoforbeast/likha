@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Jobs\Concerns\RestoresMissingDefaults;
 use App\Services\Chatbot\PageContentCheck;
 use App\Services\PageSettings;
 use Illuminate\Bus\Queueable;
@@ -19,7 +20,7 @@ use Throwable;
  */
 class RunChatbotContentCheck implements ShouldQueue, ShouldBeUnique
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use Dispatchable, InteractsWithQueue, Queueable, RestoresMissingDefaults; // SerializesModels, at ang payload na mas luma sa klase
 
     public int $timeout = 1800; // mas maikli sa retry_after ng database queue (1900)
     public int $tries = 1;

@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Jobs\Concerns\RestoresMissingDefaults;
 use App\Services\Chatbot\ChatbotSequences;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUniqueUntilProcessing;
@@ -19,7 +20,7 @@ use Illuminate\Queue\SerializesModels;
  */
 class RunChatbotSequenceStep implements ShouldQueue, ShouldBeUniqueUntilProcessing
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use Dispatchable, InteractsWithQueue, Queueable, RestoresMissingDefaults; // SerializesModels, at ang payload na mas luma sa klase
 
     public int $timeout = ChatbotSequences::INLINE_TIMEOUT; // mas maikli sa lock ng customer (ChatbotRunner::LOCK_SECONDS)
     public int $tries = 1;

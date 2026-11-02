@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Jobs\Concerns\RestoresMissingDefaults;
 use App\Services\BotcakePageSetup;
 use App\Services\PageSettings;
 use Illuminate\Bus\Queueable;
@@ -18,7 +19,7 @@ use Throwable;
  */
 class RunChatblastSetupCheck implements ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use Dispatchable, InteractsWithQueue, Queueable, RestoresMissingDefaults; // SerializesModels, at ang payload na mas luma sa klase
 
     public const PROGRESS = 'chatblast:setup-check:progress';
     public const AGAIN = 'chatblast:setup-check:again'; // may bagong pangalan habang tumatakbo: isa pang takbo pagkatapos

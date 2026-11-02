@@ -64,30 +64,41 @@ class QueuedJobCompatTest extends SequenceHandoffTestCase
     }
 
     /**
-     * Every typed property of a queued job must survive an older payload: either it has a class-level default, or it is a
-     * required constructor parameter (there since the class was first queued). An optional constructor parameter promoted
-     * to a property, or a typed property set only in the constructor body, is left uninitialized by an older payload.
+     * Every queued job (app/Jobs and its subfolders) with an optional typed property, that an older payload can leave
+     * uninitialized, uses RestoresMissingDefaults: the property is an optional constructor parameter (promoted or assigned)
+     * with no class-level default. The payload format stays as it is (no class defaults, which Laravel would leave out of the
+     * payload and the previous code could not read).
+     *
+     * Known gap: a new REQUIRED constructor parameter on a job that is already queued is not covered (there is no default to
+     * restore); a job that gains a required parameter needs a default or a drained queue before the deploy.
      */
-    public function test_S_218_3_no_queued_job_has_a_typed_property_an_older_payload_can_leave_uninitialized(): void
+    public function test_S_218_3_every_queued_job_with_an_optional_typed_property_restores_missing_defaults(): void
     {
         $bad = [];
         $checked = 0;
-        foreach (glob(app_path('Jobs/*.php')) as $file) {
-            $class = 'App\\Jobs\\' . basename($file, '.php');
+        $files = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator(app_path('Jobs'), \FilesystemIterator::SKIP_DOTS));
+        foreach ($files as $file) {
+            if ($file->getExtension() !== 'php') continue;
+            $relative = substr($file->getPathname(), strlen(app_path('Jobs')) + 1, -4);
+            $class = 'App\\Jobs\\' . str_replace(['/', '\\'], '\\', $relative);
             if (!class_exists($class) || !is_subclass_of($class, ShouldQueue::class)) continue;
             $checked++;
             $r = new \ReflectionClass($class);
+            if (in_array(\App\Jobs\Concerns\RestoresMissingDefaults::class, class_uses_recursive($class), true)) continue;
             $params = [];
             foreach ($r->getConstructor()?->getParameters() ?? [] as $p) $params[$p->getName()] = $p;
             foreach ($r->getProperties() as $prop) {
                 if ($prop->isStatic() || !$prop->hasType() || $prop->hasDefaultValue()) continue;
                 $param = $params[$prop->getName()] ?? null;
-                // Filled from a required constructor parameter of the same name (promoted or assigned): there since the class was first queued.
-                if ($param !== null && !$param->isOptional()) continue;
-                $bad[] = $class . '::$' . $prop->getName();
+                if ($param !== null && $param->isOptional()) $bad[] = $class . '::$' . $prop->getName();
             }
         }
-        $this->assertGreaterThan(40, $checked, 'every queued job class was read');
-        $this->assertSame([], $bad, 'give these properties a class-level default (and treat it as "no information")');
+        $this->assertGreaterThan(40, $checked, 'every queued job class was read, subfolders included');
+        $this->assertSame([], $bad, 'use App\Jobs\Concerns\RestoresMissingDefaults in these classes');
+    }
+
+    public function test_S_218_3_the_guard_reads_subfolders(): void
+    {
+        $this->assertTrue(is_subclass_of(\App\Jobs\Boardroom\RunTurnJob::class, ShouldQueue::class), 'app/Jobs/Boardroom is a queued job folder the guard must read');
     }
 }
