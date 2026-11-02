@@ -2598,9 +2598,9 @@
           if (row.item_value_source === 'manual' && row.item_value_comment) L.push('💬 ' + row.item_value_comment);
           // Sino at kailan (Manila, galing sa edit log); ang CEO value ay nasa source lang ng CEO view.
           if (row.item_value_set_by) L.push('Set by ' + row.item_value_set_by + (row.item_value_set_at ? ' · ' + row.item_value_set_at : ''));
-          @if(!empty($effectiveIsCEO))
+@if(!empty($effectiveIsCEO))
           if (row.item_value_ceo_set_by) L.push('🔒 CEO value set by ' + row.item_value_ceo_set_by + (row.item_value_ceo_set_at ? ' · ' + row.item_value_ceo_set_at : ''));
-          @endif
+@endif
         } else if (colId === 'action') {
           if (!row.action_comment) return null;
           L.push(row.action_comment);
