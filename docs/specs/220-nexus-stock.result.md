@@ -79,6 +79,8 @@ After the empty-days guard (item 12): `tests/Feature/Item` 326 tests, 1 failure 
 
 After review 2 (c51c0571): full suite failures ExampleTest, ItemTableFitScriptTest and Astra S-26.18, all in the base list; no new failure. `tests/Feature/Item` 330 tests, 1 failure (ItemTableFitScriptTest, base), 1 skipped; the six 220 files 93 tests, all passed, 1 skipped.
 
+Merge of live main 73bf3778 (spec 221, only `app/Services/Chatbot/ProblemsPanel.php` and its tests; conflict in `qa/stories.md` only, both slices kept): merge commit 8feddbef. On the merge: `tests/Feature/Item` 330 tests, 1 failure (ItemTableFitScriptTest, base), 1 skipped; the 220 and stock files 122 tests, all passed, 1 skipped.
+
 ## Review fixes (after the first result)
 
 Live preview on production (read-only, by the reviewer): the returned query took 835 ms using
