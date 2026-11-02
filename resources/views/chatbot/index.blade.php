@@ -623,7 +623,7 @@
             let entry = hit;
             // Ad groups lang ang nagbago (ipinakita, itinago o dumating ang data): ang mga sub-row at ang button lang ang
             // pinapalitan, hindi ang buong row ng page.
-            if (hit && hit.sig !== sig && hit.sig !== null && hit.r === r && show && hit.nodes && !hit.nodes[0].hidden && !hit.replacing
+            if (hit && hit.sig !== sig && hit.sig !== null && hit.r === r && show && hit.nodes && !hit.lazy && !hit.nodes[0].hidden && !hit.replacing
                 && RowCache.signature(r, {...st, ag: null}) === hit.main) {
                 const [tr, ...oldSubs] = hit.nodes, subs = subRowsOf(r);
                 for (const n of oldSubs) n.remove();
@@ -674,13 +674,13 @@
         if (box) box.checked = picked.has(entry.r.page);
     }
     /**
-     * Binubuo at ipinapakita ang mga row ng ops, REVEAL_AT_ONCE kada frame (ang unang bahagi ay ngayon din): ang isang row
-     * ay mga 70 cell na binubuo, saka style at layout, kaya ang 160 row nang sabay ay isang task na lampas sa kalahating
-     * segundo. Ang bagong render ay pumapalit sa naiwang reveal (kinukuwenta nito ulit ang lahat ng hindi pa nakikita).
-     * Habang may hinihintay pa, aria-busy ang table. Ang fade ay sinusukat pagkatapos ng huling bahagi.
+     * Inilalagay at ipinapakita ang mga row ng ops. Ang buong row (mga 400 element) ay binubuo lang dito kapag pinapalitan
+     * nito ang buong row na nakalagay na (Save, switch) o kasusulat lang ang page; ang iba ay magaan na kapalit (lazyRow),
+     * na binubuo kapag malapit nang makita (buildNear). Ang binubuo ay hanggang BUILD_MS kada frame (kahit isa), saka ang
+     * kasunod sa susunod na frame. Ang bagong render ay pumapalit sa naiwang reveal (kinukuwenta nito ulit ang lahat ng
+     * hindi pa nakikita). Habang may hinihintay pa, aria-busy ang table. Ang fade ay sinusukat pagkatapos ng huling bahagi.
      */
-    const REVEAL_AT_ONCE = 6;
-    let revealRun = 0;
+    let revealRun = 0, revealLeft = 0;
     function reveal(ops, order) {
         const run = ++revealRun;
         const step = later => {
@@ -688,24 +688,116 @@
             // Ang fade ng naunang bahagi (nailatag na sa nakaraang frame, kaya basa lang): ang klase ng libu-libong cell
             // nang sabay sa dulo ay isa pang mahabang frame.
             if (later) markClamped();
-            for (const entry of ops.splice(0, REVEAL_AT_ONCE)) {
+            const t0 = performance.now();
+            let built = 0;
+            while (ops.length) {
+                const entry = ops[0];
                 if (!entry.nodes) {
-                    entry.nodes = rowNodes(entry.r);
+                    const full = !nearIo || (entry.replacing && !entry.replacing[0].cbLazy) || firstPages.has(entry.r.page);
+                    if (full && built && performance.now() - t0 > BUILD_MS) break;
+                    entry.lazy = !full;
+                    entry.nodes = full ? rowNodes(entry.r) : [lazyRow(entry.r)];
+                    if (full) built++;
                     rowState(entry);
                     // Sa puwesto ng dating row, o bago ang unang nakalagay na row na kasunod nito sa listahan.
                     const at = entry.replacing ? entry.replacing[0] : nextPlaced(entry.r.page, order);
                     for (const n of entry.nodes) tbody.insertBefore(n, at);
+                    watchRow(entry);
                 }
+                ops.shift();
                 for (const n of entry.nodes) n.hidden = false;
-                for (const n of entry.replacing || []) n.remove();
+                for (const n of entry.replacing || []) { n.remove(); unwatch(n); }
                 entry.replacing = null;
             }
-            if (ops.length) table.setAttribute('aria-busy', 'true'); else table.removeAttribute('aria-busy');
+            revealLeft = ops.length;
+            paintBusy();
             paintSel();
             requestAnimationFrame(ops.length ? () => step(true) : markClamped);
         };
         step(false);
     }
+    // lazy-rows:start
+    // Ang row na malayo sa nakikita ay magaan na kapalit (ang pangalan ng page at ang taas ng row): ang buong row ay
+    // binubuo kapag pumasok sa NEAR ng kahon ng table, at ibinabalik sa kapalit kapag lumabas sa FAR (maliban sa row na
+    // bukas, ine-edit, may focus o bukas ang Ad groups). Kaya ilang screen lang ng row ang nasa table kahit ilang page:
+    // ang style, layout at paint ng bawat frame (ang pagbukas ng Ad groups, ang Save) ay hindi lumalaki sa bilang ng page.
+    // Ang data ng bawat row ay nasa rows pa rin: ang filter, Copy, Paste, Save at Check ay hindi nakadepende sa DOM.
+    const BUILD_MS = 12, NEAR_PX = 800, NEAR = NEAR_PX + 'px 0px', FAR = '3200px 0px';
+    const lazyWait = new Set(), lazyNear = new Set(); // ang kapalit na wala pang sagot ng observer; ang malapit na
+    let lazyH = 120, lazyFrame = 0; // ang karaniwang taas ng row (sinusukat sa markClamped)
+    const IO = 'IntersectionObserver' in window ? window.IntersectionObserver : null;
+    const nearIo = IO && new IO(list => {
+        for (const e of list) {
+            lazyWait.delete(e.target);
+            // Nasa kahon mismo (hindi lang sa NEAR): binubuo agad, at aria-busy ang table hanggang doon.
+            e.target.cbInView = e.isIntersecting && e.boundingClientRect.bottom > e.rootBounds.top + NEAR_PX && e.boundingClientRect.top < e.rootBounds.bottom - NEAR_PX;
+            if (e.isIntersecting) lazyNear.add(e.target); else lazyNear.delete(e.target);
+        }
+        if (lazyNear.size && !lazyFrame) lazyFrame = requestAnimationFrame(buildNear);
+        paintBusy();
+    }, {root: $('cb-box'), rootMargin: NEAR});
+    // Ang taas ay mula sa observer (walang basa ng layout kada row, na sunod-sunod sa pagpalit ay buong layout bawat isa).
+    const farIo = IO && new IO(list => { for (const e of list) if (!e.isIntersecting) fold(e.target, e.boundingClientRect.height); }, {root: $('cb-box'), rootMargin: FAR});
+    function lazyRow(r, h = lazyH) {
+        const tr = el('tr', {'data-page': r.page, class: 'cb-lazy'}, [
+            el('td', {class: 'stick-1 border-b border-slate-100 px-3 py-2 align-top font-medium break-words', text: r.page}),
+            el('td', {class: 'border-b border-slate-100', colspan: String(6 + botCols().length), style: 'height: ' + Math.max(h, 40) + 'px'})]);
+        tr.cbLazy = true;
+        return tr;
+    }
+    /** Ang bagong lagay na row: ang kapalit ay hinihintay ng NEAR, ang buong row ay binabantayan ng FAR. */
+    function watchRow(entry) {
+        const tr = entry.nodes[0];
+        if (entry.lazy) { lazyWait.add(tr); nearIo.observe(tr); } else farIo?.observe(tr);
+    }
+    function unwatch(tr) {
+        nearIo?.unobserve(tr); farIo?.unobserve(tr);
+        lazyWait.delete(tr); lazyNear.delete(tr);
+    }
+    /**
+     * Ang mga kapalit na malapit na: ang nasa kahon mismo ay lahat sa frame na ito (isang layout ng table, hindi isa kada
+     * row: ang bawat frame ay layout ng buong table), saka ang nasa NEAR lang hanggang BUILD_MS (kahit isa).
+     */
+    function buildNear() {
+        lazyFrame = 0;
+        const t0 = performance.now();
+        let built = 0;
+        for (const tr of [...lazyNear].sort((a, b) => !!b.cbInView - !!a.cbInView)) {
+            if (!tr.cbInView && built && performance.now() - t0 > BUILD_MS) break;
+            lazyNear.delete(tr);
+            const entry = rowCache.get(tr.dataset.page);
+            if (!entry || !entry.lazy || entry.nodes[0] !== tr || !tr.isConnected) { unwatch(tr); continue; }
+            if (tr.hidden) continue;
+            unwatch(tr);
+            // Ang signature ngayon (hal. dumating ang Check habang kapalit pa ito), kaya hindi ito binubuo ulit sa susunod na render.
+            const st = rowStates()(entry.r);
+            Object.assign(entry, {sig: RowCache.signature(entry.r, st), base: RowCache.withoutCheck(entry.r, st), main: RowCache.signature(entry.r, {...st, ag: null}),
+                nodes: rowNodes(entry.r), lazy: false});
+            rowState(entry);
+            tr.replaceWith(...entry.nodes);
+            watchRow(entry);
+            built++;
+        }
+        if (built) { paintSel(); requestAnimationFrame(markClamped); }
+        if (lazyNear.size) lazyFrame = requestAnimationFrame(buildNear);
+        paintBusy();
+    }
+    /** Ang buong row na napakalayo na: ibinabalik sa kapalit na kasing-taas nito (walang gumagalaw sa nakikita). */
+    function fold(tr, h) {
+        const entry = rowCache.get(tr.dataset.page), page = tr.dataset.page;
+        if (!entry || entry.lazy || entry.replacing || entry.nodes[0] !== tr || !tr.isConnected || page === openRow || AG.isOpen(page)
+            || (editing && editing.r.page === page) || entry.nodes.some(n => n.contains(document.activeElement))) return;
+        const ph = lazyRow(entry.r, h || lazyH);
+        ph.hidden = tr.hidden;
+        tr.before(ph);
+        for (const n of entry.nodes) { n.remove(); unwatch(n); }
+        Object.assign(entry, {nodes: [ph], lazy: true});
+        watchRow(entry);
+    }
+    function paintBusy() {
+        if (revealLeft || lazyWait.size || [...lazyNear].some(tr => tr.cbInView)) table.setAttribute('aria-busy', 'true'); else table.removeAttribute('aria-busy');
+    }
+    // lazy-rows:end
     function nextPlaced(page, order) {
         for (let i = order.indexOf(page) + 1; i < order.length; i++) {
             const e = rowCache.get(order[i]), first = e && ((e.replacing && e.replacing[0]) || (e.nodes && e.nodes[0]));
@@ -758,7 +850,7 @@
      */
     function placeRows(parent, want) {
         const wanted = new Set(want);
-        for (const n of [...parent.children]) if (!wanted.has(n)) n.remove();
+        for (const n of [...parent.children]) if (!wanted.has(n)) { n.remove(); unwatch(n); }
         let at = parent.firstElementChild;
         for (const n of want) {
             if (n === at) { at = at.nextElementSibling; continue; }
@@ -768,7 +860,10 @@
 
     // ---- Reply values: Page-based (ang default: page values sa lahat) o Ad-based (ang mga ad group ng page) ----
     const AG = ChatbotAdGroups.create({csrf, urls: {index: url.agUrl, save: url.agUrl, add: url.agAddUrl, del: url.agDeleteUrl, history: url.agHistoryUrl,
-        restore: url.agRestoreUrl, mode: url.agModeUrl, value: url.agValueUrl, removeAd: url.agRemoveAdUrl, ad: url.agAdUrl}, onChange: page => { agVersion.set(page, (agVersion.get(page) || 0) + 1); if (!editing) render(); }});
+        restore: url.agRestoreUrl, mode: url.agModeUrl, value: url.agValueUrl, removeAd: url.agRemoveAdUrl, ad: url.agAdUrl}, onChange: page => { agVersion.set(page, (agVersion.get(page) || 0) + 1); if (editing || pe) agStale = true; else render(); }});
+    // Nagbago ang Ad groups habang bukas ang Edit (o may ine-edit na cell): ang table ay ipinipinta pagsara ng Edit, hindi
+    // sa likod nito sa bawat sulat.
+    let agStale = false;
     /** Manage in Edit: ang Edit ng page, nakatapat sa Ad groups. */
     function manageAdGroups(r) {
         openPe(r);
@@ -1107,6 +1202,9 @@
     function markClamped() {
         const w = $('cb-box').clientWidth, tw = table.offsetWidth; // basa rin, kasama ng sukat ng mga cell
         const trs = [...table.querySelectorAll('tbody tr:not(.cb-open):not([hidden])')].filter(tr => tr.cbClampWidth !== tw);
+        // Ang karaniwang taas ng buong row, para sa taas ng kapalit (lazyRow): basa rin, sa parehong layout.
+        const full = trs.filter(tr => !tr.cbLazy && !tr.classList.contains('ag-sub'));
+        if (full.length) lazyH = Math.round(full.reduce((s, tr) => s + tr.offsetHeight, 0) / full.length);
         clampPass(trs.flatMap(tr => [...tr.querySelectorAll('.cb-txt')]));
         for (const tr of trs) tr.cbClampWidth = tw;
         setBoxWidth(w);
@@ -1843,6 +1941,14 @@
     let pe = null;
     const peInput = key => $('pe-fields').querySelector('[data-key="' + CSS.escape(key) + '"] .pe-in');
     const grow = t => { if (t.tagName === 'TEXTAREA') { t.style.height = 'auto'; t.style.height = t.scrollHeight + 2 + 'px'; } };
+    // Lahat ng textarea ng Edit nang sabay: lahat ng sulat, saka lahat ng basa, saka lahat ng sulat (isang layout, hindi isa
+    // kada field: ang sunod-sunod na sulat at basa ay buong layout ng page bawat isa).
+    function growAll() {
+        const list = [...$('pe-fields').querySelectorAll('textarea')];
+        for (const t of list) t.style.height = 'auto';
+        const heights = list.map(t => t.scrollHeight + 2);
+        list.forEach((t, i) => { t.style.height = heights[i] + 'px'; });
+    }
     /** Bawat field: ang value ngayon, at kung binago (changed) o hindi link sa image field (flagged, hindi sine-save). */
     function peState() {
         return editCols().map(c => {
@@ -1892,7 +1998,7 @@
         if (r.reply === 'ad') AG.mount(r, agHost);
         $('pe').classList.remove('hidden');
         $('pe-fields').scrollTop = 0;
-        $('pe-fields').querySelectorAll('textarea').forEach(grow);
+        growAll();
         paintPe();
         $('pe-paste').focus();
     }
@@ -1937,6 +2043,10 @@
         $('pe').classList.add('hidden');
         AG.unmount(pe.r.page);
         pe = null;
+        // Ang mga field at ang Ad groups ng saradong Edit ay hindi naiiwan sa page (libu-libong element sa Ad-based na page).
+        $('pe-fields').replaceChildren();
+        $('pe-map-list').replaceChildren();
+        if (agStale) { agStale = false; render(); }
     }
     /** Ibinabalik ang mga field bago ang huling paste, para ang bagong paste ay pumalit at hindi magpatong. */
     function peRestore() {
@@ -1965,7 +2075,7 @@
         }
         if (plan.changes.length) notes.unshift(plural(filled, 'field') + ' filled from the paste, not saved yet.');
         $('pe-notes').replaceChildren(...notes.map(n => el('li', {text: n})));
-        $('pe-fields').querySelectorAll('textarea').forEach(grow);
+        growAll();
         paintPe();
     }
     // ---- Ang AI ang pumipili ng field ng bawat value (paste sa Edit) ----
@@ -2073,7 +2183,7 @@
         // Ang cell na pinalitan na ng user ang field ay hindi ginagalaw.
         for (const m of map.missing) if (peInput(m.key) && !map.keys[m.cell]) { map.keys[m.cell] = m.key; map.conf[m.cell] = 'medium'; map.note[m.cell] = 'in order (new column)'; }
         map.missing = map.missing.filter(m => !peInput(m.key));
-        $('pe-fields').querySelectorAll('textarea').forEach(grow);
+        growAll();
         peMapList();
         paintPe();
     }
@@ -2091,7 +2201,7 @@
         pe.map.applied = true;
         $('pe-map').classList.add('hidden');
         $('pe-notes').replaceChildren(el('li', {text: plural(out.changes.length, 'field') + ' filled from the paste (AI mapping), not saved yet.'}));
-        $('pe-fields').querySelectorAll('textarea').forEach(grow);
+        growAll();
         paintPe();
     }
     /** Ang dating mapping (header o ayos), may maikling dahilan kung bakit. */

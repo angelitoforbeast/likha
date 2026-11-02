@@ -17,7 +17,7 @@ const churn = () => { if (process.env.PERF_PHP) spawnSync(process.env.PERF_PHP, 
 
 // The grid against the server, after an action: every shown row once, its values and chat count as /chatbot/data has
 // them (pasted values not saved yet are skipped), no row left over from before a redraw.
-const GRID_CHECK = `(async () => {
+export const GRID_CHECK = `(async () => {
     const data = await fetch('/chatbot/data', {headers: {Accept: 'application/json'}}).then(r => r.json());
     const byPage = new Map(data.rows.map(r => [r.page, r]));
     const seen = new Map(), wrong = [];

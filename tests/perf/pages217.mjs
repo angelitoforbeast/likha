@@ -7,7 +7,7 @@
 // One-time setup (local test values only, no env file): php tests/perf/set217.php migrate && php tests/perf/set217.php seed
 // Run: node tests/perf/pages217.mjs [--cpu=4] [--phone] [--only-phone] [--json=file] [--css=file] [--profile=<action>|load] [--trace=<action>|load] [--php=path]
 //   --cpu=N slows the page's CPU N times (a normal office PC is slower than this machine; the verdicts use the run given).
-//   --eval=<expression> prints it after the load and stops.
+//   --eval=<expression> prints it after the load and stops; --features runs only the S-217.1.3 checks after the load.
 //   --css=file appends rules to the stylesheet, to try a CSS change before it is made.
 // It starts the local server (php -S on 127.0.0.1:8217) and Chrome, and stops them at the end. Nothing outside
 // 127.0.0.1 resolves in that Chrome.
@@ -22,7 +22,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const args = Object.fromEntries(process.argv.slice(2).map(a => { const [k, ...v] = a.replace(/^--/, '').split('='); return [k, v.join('=') || true]; }));
 if (args.profile && args.profile !== 'load') process.env.PERF_PROFILE = String(args.profile);
 if (args.trace && args.trace !== 'load') process.env.PERF_TRACE = String(args.trace);
-const {measure, startTrace, topFunctions} = await import('./screens.mjs');
+const {measure, startTrace, topFunctions, GRID_CHECK} = await import('./screens.mjs');
 const PORT = 8217, BASE = 'http://127.0.0.1:' + PORT, DEBUG_PORT = 9417;
 const PHP = args.php || (existsSync('C:/Users/Forbeast/.config/herd/bin/php84/php.exe') ? 'C:/Users/Forbeast/.config/herd/bin/php84/php.exe' : 'php');
 const CHROME = args.chrome || 'C:/Program Files/Google/Chrome/Application/chrome.exe';
@@ -94,7 +94,9 @@ async function adGroups(p, out, label) {
     const before = {dom: await p.ev(DOM), subs: await p.ev(SUB_ROWS), groups: await p.ev(GROUP_NODES)};
     const shown = [];
     for (const page of AD_PAGES) {
-        await p.ev(`(() => { const b = document.querySelector('button[aria-label^="Show the ad groups of ${page}"]'); if (b) b.scrollIntoView({block: 'center'}); return true; })()`);
+        // The row may still be its light stand-in until it is near the view: bring it in and wait for the button.
+        await p.ev(`(() => { document.querySelector('#cb-table tr[data-page="${page}"]').scrollIntoView({block: 'center'}); return true; })()`);
+        await p.waitFor(`document.querySelector('button[aria-label^="Show the ad groups of ${page}"]') && !document.querySelector('[aria-busy="true"]')`, 60000);
         await sleep(300);
         const r = await measure(p, label + ': show ad groups of ' + page, click(`document.querySelector('button[aria-label^="Show the ad groups of ${page}"]')`),
             `[...document.querySelectorAll('#cb-table tr.ag-sub')].some(tr => tr.dataset.agGroup)`, {settle: 800});
@@ -122,6 +124,58 @@ async function adGroups(p, out, label) {
         pass: before.subs === 0 && before.groups === 0 && open.groups > 0 && after.subs === 0 && after.groups === 0 && after.dom <= before.dom * 1.05,
         note: `before: ${before.subs} sub-rows, ${before.groups} group/ad nodes, ${before.dom} elements; 3 shown: ${open.subs} sub-rows, ${open.groups} group/ad nodes; hidden again: ${after.subs} sub-rows, ${after.groups} group/ad nodes, ${after.dom} elements`});
     return {longest: Math.max(...[...shown, sc, edit, ...hidden].map(r => r.longest || 0))};
+}
+
+/**
+ * S-217.1.3: every feature of the screen still works on the lazily built grid, in real Chrome (each check opens or
+ * writes what it says and reads the result back). Native questions (confirm) are answered yes.
+ */
+async function features(p, out, label) {
+    const RUN = Date.now().toString(36);
+    const row = page => `document.querySelector('#cb-table tr[data-page="${page}"]:not(.ag-sub)')`;
+    const cellOf = (page, key) => `${row(page)}.querySelector('td[data-key="${key}"]')`;
+    const shown = id => `!document.getElementById('${id}').classList.contains('hidden')`;
+    const results = [];
+    const check = async (action, run, ok, timeout = 15000) => {
+        let pass = false, note = '';
+        try { await p.ev(`(async () => { ${run}; return true; })()`); pass = !!(await p.waitFor(ok, timeout)); } catch (e) { note = e.message.slice(0, 200); }
+        results.push(pass);
+        out.push({action: label + ': S-217.1.3 ' + action, pass, note});
+    };
+    const paste = (page, key, tsv) => `const dt = new DataTransfer(); dt.setData('text/plain', ${JSON.stringify(tsv)}); ${cellOf(page, key)}.dispatchEvent(new ClipboardEvent('paste', {clipboardData: dt, bubbles: true, cancelable: true}))`;
+    await check('inline ✎ edit saves', `${cellOf('Perf Page 003', 'main_flow_2')}.querySelector('.cb-edit').click(); const t = document.getElementById('long-text'); t.value = 'PERF217 inline ${RUN}'; t.dispatchEvent(new Event('input')); document.getElementById('long-close').click()`,
+        `${cellOf('Perf Page 003', 'main_flow_2')}.textContent.includes('PERF217 inline ${RUN}') && !${cellOf('Perf Page 003', 'main_flow_2')}.textContent.includes('Saving')`);
+    await check('multi-cell paste shows 4 cells on 2 pages', `${cellOf('Perf Page 004', 'main_flow')}.click(); ${paste('Perf Page 004', 'main_flow', `P1 ${RUN}\tP2 ${RUN}\nP3 ${RUN}\tP4 ${RUN}`)}`,
+        `/4 cells changed on 2 pages/.test(document.getElementById('bar-text').textContent)`);
+    await check('the pasted cells save', `document.getElementById('bar-save').click()`,
+        `/Saved 4 fields on 2 pages/.test(document.getElementById('bar-text').textContent) && ${cellOf('Perf Page 005', 'main_flow_2')}.textContent.includes('P4 ${RUN}')`);
+    await check('Undo puts them back', `document.getElementById('bar-undo').click()`,
+        `/^Undone: 4 fields/.test(document.getElementById('notice').textContent) && !${cellOf('Perf Page 005', 'main_flow_2')}.textContent.includes('P4 ${RUN}')`);
+    await check('Edit window saves a field', `document.querySelector('button[aria-label="Edit Perf Page 006"]').click(); const i = document.querySelector('#pe-fields [data-key="main_flow"] .pe-in'); i.value = 'PERF217 edit ${RUN}'; i.dispatchEvent(new Event('input', {bubbles: true})); document.getElementById('pe-save').click()`,
+        `${shown('pe')} === false && ${cellOf('Perf Page 006', 'main_flow')}.textContent.includes('PERF217 edit ${RUN}')`);
+    await check('History lists the versions', `document.querySelector('button[aria-label="Edit Perf Page 006"]').click(); document.querySelector('#pe-fields button[aria-label="History of Main Flow"]').click()`,
+        `${shown('hist')} && [...document.querySelectorAll('#hist-list button')].some(b => b.textContent === 'Restore')`);
+    await check('Restore brings back the older value', `[...document.querySelectorAll('#hist-list button')].find(b => b.textContent === 'Restore').click()`,
+        `/^Restored/.test(document.getElementById('hist-note').textContent) && !${cellOf('Perf Page 006', 'main_flow')}.textContent.includes('PERF217 edit ${RUN}')`);
+    await p.ev(`(() => { document.querySelector('#hist [data-close-dialog]').click(); document.getElementById('pe-close').click(); return true; })()`);
+    await check('the Check column shows a result', 'true', `!document.querySelector('#cb-table td[data-check="Perf Page 002"]').textContent.includes('Checking')`, 60000);
+    await check('search filter', `const f = document.getElementById('f-q'); f.value = 'Page 01'; f.dispatchEvent(new Event('input', {bubbles: true}))`,
+        `/^10 of 80/.test(document.getElementById('count').textContent) && [...document.querySelectorAll('#cb-table tbody tr[data-page]:not([hidden]):not(.ag-sub)')].length === 10`);
+    await check('clearing the filter shows every page', `const f = document.getElementById('f-q'); f.value = ''; f.dispatchEvent(new Event('input', {bubbles: true}))`,
+        `/^80 of 80/.test(document.getElementById('count').textContent) && [...document.querySelectorAll('#cb-table tbody tr[data-page]:not([hidden]):not(.ag-sub)')].length === 80`);
+    await check('Replies switch to Ad-based', `const s = document.querySelector('select[aria-label="Reply values of Perf Page 002"]'); s.value = 'ad'; s.dispatchEvent(new Event('change'))`,
+        `document.querySelector('button[aria-label^="Show the ad groups of Perf Page 002"], button[aria-label^="Hide the ad groups of Perf Page 002"]')`);
+    await check('Replies switch back to Page-based', `const s = document.querySelector('select[aria-label="Reply values of Perf Page 002"]'); s.value = 'page'; s.dispatchEvent(new Event('change'))`,
+        `document.querySelector('select[aria-label="Reply values of Perf Page 002"]')?.value === 'page' && !document.querySelector('#cb-table tr.ag-sub')`);
+    await check('a far row is built when scrolled to', `const b = document.getElementById('cb-box'); b.scrollTop = b.scrollHeight`,
+        `${row('Perf Page 080')} && ${row('Perf Page 080')}.querySelector('td.cb-cell') && !document.querySelector('[aria-busy="true"]')`);
+    await p.ev(`(() => { document.getElementById('cb-box').scrollTop = 0; return true; })()`);
+    const g = await p.ev(GRID_CHECK);
+    out.push({action: label + ': S-217.1.3 the grid matches the server', pass: g.wrongCount === 0 && !g.dupes.length && !g.inert && g.visible === 80,
+        note: `${g.visible} rows shown (${g.count}), ${g.wrongCount} values differ, ${g.dupes.length} duplicate rows, ${g.inert} inert`});
+    results.push(g.wrongCount === 0 && !g.dupes.length && !g.inert && g.visible === 80);
+    if (p.errors.length) { out.push({action: label + ': S-217.1.3 page errors', pass: false, note: JSON.stringify(p.errors.slice(-3))}); results.push(false); }
+    return results.every(Boolean);
 }
 
 async function main() {
@@ -173,6 +227,7 @@ async function main() {
         const l = await load(page, out, label);
         // --eval=<expression>: printed after the load, then the run stops (to look at the page).
         if (args.eval) { console.log(JSON.stringify(await page.ev(String(args.eval)))); break; }
+        if (args.features) { out.push({action: label + ': S-217.1.3 every feature of the screen still works', pass: await features(page, out, label)}); break; }
         const s = await scroll(page, out, label);
         const ag = await adGroups(page, out, label);
         const ok = l.serverMs < SERVER_MS && l.usable < USABLE_MS && l.afterLoad < TASK_MS && s.longest < TASK_MS;
@@ -180,6 +235,8 @@ async function main() {
             pass: ok && (!phone || ag.longest < TASK_MS * 5),
             note: `server ${Math.round(l.serverMs)} ms, usable at ${l.usable} ms, longest task after usable ${fmt(l.afterLoad)} ms, while scrolling ${fmt(s.longest)} ms; ad groups and Edit: longest ${fmt(ag.longest)} ms`});
         if (page.errors.length) out.push({action: label + ': page errors', pass: false, note: JSON.stringify(page.errors.slice(-3))});
+        // The features on the desktop run (they write values, so once per run).
+        if (!phone) out.push({action: label + ': S-217.1.3 every feature of the screen still works', pass: await features(page, out, label)});
         await cdp.send('Target.closeTarget', {targetId: page.targetId});
     }
     printTable(results);
