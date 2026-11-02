@@ -7,6 +7,7 @@
 // One-time setup (local test values only, no env file): php tests/perf/set217.php migrate && php tests/perf/set217.php seed
 // Run: node tests/perf/pages217.mjs [--cpu=4] [--phone] [--only-phone] [--json=file] [--css=file] [--profile=<action>|load] [--trace=<action>|load] [--php=path]
 //   --cpu=N slows the page's CPU N times (a normal office PC is slower than this machine; the verdicts use the run given).
+//   --eval=<expression> prints it after the load and stops.
 //   --css=file appends rules to the stylesheet, to try a CSS change before it is made.
 // It starts the local server (php -S on 127.0.0.1:8217) and Chrome, and stops them at the end. Nothing outside
 // 127.0.0.1 resolves in that Chrome.
@@ -143,7 +144,11 @@ async function main() {
         if (!version) throw new Error('Chrome did not start');
     }
     const cdp = await Cdp.connect((await version.json()).webSocketDebuggerUrl);
-    const css = (await tailwindCss(root)) + (args.css ? ' ' + readFileSync(String(args.css), 'utf8') : '');
+    // The layout's own rules (<style type="text/tailwindcss">: the buttons, cards and the one scrolling box of .cb-scroll)
+    // go through the same compiler, so the table scrolls inside its box as it does live.
+    const layout = readFileSync(join(root, 'resources/views/layouts/chatblast.blade.php'), 'utf8');
+    const own = [...layout.matchAll(/<style type="text\/tailwindcss">([\s\S]*?)<\/style>/g)].map(m => m[1]).join('\n');
+    const css = (await tailwindCss(root, own)) + (args.css ? ' ' + readFileSync(String(args.css), 'utf8') : '');
     const twJs = 'document.head.append(Object.assign(document.createElement("style"), {textContent: ' + JSON.stringify(css) + '}));';
     const results = [];
     const out = {push: r => { results.push(r); process.stderr.write(`   ${r.action}: ${r.pass !== undefined ? (r.pass ? 'PASS' : 'FAIL') + ' ' : ''}longest ${fmt(r.longest)} ms${r.dom ? ', ' + r.dom + ' elements' : ''}${r.server ? ', ' + r.server : ''}${r.note ? ' (' + r.note + ')' : ''}\n`); }};
@@ -166,6 +171,8 @@ async function main() {
         await page.waitFor('location.pathname !== "/login" && document.readyState === "complete"', 60000);
         process.stderr.write(`\n== ${label}\n`);
         const l = await load(page, out, label);
+        // --eval=<expression>: printed after the load, then the run stops (to look at the page).
+        if (args.eval) { console.log(JSON.stringify(await page.ev(String(args.eval)))); break; }
         const s = await scroll(page, out, label);
         const ag = await adGroups(page, out, label);
         const ok = l.serverMs < SERVER_MS && l.usable < USABLE_MS && l.afterLoad < TASK_MS && s.longest < TASK_MS;
