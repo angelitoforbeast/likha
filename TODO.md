@@ -1548,3 +1548,12 @@ Minor review findings, accepted (none is on a new untrusted path, and no page us
 - **A removed user shows as the email's local part on the RTS hover but as the full email on the Item Value hover.** Reason: the RTS name rule is today's `rtsSetByMap` (unchanged); S-216.1.9 asks for the email on the new lookup. One shared fallback would change the existing RTS text.
 - **No test for a value spread by apply-through or copied by the cogs_ceo mirror** (both show no "Set by", by the same value check that S-216.1.7 tests). Reason: same code path as the tested mismatch case.
 - **The S-216.1.10 time half is measured by hand, not in the suite.** Reason: a timing assertion in a shared test run would be flaky; the before/after numbers are in the result.
+
+## Pages speed and ad group edit (spec 217), accepted review minors
+
+- **A pasted value equal to the page value becomes the group's own value in the group Edit** (a later change of the page value no longer reaches that group). Reason: the group Edit saves what it shows, as the page Edit does; leaving such values empty would be a new rule. Asked as an open question in the result.
+- **The Ad dropdown of /chatbot/test lists at most 50 ads not in a group** (the server's "Ads not in a group yet" limit), and an ad set or campaign ID of a group shows as one entry. Reason: the same list as Manage in Edit; a full list needs a new query. Proposed as a task in the result.
+- **`adStatus` on /chatbot/test repeats `statusText` of public/js/chatbot-adgroups.js.** Reason: the Test page does not load that script; two lines, one other place.
+- **"Add to group" in Manage in Edit now defaults to the top (running) group**, not the first one made. Reason: follows the new running-first order; the select still lists every group.
+- **No test of the skip continuation (`/chatbot/test/skip`) with an ad.** Reason: it calls the same `testAd()` as the send, which is tested.
+- **Rows far from the view are light stand-ins, so the browser's find-in-page sees only the rows near the view** (page names are always there). Reason: the speed fix of S-217.1; the Search filter finds pages.
