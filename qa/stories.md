@@ -3911,3 +3911,121 @@ Slice 219 (first written as 218). Threat model: queue payloads are trusted (writ
 | S-219.2 | happy | The same for `ResumeChatbotSequenceSend` and `GatewayAfterSend`: a payload with only the properties the class had when first queued runs normally | `test_S_219_2_the_resume_and_gateway_watch_jobs_run_from_their_first_payload_shape` | 2026-11-03 passed |
 | S-219.3 | negative | Given any queued job under `app/Jobs` (subfolders included), then a typed property with no class default passes only as a required constructor parameter of the same name, or, with `RestoresMissingDefaults`, an optional parameter of the same name and type; anything else fails the guard; `HandleComment` without `until` in its payload keeps a 6-hour retry window | `test_S_219_3_every_queued_job_with_an_optional_typed_property_restores_missing_defaults`, `test_S_219_3_a_comment_job_with_or_without_until_in_the_payload_keeps_its_retry_window`, `test_S_219_3_the_guard_reads_subfolders` | 2026-11-03 passed |
 | S-219.4 | edge | Given the 15 job classes built with required and with all arguments, then every payload is byte for byte what f5d6d450 writes, and reading it back sets every typed property | `QueuedJobPayloadTest::test_S_219_4_every_payload_is_byte_for_byte_what_f5d6d450_writes`, `test_S_219_4_a_payload_written_now_is_read_by_the_f5d6d450_classes_the_same_way` | 2026-11-03 passed |
+
+## Slice 220 – Stock on /item = Nexus stock-in + J&T returned − shipped
+
+As the owner, I want stock on /item to follow what really came in (the warehouse's Nexus stock-in) plus what J&T returned, minus what shipped, so I know what to order.
+
+Slice 220. Threat model: untrusted Nexus API response (types validated, names escaped) and J&T data; secret `NEXUS_API_TOKEN` (never logged, returned or put in a fixture); trusted `app_settings` edited by the CEO. One new table (Nexus stock-in per day and item); settings rows in `app_settings`. Risk tier: medium.
+Tests: Nexus faked with `Http::fake` and a guard that fails on any unfaked request; sqlite.
+
+### S-220.1 Hourly sync stores stock-in per item per day (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-220.1.1 | happy | Given a faked Nexus item for 2026-11-02, when the sync runs, then it is stored with its pieces and lots, and the request carries the bearer token | – | not run |
+| S-220.1.2 | happy | Given no rows yet, when the first run happens as of 2026-11-03 with start 2026-10-02, then it backfills from the start in windows of 31 days or less (2 requests) and the sums match | – | not run |
+| S-220.1.3 | happy | The sync is scheduled hourly with a trailing window that includes today, and today's row is overwritten | – | not run |
+| S-220.1.4 | edge | Re-runs never add: 24 runs give the same rows as 1 run | – | not run |
+| S-220.1.5 | edge | Given a stored 48, when Nexus corrects it to 40, then 40 is stored | – | not run |
+| S-220.1.6 | negative | Given no token, then a clear message, no request, no change, and the token never appears in output or logs | – | not run |
+| S-220.1.7 | edge | Concurrent runs give no duplicates (unique key plus overlap guard) | – | not run |
+| S-220.1.8 | edge | Non-ASCII, case and spacing variants give no near-duplicate rows, and the text is stored intact | – | not run |
+| S-220.1.9 | negative | Nothing before the start is queried; with no start, stock_ready stays false | – | not run |
+| S-220.1.10 | negative | 0 or null is stored as 0; negative or non-numeric values are skipped and logged | – | not run |
+| S-220.1.11 | edge | Manila dates are used at midnight, and the previous day stays in the window | – | not run |
+
+### S-220.2 A failed or empty sync never zeroes stock; "last synced" is visible (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-220.2.1 | happy | /item/stock returns the last-synced time (Manila), and the page shows it | – | not run |
+| S-220.2.2 | negative | Given a 500 or timeout, then no row changes, last-synced is kept, the last error and its time are recorded, and the previous stock is returned | – | not run |
+| S-220.2.3 | negative | Given a 401, then the same, plus the page says the token needs fixing, without echoing it | – | not run |
+| S-220.2.4 | negative | Given 200 with empty items, malformed JSON or no items for a stored day, then nothing is deleted or zeroed, last-synced doesn't advance, and a warning is recorded | – | not run |
+| S-220.2.5 | edge | Given partial windows, then the successful ones are stored and the failed ones retried next hour; nothing is deleted | – | not run |
+| S-220.2.6 | edge | Given more than 3 h since the last success (3h01 warns; 3h00 and 2h59 don't), then a visible warning, and the numbers still show | – | not run |
+| S-220.2.7 | edge | Given never synced, then the page says "not synced yet" rather than showing a normal zero | – | not run |
+| S-220.2.8 | negative | Given the table missing, then /item/stock does not 500 | – | not run |
+| S-220.2.9 | edge | Given a day of failed runs, then the first success catches up and clears the warning | – | not run |
+
+### S-220.3 Name matching, with an unmatched list (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-220.3.1 | happy | Case and spacing variants of a Nexus name land on the Likha item | – | not run |
+| S-220.3.2 | happy | item_type_mappings is honoured through the same resolver | – | not run |
+| S-220.3.3 | negative | An unknown Nexus name goes to the unmatched list with its pieces and changes no item | – | not run |
+| S-220.3.4 | edge | Mapping a name later counts its history without a re-sync | – | not run |
+| S-220.3.5 | edge | Two Nexus names that resolve to one item are summed once each | – | not run |
+| S-220.3.6 | edge | An "N x" prefix in a Nexus name is stripped; pieces come from stock_in_pieces | – | not run |
+| S-220.3.7 | edge | A Likha item with no Nexus name gets stock-in 0 and is not listed as unmatched | – | not run |
+| S-220.3.8 | happy | The unmatched list is collapsed with a count | – | not run |
+| S-220.3.9 | edge | Non-ASCII matching is stable | – | not run |
+
+### S-220.4 J&T returned, by signingtime (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-220.4.1 | happy | Given "2 x GLOW TAPE" shipped after the start, then Returned, then returned = 2 and the parcel nets to 0 | – | not run |
+| S-220.4.2 | happy | No prefix = 1 piece | – | not run |
+| S-220.4.3 | negative | 'For Return' is not counted | – | not run |
+| S-220.4.4 | negative | Shipped before the start: not counted | – | not run |
+| S-220.4.5 | negative | Cancelled in macro_output: not counted | – | not run |
+| S-220.4.6 | negative | Returned with a null signingtime: not counted, and the count is visible in a log or debug output | – | not run |
+| S-220.4.7 | edge | Several from_jnts rows: one count per distinct waybill; the documented row sets the status | – | not run |
+| S-220.4.8 | edge | A flip away from Returned removes it on the next read; it is never double counted | – | not run |
+| S-220.4.9 | edge | Manila date; future or impossible dates are ignored or flagged | – | not run |
+| S-220.4.10 | edge | A multi-row macro_output waybill is counted per row, as shipped | – | not run |
+| S-220.4.11 | edge | If returned exceeds shipped, the item is flagged, not hidden | – | not run |
+
+### S-220.5 Returned-source switch (P1; 5.8 P2)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-220.5.1 | happy | The default is jnt | – | not run |
+| S-220.5.2 | happy | Given "nexus" with a fake source, then it is used for the whole history, with no mixing | – | not run |
+| S-220.5.3 | negative | An unknown value falls back to jnt with a warning; both are never counted | – | not run |
+| S-220.5.4 | negative | Given "nexus" unavailable, then returned is shown as unavailable with a warning; no silent fallback to J&T and no zeroing | – | not run |
+| S-220.5.5 | edge | Only the owner's edit changes the setting; deploying the Nexus source leaves jnt | – | not run |
+| S-220.5.6 | edge | The cache key includes the source | – | not run |
+| S-220.5.7 | edge | Flipping changes no data | – | not run |
+| S-220.5.8 | happy | (P2) A read-only artisan command prints J&T returned and Nexus RTS totals per item side by side; with the stub, the Nexus side shows "not available" | – | not run |
+
+### S-220.6 Stock = stock-in + returned − shipped (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-220.6.1 | happy | Stock-in 100, returned 4, shipped 30 → 74 | – | not run |
+| S-220.6.2 | edge | The start day and the last day are inclusive; days before the start are not counted | – | not run |
+| S-220.6.3 | edge | Negative raw → 0, with needs_count and "bilangin" | – | not run |
+| S-220.6.4 | negative | No start → null fields | – | not run |
+| S-220.6.5 | edge | No Nexus rows and some shipped → 0 with "bilangin", not an error | – | not run |
+| S-220.6.6 | happy | PO received no longer adds: a counted PO of 50 plus Nexus stock-in of 50 = 50, not 100; a counted PO with no Nexus stock-in contributes 0 | – | not run |
+| S-220.6.7 | happy | incoming (paparating) and discount lines are exactly as before | – | not run |
+| S-220.6.8 | negative | CEO and Marketing see the same numbers, no price is added, and an unknown role gets 404 | – | not run |
+| S-220.6.9 | edge | Phone width 390: readable | – | not run |
+| S-220.6.10 | edge | Large integers display correctly | – | not run |
+| S-220.6.11 | happy | PO unit_cost, /cogs and quote history are unchanged | – | not run |
+
+### S-220.7 Nexus remaining cross-check (P2)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-220.7.1 | happy | Remaining and the difference (Likha − Nexus) are shown, with the as-of time | – | not run |
+| S-220.7.2 | edge | No Nexus row → a dash | – | not run |
+| S-220.7.3 | edge | Display only | – | not run |
+| S-220.7.4 | edge | Shown as stale after 3 h | – | not run |
+| S-220.7.5 | happy | The label explains that pre-start opening stock is in Nexus | – | not run |
+
+### S-220.8 DOI, order quantity and Ready to order (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-220.8.1 | happy | The formulas are unchanged; only the stock input differs | – | not run |
+| S-220.8.2 | edge | Uses the floored stock | – | not run |
+| S-220.8.3 | happy | The stale and unmatched warnings show next to I-ORDER | – | not run |
+| S-220.8.4 | edge | The worklist i_order chip is identical before and after (regression) | – | not run |
+| S-220.8.5 | edge | Lifecycle, lead, palugit and category are unchanged | – | not run |
+| S-220.8.6 | edge | The gap is pinned: a PO counted today but not yet synced is in neither incoming nor stock until the next sync | – | not run |
+
+### S-220.9 /item is not slower (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-220.9.1 | happy | A warm second call runs no query on from_jnts or the new table | – | not run |
+| S-220.9.2 | edge | The returned query is one grouped query; the result reports its cold-cache time on realistic data, or explains why it can't | – | not run |
+| S-220.9.3 | edge | The cache is cleared or re-keyed on sync or a source change; otherwise the TTL is 1 hour or less | – | not run |
+| S-220.9.4 | edge | Concurrent cold requests are correct | – | not run |
+| S-220.9.5 | negative | A failed or partial sync does not refresh the cache | – | not run |
