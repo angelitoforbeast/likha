@@ -107,6 +107,7 @@ abstract class ItemTestCase extends TestCase
             'database/migrations/2026_10_02_100500_hide_category_column_owner_private.php',
             'database/migrations/2026_10_16_300000_create_item_edit_logs_table.php',
             'database/migrations/2026_11_16_100000_create_nexus_stock_ins_table.php',
+            'database/migrations/2026_11_16_100100_seed_stock_returned_source_setting.php',
         ];
     }
 

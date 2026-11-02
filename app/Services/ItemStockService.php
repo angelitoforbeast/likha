@@ -266,15 +266,16 @@ class ItemStockService
         return $out;
     }
 
-    private function col(string $name): string
+    /** Column ng macro_output (alias mo), naka-quote ayon sa driver. */
+    public static function col(string $name): string
     {
         return DB::getDriverName() === 'pgsql' ? 'mo."' . $name . '"' : 'mo.`' . $name . '`';
     }
 
-    /** STATUS expression kapareho ng HoldService::liveHoldQuery. */
-    private function notCancelledSql(): string
+    /** STATUS expression kapareho ng HoldService::liveHoldQuery (bindings: HoldService::CANCELLED_STATUSES). */
+    public static function notCancelledSql(): string
     {
-        $status = $this->col('STATUS');
+        $status = self::col('STATUS');
         $marks  = implode(',', array_fill(0, count(HoldService::CANCELLED_STATUSES), '?'));
         return "($status IS NULL OR LOWER(REPLACE(REPLACE(TRIM($status), ' ', ''), '_', '')) NOT IN ($marks))";
     }
