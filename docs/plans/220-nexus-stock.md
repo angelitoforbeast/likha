@@ -289,3 +289,14 @@ response). Each task: red test per case, then code, then the affected test files
 from the `artisan test` printer in this worktree, not from the tests: the same files run through
 `vendor/bin/phpunit` report OK with no warning (`StockEndpointTest`: OK, 21 tests, 112 assertions). T5 compares
 head against these counts, failures by name.
+
+## Review outcome (before the build)
+
+- Q1: one `?date=` call per day (the Nexus range response sums over the days asked). S-220.1.2 updated.
+- Q2: zero, not keep; each zeroing logged with day, name_key and old pieces.
+- Q3: returned null with a warning, no J&T fallback, nothing zeroed.
+- Change: without `services.nexus.token` the stock stays the PO-received path exactly as on 86db0060, with only a quiet
+  "Nexus not configured" note (new case S-220.6.12). So the base `StockEndpointTest`/`LifecycleStockTest` stay
+  unchanged and pin that mode; their Nexus-mode counterparts are new tests.
+- The proposed story changes were accepted.
+- 9.2 measured on a throwaway Docker `mysql:8.4` container, not the local MySQL80 service.
