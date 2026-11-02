@@ -267,7 +267,8 @@ class CommentRepliesTest extends ChatblastTestCase
         $this->gateway();
         $this->travelTo('2026-10-25 10:00:15');
         Queue::fake([HandleComment::class]);
-        for ($i = 1; $i <= 21; $i++) $this->comment(['comment_id' => 'c_' . $i])->assertOk();
+        // Isang tao kada comment: ang paksa ay ang minuto ng page, hindi ang isang sagot kada araw.
+        for ($i = 1; $i <= 21; $i++) $this->comment(['comment_id' => 'c_' . $i, 'from_id' => (string) (600 + $i)])->assertOk();
         $jobs = Queue::pushed(HandleComment::class)->values();
         $this->assertCount(21, $jobs);
 
@@ -372,7 +373,7 @@ class CommentRepliesTest extends ChatblastTestCase
         $first->assertReleased(45);
         $this->assertSame(['queued', 'sent', null], [$this->event()->status, $this->event()->pm_status, $this->event()->reply_status]);
         // Ang ibang comment ng page ay naghihintay din hanggang sa susunod na minuto.
-        $this->comment(['comment_id' => 'other'])->assertOk();
+        $this->comment(['comment_id' => 'other', 'from_id' => '556'])->assertOk();
         $other = Queue::pushed(HandleComment::class)->last()->withFakeQueueInteractions();
         $other->handle(app(CommentReplies::class));
         $other->assertReleased(45);
@@ -469,7 +470,7 @@ class CommentRepliesTest extends ChatblastTestCase
         $this->forbeastPage(['comment_reply_2' => '', 'comment_reply_3' => '']);
         $this->gateway(['/c_2/reply' => [500, ['ok' => false, 'error' => 'meta_error', 'meta_code' => 1, 'meta_subcode' => null]]]);
         $this->comment(['comment_id' => 'c_1'])->assertOk();
-        $this->comment(['comment_id' => 'c_2'])->assertOk();
+        $this->comment(['comment_id' => 'c_2', 'from_id' => '556'])->assertOk();
         $this->comment(['comment_id' => 'c_3', 'is_reply' => true])->assertOk();
 
         $this->actingAs($this->user());
@@ -501,5 +502,222 @@ class CommentRepliesTest extends ChatblastTestCase
         $this->comment([], null)->assertStatus(401);
 
         $this->assertSame([0, []], [ChatbotCommentEvent::count(), $this->calls]);
+    }
+
+    // ── isang sagot kada tao kada page kada araw (spec 218) ─────────────────────────────────────────────────────────
+
+    /** Ang naunang comment ng 555 sa page, ngayon ($row ang nananaig). */
+    private function earlier(array $row): ChatbotCommentEvent
+    {
+        return ChatbotCommentEvent::create($row + ['page_id' => 1001, 'comment_id' => 'earlier_' . (ChatbotCommentEvent::count() + 1), 'post_id' => '1001_9',
+            'from_id' => '555', 'received_at' => now(), 'handled_at' => now()]);
+    }
+
+    /** Ang mga endpoint na tinawag (private-reply, reply), sa pagkakasunod. */
+    private function called(): array
+    {
+        return array_map(fn ($c) => basename($c['url']), $this->calls);
+    }
+
+    /** Ang job ng comment, pinatakbo nang isang beses (gaya ng worker). */
+    private function handled(string $commentId): HandleComment
+    {
+        $job = (new HandleComment($this->event($commentId)->id))->withFakeQueueInteractions();
+        $job->handle(app(CommentReplies::class));
+
+        return $job;
+    }
+
+    public function test_S_218_1_1_a_customers_first_comment_today_gets_the_private_message_and_the_reply(): void
+    {
+        $this->forbeastPage();
+        $this->gateway();
+        $this->earlier(['from_id' => '556', 'status' => 'sent', 'pm_status' => 'sent', 'reply_status' => 'sent']); // ibang tao
+
+        $this->comment()->assertOk();
+
+        $this->assertSame(['private-reply', 'reply'], $this->called());
+        $this->assertSame(['sent', 'sent', 'sent', null], [$this->event()->status, $this->event()->pm_status, $this->event()->reply_status, $this->event()->reason]);
+    }
+
+    public function test_S_218_1_2_a_second_and_third_comment_today_on_the_page_get_nothing_and_are_skipped_daily_limit(): void
+    {
+        $this->forbeastPage();
+        $this->gateway();
+
+        $this->comment()->assertOk();
+        $this->comment(['comment_id' => '111_333', 'event_id' => 43])->assertOk();                                                // ang parehong post
+        $this->comment(['comment_id' => '222_444', 'event_id' => 44, 'post_id' => '1001_8', 'parent_id' => '1001_8'])->assertOk(); // ibang post
+
+        $this->assertSame(['private-reply', 'reply'], $this->called(), 'only the first comment is answered');
+        foreach (['111_333', '222_444'] as $id) {
+            $e = $this->event($id);
+            $this->assertSame(['skipped', 'daily_limit', null, null], [$e->status, $e->reason, $e->pm_status, $e->reply_status], $id);
+        }
+    }
+
+    /** @return array<string, array{0: array}> ang naunang row ngayon na sinagot na (o maaaring naipost na) */
+    public static function answeredEarlier(): array
+    {
+        return [
+            'private message and reply sent' => [['status' => 'sent', 'pm_status' => 'sent', 'reply_status' => 'sent']],
+            'public reply only' => [['status' => 'sent', 'reply_status' => 'sent']],
+            'private message only' => [['status' => 'sent', 'pm_status' => 'sent']],
+            'unknown outcome (504)' => [['status' => 'unknown', 'pm_status' => 'unknown', 'reply_status' => 'sent']],
+            'already replied (Meta)' => [['status' => 'skipped', 'reason' => 'already_replied', 'pm_status' => 'already_replied']],
+            'private message failed, reply sent' => [['status' => 'failed', 'reason' => 'forbidden', 'pm_status' => 'failed', 'reply_status' => 'sent']],
+            'still sending' => [['status' => 'sending', 'handled_at' => null]],
+            'waiting for the next minute with the private message sent' => [['status' => 'queued', 'pm_status' => 'sent', 'handled_at' => null]],
+        ];
+    }
+
+    #[DataProvider('answeredEarlier')]
+    public function test_S_218_1_2_a_customer_answered_today_on_the_page_is_skipped_daily_limit(array $row): void
+    {
+        $this->forbeastPage();
+        $this->gateway();
+        $this->earlier($row);
+
+        $this->comment()->assertOk();
+
+        $this->assertSame([], $this->calls);
+        $this->assertSame(['skipped', 'daily_limit'], [$this->event()->status, $this->event()->reason]);
+    }
+
+    public function test_S_218_1_3_the_day_is_the_manila_calendar_day(): void
+    {
+        $this->forbeastPage();
+        $this->gateway();
+        $this->travelTo(\Carbon\Carbon::parse('2026-10-25 23:50:00', 'Asia/Manila'));
+        $this->comment(['comment_id' => 'c_1'])->assertOk();
+
+        $this->travelTo(\Carbon\Carbon::parse('2026-10-26 00:10:00', 'Asia/Manila'));
+        $this->comment(['comment_id' => 'c_2'])->assertOk();
+        $this->comment(['comment_id' => 'c_3'])->assertOk();
+
+        $this->assertSame(['private-reply', 'reply', 'private-reply', 'reply'], $this->called());
+        $this->assertSame(['sent', 'sent', 'skipped', 'daily_limit'],
+            [$this->event('c_1')->status, $this->event('c_2')->status, $this->event('c_3')->status, $this->event('c_3')->reason]);
+    }
+
+    public function test_S_218_1_4_the_limit_is_per_page(): void
+    {
+        $this->forbeastPage();
+        $this->gateway();
+        $this->earlier(['page_id' => 1002, 'status' => 'sent', 'pm_status' => 'sent', 'reply_status' => 'sent']); // sinagot na sa ibang page
+
+        $this->comment(['comment_id' => 'c_1'])->assertOk();
+        $this->comment(['comment_id' => 'c_2'])->assertOk();
+
+        $this->assertSame(['private-reply', 'reply'], $this->called());
+        $this->assertSame(['sent', 'skipped'], [$this->event('c_1')->status, $this->event('c_2')->status]);
+    }
+
+    public function test_S_218_1_5_an_earlier_comment_skipped_or_failed_before_sending_does_not_count(): void
+    {
+        $this->forbeastPage();
+        $this->gateway();
+        foreach (['bot_off', 'not_set', 'reply', 'page_author', 'botcake_page', 'daily_limit'] as $reason) $this->earlier(['status' => 'skipped', 'reason' => $reason]);
+        $this->earlier(['status' => 'failed', 'reason' => 'forbidden', 'pm_status' => 'failed']); // pumalya ang PM, walang Comment Reply
+        $this->earlier(['status' => 'failed', 'reason' => null]);                                  // pumalya ang job bago magpadala
+        $this->earlier(['status' => 'queued', 'handled_at' => null]);                              // naghihintay, wala pang naipadala
+
+        $this->comment(['comment_id' => 'c_1'])->assertOk();
+        $this->comment(['comment_id' => 'c_2'])->assertOk();
+
+        $this->assertSame(['private-reply', 'reply'], $this->called());
+        $this->assertSame(['sent', 'skipped', 'daily_limit'], [$this->event('c_1')->status, $this->event('c_2')->status, $this->event('c_2')->reason]);
+    }
+
+    public function test_S_218_1_6_two_comments_at_the_same_moment_get_one_answer(): void
+    {
+        $this->forbeastPage();
+        Queue::fake([HandleComment::class]);
+        $this->comment(['comment_id' => 'c_1'])->assertOk();
+        $this->comment(['comment_id' => 'c_2'])->assertOk();
+        // Ang ikalawang worker ay tumatakbo habang ang una ay nasa tawag pa sa Forbeast.
+        $second = null;
+        Http::fake(['gw.example.test/*' => function (HttpRequest $req) use (&$second) {
+            $this->calls[] = ['url' => $req->url()];
+            $second ??= $this->handled('c_2');
+            return Http::response(['ok' => true, 'comment_id' => 'our_' . count($this->calls)]);
+        }]);
+
+        $this->handled('c_1');
+
+        $this->assertSame(['private-reply', 'reply'], $this->called());
+        $this->assertSame(['sent', 'skipped', 'daily_limit'], [$this->event('c_1')->status, $this->event('c_2')->status, $this->event('c_2')->reason]);
+        $second->assertNotReleased();
+    }
+
+    public function test_S_218_1_6_a_comment_waits_while_another_worker_decides_for_the_same_customer(): void
+    {
+        $this->forbeastPage();
+        $this->gateway();
+        Queue::fake([HandleComment::class]);
+        $this->comment(['comment_id' => 'c_1'])->assertOk();
+        $this->comment(['comment_id' => 'c_2'])->assertOk();
+
+        $held = \Illuminate\Support\Facades\Cache::lock('comment-replies:once:1001:555', 10);
+        $this->assertTrue($held->get());
+        $this->handled('c_2')->assertReleased(5);
+        $this->assertSame([[], 'queued'], [$this->calls, $this->event('c_2')->status]);
+        $held->release();
+
+        $this->handled('c_1');
+        $this->handled('c_2')->assertNotReleased();
+
+        $this->assertSame(['private-reply', 'reply'], $this->called());
+        $this->assertSame(['sent', 'skipped', 'daily_limit'], [$this->event('c_1')->status, $this->event('c_2')->status, $this->event('c_2')->reason]);
+    }
+
+    public function test_S_218_1_7_a_comment_without_from_id_is_answered_as_today(): void
+    {
+        $this->forbeastPage();
+        $this->gateway();
+
+        $this->comment(['comment_id' => 'c_1', 'from_id' => null])->assertOk();
+        $this->comment(['comment_id' => 'c_2', 'from_id' => null])->assertOk();
+        $this->comment(['comment_id' => 'c_3', 'from_id' => ''])->assertOk();
+
+        $this->assertSame(['private-reply', 'reply', 'private-reply', 'reply', 'private-reply', 'reply'], $this->called());
+        $this->assertSame(['sent', 'sent', 'sent'], [$this->event('c_1')->status, $this->event('c_2')->status, $this->event('c_3')->status]);
+    }
+
+    public function test_S_218_1_8_a_comment_waiting_for_the_next_minute_is_checked_when_it_is_sent(): void
+    {
+        $this->forbeastPage();
+        $this->travelTo('2026-10-25 10:00:15');
+        $pms = 0;
+        Http::fake(['gw.example.test/*' => function (HttpRequest $req) use (&$pms) {
+            $this->calls[] = ['url' => $req->url()];
+            if (str_ends_with($req->url(), '/private-reply') && ++$pms === 1) return Http::response(['ok' => false, 'error' => 'rate_limited'], 429);
+            return Http::response(['ok' => true, 'comment_id' => 'our_' . count($this->calls)]);
+        }]);
+        Queue::fake([HandleComment::class]);
+        $this->comment(['comment_id' => 'c_1'])->assertOk();
+        $this->handled('c_1')->assertReleased(45);                       // 429: wala pang naipadala, naghihintay sa susunod na minuto
+        $this->assertSame(['queued', null], [$this->event('c_1')->status, $this->event('c_1')->pm_status]);
+
+        $this->travelTo('2026-10-25 10:01:00');
+        $this->comment(['comment_id' => 'c_2'])->assertOk();
+        $this->handled('c_2');                                           // ang bagong comment ang naunang naipadala
+        $this->handled('c_1')->assertNotReleased();
+
+        $this->assertSame(['private-reply', 'private-reply', 'reply'], $this->called());
+        $this->assertSame(['sent', 'skipped', 'daily_limit'], [$this->event('c_2')->status, $this->event('c_1')->status, $this->event('c_1')->reason]);
+    }
+
+    public function test_S_218_1_9_the_replies_view_says_already_answered_today(): void
+    {
+        $this->forbeastPage();
+        $this->gateway();
+        $this->comment(['comment_id' => 'c_1'])->assertOk();
+        $this->comment(['comment_id' => 'c_2'])->assertOk();
+
+        $this->assertSame('already answered today', CommentReplies::REASONS['daily_limit'] ?? null);
+        $this->actingAs($this->user());
+        $rows = $this->getJson('/chatbot/replies/data?date=' . now('Asia/Manila')->toDateString() . '&kind=comments&status=skipped')->assertOk()->json('rows');
+        $this->assertSame([['c_2', 'Comment c_2 · Skipped: already answered today']], array_map(fn ($r) => [$r['comment_id'], $r['summary']], $rows));
     }
 }

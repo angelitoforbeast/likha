@@ -13,18 +13,28 @@ use Illuminate\Support\Facades\Schema;
  * message, una) at isa sa mga may lamang Comment Reply 1-3 (public, random, laban sa spam check ng Facebook). Ang
  * blangkong column ay patay ang bahaging iyon. Para lang sa page na bot On at provider Forbeast (ang Botcake page ay
  * may sariling comment feature), sa top-level na comment na hindi galing sa page o sa amin, isang beses kada comment,
- * hanggang 20 comment kada minuto kada page (ang iba ay naghihintay sa susunod na minuto, gaya ng Botcake).
+ * hanggang 20 comment kada minuto kada page (ang iba ay naghihintay sa susunod na minuto, gaya ng Botcake). Isang sagot
+ * lang kada tao (from_id) kada page kada araw sa Manila: ang mga sumunod niyang comment sa araw na iyon ay skipped
+ * (daily_limit), para hindi siya makatanggap ng limang private message at limang public reply sa limang comment.
  */
 class CommentReplies
 {
     public const PER_MINUTE = 20;
     public const VARIANTS = ['comment_reply_1', 'comment_reply_2', 'comment_reply_3'];
     public const PM = 'comment_pm';
+    public const DAILY_LIMIT = 'daily_limit';
+    /** Ang bahaging binibilang na sagot sa araw: naipadala, naitala na ng Meta, o maaaring naipost na (504). */
+    private const ANSWERED = ['sent', GatewayComments::ALREADY_REPLIED, GatewayComments::UNKNOWN];
+    /** Ang comment ay naghihintay sa queue nang hanggang 6 na oras lang (HandleComment), kaya ang mas luma ay hindi masasagot ngayon. */
+    private const QUEUE_HOURS = 7;
+    /** Segundo bago subukan ulit kapag may ibang worker na nagpapasya para sa parehong tao at page. */
+    private const LOCK_WAIT = 5;
     /** Ang mga dahilan ng skipped, sa screen (Replies). */
     public const REASONS = [
         'botcake_page' => 'the page replies via Botcake', 'bot_off' => 'the bot is Off', 'reply' => 'a reply to a reply',
         'page_author' => 'written by the page', 'ours' => 'our own reply', 'not_set' => 'not set (no Comment PM or Comment Reply)',
         'unknown_page' => 'unknown page', GatewayComments::ALREADY_REPLIED => 'already replied',
+        self::DAILY_LIMIT => 'already answered today',
     ];
 
     /** @var callable|null ang pumipili ng variant (test seam); null = random_int */
@@ -91,9 +101,24 @@ class CommentReplies
         $variants = array_values(array_filter(array_map($value, self::VARIANTS), fn ($v) => $v !== ''));
         if ($pm === '' && !$variants) return $this->skip($event, 'not_set');
 
-        if (($wait = $this->slot((string) $event->page_id)) > 0) return $wait;
-        // Isang worker lang ang magpapadala (ang job na naulit ay walang gagawin).
-        if (ChatbotCommentEvent::whereKey($event->id)->where('status', 'queued')->update(['status' => 'sending']) === 0) return 0;
+        // Isang sagot kada tao kada page kada araw, sinusuri tuwing tatakbo (pati pagkatapos maghintay ng minuto). Ang
+        // pagsuri at ang pagkuha ng row (sending) ay nasa iisang lock, kaya sa dalawang comment niyang sabay dumating ay isa
+        // lang ang masasagot; ang row na sending ay binibilang nang sagot, kaya hindi hinahawakan ang lock habang nagpapadala.
+        // Ang row na may naipadala nang bahagi (bago ang 429) ay tinatapos: iyon ang sagot ng araw.
+        $limited = (string) $event->from_id !== '' && $event->pm_status === null && $event->reply_status === null;
+        $lock = $limited ? Cache::lock('comment-replies:once:' . $event->page_id . ':' . $event->from_id, 10) : null;
+        if ($lock !== null && !$lock->get()) return self::LOCK_WAIT;
+        try {
+            if ($limited && $this->answeredToday($event)) {
+                ChatbotCommentEvent::whereKey($event->id)->where('status', 'queued')->update(['status' => 'skipped', 'reason' => self::DAILY_LIMIT, 'handled_at' => now()]);
+                return 0;
+            }
+            if (($wait = $this->slot((string) $event->page_id)) > 0) return $wait;
+            // Isang worker lang ang magpapadala (ang job na naulit ay walang gagawin).
+            if (ChatbotCommentEvent::whereKey($event->id)->where('status', 'queued')->update(['status' => 'sending']) === 0) return 0;
+        } finally {
+            $lock?->release();
+        }
 
         // Ang bahaging nasubukan na (may status) ay hindi na ipinapadala ulit: ang 429 ay bumabalik dito para sa natitira lang.
         $done = [];
@@ -136,6 +161,23 @@ class CommentReplies
         Cache::put('comment-replies:' . $pageId . ':' . $now->format('YmdHi'), self::PER_MINUTE, 120);
 
         return max(1, 60 - (int) $now->format('s'));
+    }
+
+    /**
+     * Nasagot na ba ngayong araw (Manila, ang araw ng pagpapadala) ang taong ito sa page na ito ng ibang comment: may
+     * bahaging naipadala, naitala na o maaaring naipost na, o nagpapadala pa. Ang skipped at ang pumalya bago may naipadala
+     * ay hindi binibilang. Ang handled_at na null ay ginagawa pa ngayon (sending, o naghihintay na may naipadala na).
+     */
+    private function answeredToday(ChatbotCommentEvent $event): bool
+    {
+        $today = now('Asia/Manila')->startOfDay()->timezone(config('app.timezone'));
+
+        // Ang received_at ay hangganan para sa index (page_id, received_at); ang from_id ay sinasala sa mga row na iyon.
+        return ChatbotCommentEvent::where('page_id', $event->page_id)->where('received_at', '>=', $today->copy()->subHours(self::QUEUE_HOURS))
+            ->where('from_id', (string) $event->from_id)->whereKeyNot($event->id)
+            ->where(fn ($w) => $w->where('status', 'sending')->orWhereIn('pm_status', self::ANSWERED)->orWhereIn('reply_status', self::ANSWERED))
+            ->where(fn ($w) => $w->whereNull('handled_at')->orWhere('handled_at', '>=', $today))
+            ->exists();
     }
 
     /** Ang dahilan ng hindi pagsagot na alam na pagdating ng event, o null. */
