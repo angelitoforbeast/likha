@@ -1,89 +1,83 @@
 # Result: spec 218, a deploy never breaks the jobs already waiting in the queue
 
-**Status:** done (built and tested locally; not pushed, not deployed)
+**Status:** done after rework (built and tested locally; not pushed, not deployed)
 **Date:** 2026-11-03
 **Branch / PR:** `fix/218-queued-job-compat`, cut from f5d6d450 (live Likha main; Incepxion 36e36f9c has the same tree). Not pushed, no PR.
 
 ## Cause
 
 Laravel's `SerializesModels` writes a job's properties into the queue payload and, on the worker, sets back only the
-properties present in the payload (`__unserialize`); the constructor does not run. It also leaves out any property whose
-value equals its class-level default. A typed property declared through constructor promotion (`public ?string $earlier
-= null` in the constructor) has a constructor default but no class-level default, so a payload written before the
-property existed leaves it uninitialized, and the first read throws. That is what happened to the 8,213
-`RunChatbotSequenceStep` jobs queued by the previous class version.
+properties present in the payload (`__unserialize`); the constructor does not run. A typed property declared through
+constructor promotion with a constructor default (`public ?string $earlier = null` in the constructor) has no class-level
+default, so a payload written before the property existed leaves it uninitialized, and the first read throws. That is what
+happened to the 8,213 `RunChatbotSequenceStep` jobs queued by the previous class version.
 
-## Fix
+## Fix (reworked)
 
-Every optional typed property of a queued job now has a class-level default equal to its old constructor default. The
-constructor takes the same parameter (not promoted) and assigns it. An older payload therefore leaves the default, which
-the code already reads as "no information" (for the step job: `$earlier = null` means no earlier claim, exactly as a fresh
-dispatch). Property names, types, defaults and the payload format are unchanged.
+The first version gave the properties class-level defaults. Review found that `SerializesModels::__serialize`
+(Laravel 12.19.3) leaves out every property equal to its class default, so the new payloads lacked `earlier`, `probe`,
+`full` and the rest, and the previous code (still running during the deploy window, or after a rollback) could not read
+them. That version is reverted (`5e2533ea`).
 
-### Properties changed (21, in 15 classes under `app/Jobs`)
+Now:
+- The job classes keep their promoted properties exactly as on f5d6d450, so every new payload is byte for byte what
+  f5d6d450 writes.
+- A shared trait, `App\Jobs\Concerns\RestoresMissingDefaults`, wraps `SerializesModels`: its `__unserialize` calls
+  `SerializesModels::__unserialize`, then fills every typed property that is still uninitialized from the default of the
+  constructor parameter with the same name. An older payload into the new code therefore gets the constructor default,
+  exactly as a fresh dispatch; `__serialize` is the untouched `SerializesModels` one.
+- The trait replaces `SerializesModels` in the 14 queued jobs that have an optional typed property:
+  `RunChatbotSequenceStep` (`$claim`, `$earlier`), `SendOrderToForbeast` (`$probe`), `RunChatblastSetupCheck` (`$by`),
+  `RunChatbotContentCheck` (`$page`), `SyncBotcakeCustomersJob` (`$full`), `ImportBotcakePsidFromGoogleSheet`
+  (`$cutoffDateTime`, `$runId`, `$cleanSheet`), `ImportMacroFromGoogleSheet`, `ProcessAdsManagerReportsUpload`,
+  `ProcessJntCreateOrdersBatch`, `ProcessPancakeConversationsUpload` (`$userId` each), `ProcessPaymentActivityUpload`
+  (`$uploadedBy`, `$diskName`, `$uploadLogId`), `ExportJntStatusToGsheet` (`$status`, `$dateRangeRaw`),
+  `SyncFromJntStatusByTrack` (`$dryRun`), `SyncJntOrderQueryByDate` (`$page`).
+- `HandleComment` is unchanged: it does not use `SerializesModels`, and its only typed property, `$until`, is always set
+  in the constructor, so every payload carries it.
 
-| Class | Property | Now |
-|---|---|---|
-| `RunChatbotSequenceStep` (215) | `$claim`, `$earlier` | `public ?string … = null` |
-| `SendOrderToForbeast` (211) | `$probe` | `public bool $probe = false` |
-| `RunChatblastSetupCheck` | `$by` | `public ?int $by = null` |
-| `RunChatbotContentCheck` | `$page` | `public ?string $page = null` |
-| `SyncBotcakeCustomersJob` | `$full` | `public bool $full = false` |
-| `HandleComment` | `$until` | `public ?int $until = null`; `retryUntil()` uses 6 hours from now when it is null (what a fresh dispatch sets) |
-| `ImportBotcakePsidFromGoogleSheet` | `$cutoffDateTime`, `$runId`, `$cleanSheet` | defaults `null`, `null`, `false` (the constructor defaults) |
-| `ImportMacroFromGoogleSheet` | `$userId` | `public ?int $userId = null` |
-| `ProcessAdsManagerReportsUpload` | `$userId` | `public ?int $userId = null` |
-| `ProcessJntCreateOrdersBatch` | `$userId` | `public ?int $userId = null` |
-| `ProcessPancakeConversationsUpload` | `$userId` | `public ?int $userId = null` |
-| `ProcessPaymentActivityUpload` | `$uploadedBy`, `$diskName`, `$uploadLogId` | `'system'`, `null`, `null` |
-| `ExportJntStatusToGsheet` | `$status`, `$dateRangeRaw` | `'All'`, `''` |
-| `SyncFromJntStatusByTrack` | `$dryRun` | `public bool $dryRun = true` |
-| `SyncJntOrderQueryByDate` | `$page` | `public ?string $page = null` |
+## Payload format unchanged: the evidence
 
-Audited: all 52 `ShouldQueue` classes under `app/Jobs`, including those changed by specs 210, 211, 214, 215 and 216.
-`ResumeChatbotSequenceSend` and `GatewayAfterSend` (215) needed no change: their typed properties are required
-constructor parameters (present in every payload since the class was first queued) or have class defaults (`$timeout`,
-`$tries`, `$uniqueFor`).
+`tests/Feature/Chatblast/fixtures/218/payloads.json` was recorded on f5d6d450's job classes: `app/Jobs` was checked out
+from f5d6d450 (`git diff f5d6d450 -- app/Jobs` empty) and `QueuedJobPayloadTest` ran with `RECORD_218_PAYLOADS=1`. It
+holds `serialize()` of the 15 classes, each built twice (required arguments only, and every argument with non-default
+values; 29 payloads), with the clock frozen. That fixture and the reverted classes are one commit (`5e2533ea`); the trait
+came after (`cbd1f23c`). `test_S_218_4_every_payload_is_byte_for_byte_what_f5d6d450_writes` compares the branch's
+payloads with the recorded bytes: identical for all 29.
+
+## Both directions
+
+- **Old payload into new code:** `test_S_218_1…` unserializes the exact payload that failed in production
+  (`O:31:"App\Jobs\RunChatbotSequenceStep":4:{subscriptionId;claim;connection;queue}`) and runs `handle()`: the step hands
+  its send off and the message is sent once; `$earlier` reads null. `test_S_218_2…` does the same for
+  `ResumeChatbotSequenceSend` and `GatewayAfterSend`.
+- **New payload into old code:** the new code writes the f5d6d450 bytes (S-218.4), which f5d6d450 reads by definition;
+  `test_S_218_4_a_payload_written_now_is_read_…` also reads every payload back and checks every typed property is set.
+- **Rollback is safe:** the payload format is f5d6d450's, so rolling back to f5d6d450 with jobs from this code in the queue
+  works. Rolling back to code before 215 is the old situation (payloads with `earlier` are read by a class without it:
+  PHP ignores an unknown property, no error).
 
 ## Tests
 
-`tests/Feature/Chatblast/QueuedJobCompatTest.php`:
-
-| Case | Test | On f5d6d450 | After the fix |
+| Case | Test | Before the fix | After |
 |---|---|---|---|
-| S-218.1 | `test_S_218_1_a_step_job_queued_by_the_previous_class_version_runs_after_the_deploy`: unserializes the exact old payload `O:31:"App\Jobs\RunChatbotSequenceStep":4:{subscriptionId;claim;connection;queue}` and calls `handle()`; the step hands its send off and is sent once | **fails**: `Error: Typed property App\Jobs\RunChatbotSequenceStep::$earlier must not be accessed before initialization` (the production error) | passes |
-| S-218.2 | `test_S_218_2_the_resume_and_gateway_watch_jobs_run_from_their_first_payload_shape` (`ResumeChatbotSequenceSend`, `GatewayAfterSend`) | passes | passes |
-| S-218.3 | `test_S_218_3_no_queued_job_has_a_typed_property_an_older_payload_can_leave_uninitialized`: reflection over every `ShouldQueue` class in `app/Jobs`; a typed property must have a class default or be a required constructor parameter of the same name | **fails**, listing the 21 properties above | passes |
+| S-218.1 | `QueuedJobCompatTest::test_S_218_1…` (the exact production payload) | fails: `Error: Typed property App\Jobs\RunChatbotSequenceStep::$earlier must not be accessed before initialization` | passes |
+| S-218.2 | `test_S_218_2…` (resume and gateway watch jobs) | passes | passes |
+| S-218.3 | `test_S_218_3_every_queued_job_with_an_optional_typed_property_restores_missing_defaults` (recursive over `app/Jobs`, subfolders such as `Boardroom` included; the rule: every queued job with an optional typed property uses the trait), `test_S_218_3_the_guard_reads_subfolders` | fails, listing 20 properties in 14 classes | passes |
+| S-218.4 | `QueuedJobPayloadTest` (2 tests, 29 payloads) | passes (it is the recorded state) | passes |
 
-The guard is stricter than "set in the constructor": an optional constructor parameter is set in the constructor too, yet
-an older payload skips it, which is exactly the incident. A required parameter is allowed because every payload of the
-class carries it.
+The guard's docblock records the known gap: a new **required** constructor parameter on a job that is already queued is not
+covered (there is no default to restore); such a change needs a default or a drained queue before the deploy.
 
-### Counts (sqlite)
-
-| | Tests | Assertions | Failures | Skipped |
-|---|---|---|---|---|
-| f5d6d450 (live main) | 4,169 | 45,427 | 4 | 5 |
-| This branch | 4,172 | 45,441 | 4 | 5 |
-
-- **No new failure.** The 4 are the known ones on f5d6d450: BigBroadcastTest S-167.1, ExampleTest,
-  ItemTableFitScriptTest, AstraAddressRulesTest S-26.18.
-- **The 3 new tests pass.**
-- **Green in the same run:** the 6 Sequence classes (Handoff 11, Safety 28, ReRun 12 with 1 MySQL-only skip,
-  Visibility 3, Durability 14, Bench 10), the 14 listed suites, and ForbeastHoldTest 17.
+TESTCOUNTS
 
 ## Deploy notes
 
 - No migration. No supervisor or Horizon change. No config or env change.
-- **Safe to deploy with a full queue** (that is the point): jobs queued by the current live code keep running after the
-  deploy, and so will jobs queued by this code after any later deploy that adds an optional property (the guard test makes
-  that a red test before it ships).
-- Rollback note: a payload written by this code leaves out optional properties at their default (Laravel skips
-  default-valued properties). Rolling back to code from before this fix, while such jobs are still queued, would hit the
-  same error in the older classes (for example `SendOrderToForbeast` with `probe = false`). After this fix is live, roll
-  back only to code that includes it, or drain the queue first.
+- **Safe to deploy with a full queue**, in both directions: jobs queued by f5d6d450 (or earlier) run on this code, and jobs
+  queued by this code run on f5d6d450 during the deploy window (workers not yet restarted) or after a rollback.
 
 ## Out of scope
 
 The steps that failed on 2026-11-03 are not re-run (their subscriptions have ended; an owner decision). No change to the
-queue driver, Horizon or job behaviour beyond the defaults.
+queue driver, Horizon, the payload format or any job's behaviour.
