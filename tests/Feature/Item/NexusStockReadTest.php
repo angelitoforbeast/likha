@@ -350,7 +350,28 @@ class NexusStockReadTest extends ItemTestCase
         $this->assertSame(2, $meta['unmatched_count']);
         $this->assertSame(12, $meta['unmatched'][0]['pieces']);
         $this->assertSame('mystery box', strtolower(preg_replace('/\s+/', ' ', $meta['unmatched'][0]['name'])));
-        $this->assertSame(['name' => '<b>Odd</b>', 'pieces' => 1], $meta['unmatched'][1]);   // raw; ang view ang nag-e-escape
+        $this->assertSame(['name' => '<b>Odd</b>', 'pieces' => 1, 'ambiguous' => false], $meta['unmatched'][1]);   // raw; ang view ang nag-e-escape
+    }
+
+    public function test_S_220_3_2_two_variants_mapped_to_one_family_keep_their_own_stock_and_a_family_name_is_ambiguous(): void
+    {
+        Artisan::call('migrate', ['--path' => 'database/migrations/2026_04_13_000001_create_item_type_mappings_table.php', '--force' => true]);
+        foreach (['Alagang Pamilya II', 'Alagang Pamilya VII'] as $v) {
+            DB::table('item_type_mappings')->insert(['item_name' => $v, 'item_type' => 'Alagang Pamilya', 'created_at' => now(), 'updated_at' => now()]);
+        }
+        $this->parcels('1 x ALAGANG PAMILYA II', 1, 'A');
+        $this->parcels('1 x ALAGANG PAMILYA VII', 1, 'B');
+        $this->nexusStockIn('Alagang Pamilya II', 5, '2026-10-01');         // eksaktong pangalan
+        $this->nexusStockIn('ALAGANG  PAMILYA VII', 3, '2026-10-01');       // eksakto (case, spacing)
+        $this->nexusStockIn('Alagang-Pamilya VII', 2, '2026-10-02');        // walang mapping na kailangan (gitling lang)
+        $this->nexusStockIn('Alagang Pamilya', 9, '2026-10-01');            // ang pamilya lang: dalawa ang puwede
+
+        $json = $this->stock()->assertOk()->json();
+
+        $this->assertSame(5, $json['items']['alagang pamilya ii']['stock_in']);
+        $this->assertSame(5, $json['items']['alagang pamilya vii']['stock_in']);
+        $this->assertSame(1, $json['stock_meta']['nexus']['unmatched_count']);
+        $this->assertSame(['name' => 'Alagang Pamilya', 'pieces' => 9, 'ambiguous' => true], $json['stock_meta']['nexus']['unmatched'][0]);
     }
 
     public function test_S_220_3_2_and_3_4_item_type_mappings_are_honoured_and_a_later_mapping_counts_history_without_a_resync(): void

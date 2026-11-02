@@ -67,6 +67,8 @@ class StockSourceViewTest extends ItemTestCase
         $this->assertStringContainsString("x-text=\"num(stock.meta.nexus.unmatched_count) + ' Nexus names not matched'\"", $block);
         $this->assertStringContainsString('x-text="u.name"', $block);
         $this->assertStringContainsString("x-text=\"num(u.pieces) + ' pcs'\"", $block);
+        $this->assertStringContainsString('x-show="u.ambiguous"', $block);
+        $this->assertStringContainsString(' · ambiguous</span>', $block);
         $this->assertStringNotContainsString(' open', substr($block, 0, 40), 'naka-collapse');
     }
 

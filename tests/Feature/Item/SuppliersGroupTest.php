@@ -21,10 +21,10 @@ class SuppliersGroupTest extends ItemTestCase
      * Muling na-pin nang palitan ang mensahe ng Primary Items recompute ("ties skipped" → "tie(s) resolved"); iyon lang ang diff. Muling na-pin nang idagdag sa expand partial (owner._private_expand_inline, kasama sa /item) ang delivery label, ang "Walang ad id" at ang "Total ng page (ayon sa order)" na linya ang tanda ng campaign na walang spend sa range, at ang RTS / DEL / INT na cell (owner._ad_rdt_cell), naka-$data. kaya walang epekto sa /item; iyon lang ang diff.
      */
     private const BASE = [
-        'default.ceo'              => '09c04b5bd2048b4cc48ea107b84e31f5b7de57cd', // muling na-pin (lahat): pinanggalingan ng stock sa To order at sa script
-        'default.ceo_as_marketing' => 'bb720970eb485768092bc7cbf6f096625072c22d',
-        'default.marketing'        => '288eae04de3d03f7257a4c3a67bb95d8b7f31c52',
-        'default.marketing_oic'    => 'a47c922478abec4571e38f0af2572333d6304e5e', // muling na-pin: may supplier work na ang Marketing - OIC
+        'default.ceo'              => 'fa14c86a96efcac26d4bd4f87559dab1c03af116', // muling na-pin (lahat): pinanggalingan ng stock sa To order at sa script
+        'default.ceo_as_marketing' => '2085bd9a5817ccea7931ec751782b5d0a1ca362b',
+        'default.marketing'        => '9aa2f61dd36ea986d42684cc227a20711805cc72',
+        'default.marketing_oic'    => 'e62a7342b212e60c2157b95fd355fb71541b8e4a', // muling na-pin: may supplier work na ang Marketing - OIC
         'old.ceo'                  => '5d10d65e1b9f383fbf8e969d35a078bc87e117bb', // ikinukumpara pagkatapos tanggalin ang link sa toolbar at ang salita sa address
         'old.ceo_as_marketing'     => 'fbc50f5bba353c17b0b03e9fd175a87d7a466f51',
         'old.marketing'            => 'c3a562c1ca7abe192a72bb44975c7ebc33fe9d5d',

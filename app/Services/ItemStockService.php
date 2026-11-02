@@ -214,14 +214,15 @@ class ItemStockService
             $bridge = new ItemNameBridge(array_merge($likhaKeys, array_keys($left['units'])), new ItemAliasResolver());
 
             foreach ($in['stock_in'] as [$name, $pieces]) {
-                $k = $bridge->likhaKey($name);
-                if ($k !== null) {
-                    $out['stock_in'][$k] = ($out['stock_in'][$k] ?? 0) + $pieces;
+                $hit = $bridge->resolve($name);
+                if ($hit['key'] !== null) {
+                    $out['stock_in'][$hit['key']] = ($out['stock_in'][$hit['key']] ?? 0) + $pieces;
                     continue;
                 }
                 $nk = StockInSync::normalizeName($name);
-                $unmatched[$nk] ??= ['name' => $name, 'pieces' => 0];
+                $unmatched[$nk] ??= ['name' => $name, 'pieces' => 0, 'ambiguous' => false];
                 $unmatched[$nk]['pieces'] += $pieces;
+                $unmatched[$nk]['ambiguous'] = $unmatched[$nk]['ambiguous'] || $hit['ambiguous'];
             }
 
             $ret = ReturnedResult::fromArray($in['returned']);

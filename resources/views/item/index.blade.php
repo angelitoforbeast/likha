@@ -888,7 +888,8 @@
                        title="Nexus items whose name matches no Likha item: their stock-in is not counted. Rename one side or add an item mapping."></summary>
               <ul>
                 <template x-for="u in stock.meta.nexus.unmatched" :key="'um-' + u.name">
-                  <li><span x-text="u.name"></span> · <span x-text="num(u.pieces) + ' pcs'"></span></li>
+                  <li><span x-text="u.name"></span> · <span x-text="num(u.pieces) + ' pcs'"></span><span x-show="u.ambiguous"
+                      class="il-src-warn" title="This name fits more than one Likha item through an item mapping, so it is not counted"> · ambiguous</span></li>
                 </template>
               </ul>
             </details>
