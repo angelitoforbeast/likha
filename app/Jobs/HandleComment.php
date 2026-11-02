@@ -18,7 +18,7 @@ class HandleComment implements ShouldQueue
     use Dispatchable, InteractsWithQueue, Queueable;
 
     public int $maxExceptions = 1;
-    public ?int $until = null; // null (payload na mas luma): ang 6 oras ay mula ngayon
+    public int $until;
 
     public function __construct(public int $eventId)
     {
@@ -28,7 +28,7 @@ class HandleComment implements ShouldQueue
 
     public function retryUntil(): \DateTimeInterface
     {
-        return \Carbon\Carbon::createFromTimestamp($this->until ?? now()->addHours(6)->getTimestamp());
+        return \Carbon\Carbon::createFromTimestamp($this->until);
     }
 
     public function handle(CommentReplies $replies): void

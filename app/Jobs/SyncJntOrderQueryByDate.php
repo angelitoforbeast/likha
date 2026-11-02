@@ -19,16 +19,11 @@ class SyncJntOrderQueryByDate implements ShouldQueue
     public int $timeout = 1800; // 30 minutes
     public int $tries = 1;
 
-    // Default sa klase (hindi sa constructor lang): ang payload na naka-queue bago idinagdag ito ay hindi naiiwang walang laman.
-    public ?string $page = null;
-
     public function __construct(
         public int $runId,
         public string $uploadDate,
-        ?string $page = null
-    ) {
-        $this->page = $page;
-    }
+        public ?string $page = null
+    ) {}
 
     public function handle(JntOrderQueryClient $client): void
     {

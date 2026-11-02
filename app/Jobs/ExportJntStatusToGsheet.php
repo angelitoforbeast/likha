@@ -21,17 +21,10 @@ class ExportJntStatusToGsheet implements ShouldQueue
 
     public int $timeout = 1200; // 20 mins
 
-    // Default sa klase (hindi sa constructor lang): ang payload na naka-queue bago idinagdag ito ay hindi naiiwang walang laman.
-    public string $status = 'All';
-    public string $dateRangeRaw = '';
-
     public function __construct(
-        string $status = 'All',
-        string $dateRangeRaw = ''
-    ) {
-        $this->status = $status;
-        $this->dateRangeRaw = $dateRangeRaw;
-    }
+        public string $status = 'All',
+        public string $dateRangeRaw = ''
+    ) {}
 
     public function handle(): void
     {

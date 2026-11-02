@@ -17,12 +17,8 @@ class SyncBotcakeCustomersJob implements ShouldQueue
     public int $timeout = 3600;
     public int $tries = 1;
 
-    // Default sa klase (hindi sa constructor lang): ang payload na naka-queue bago idinagdag ito ay hindi naiiwang walang laman.
-    public bool $full = false;
-
-    public function __construct(public string $page, bool $full = false)
+    public function __construct(public string $page, public bool $full = false)
     {
-        $this->full = $full;
     }
 
     public function handle(BotcakeCustomerSync $sync): void

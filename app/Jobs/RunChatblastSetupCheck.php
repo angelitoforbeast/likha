@@ -25,12 +25,8 @@ class RunChatblastSetupCheck implements ShouldQueue
     public int $timeout = 1800; // mas maikli sa retry_after ng database queue (1900); ~60 page × ~2-25 s
     public int $tries = 1;
 
-    // Default sa klase (hindi sa constructor lang): ang payload na naka-queue bago idinagdag ito ay hindi naiiwang walang laman.
-    public ?int $by = null;
-
-    public function __construct(?int $by = null)
+    public function __construct(public ?int $by = null)
     {
-        $this->by = $by;
         $this->onQueue('default');
     }
 

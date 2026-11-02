@@ -26,12 +26,8 @@ class RunChatbotContentCheck implements ShouldQueue, ShouldBeUnique
     public int $uniqueFor = 3600;
     private const BUDGET_SECONDS = 1300; // ang bago o nabagong text, larawan at video lang ang tinatanong (Main Flow, Prompt, Seq); ang hindi naabot ay sa susunod na takbo
 
-    // Default sa klase (hindi sa constructor lang): ang payload na naka-queue bago idinagdag ito ay hindi naiiwang walang laman.
-    public ?string $page = null;
-
-    public function __construct(?string $page = null)
+    public function __construct(public ?string $page = null)
     {
-        $this->page = $page;
         $this->onQueue('default');
     }
 

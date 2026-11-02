@@ -40,15 +40,11 @@ class ProcessPancakeConversationsUpload implements ShouldQueue
 
     private const ROW_CHUNK_SIZE = 4000;
 
-    // Default sa klase (hindi sa constructor lang): ang payload na naka-queue bago idinagdag ito ay hindi naiiwang walang laman.
-    public ?int $userId = null;
-
     public function __construct(
         public string $storedPath,
-        ?int $userId = null,
+        public ?int   $userId = null,
         ?int          $uploadLogId = null
     ) {
-        $this->userId = $userId;
         $this->uploadLogId = $uploadLogId;
     }
 
