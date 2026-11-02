@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Jobs\Concerns\RestoresMissingDefaults;
 use App\Models\UploadLog;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -20,7 +21,7 @@ use OpenSpout\Reader\XLSX\Reader as XlsxReaderV4;
 
 class ProcessPancakeConversationsUpload implements ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use Dispatchable, InteractsWithQueue, Queueable, RestoresMissingDefaults; // SerializesModels, at ang payload na mas luma sa klase
 
     public int $timeout = 3600;
     public int $tries   = 1;

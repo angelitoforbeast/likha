@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Jobs\Concerns\RestoresMissingDefaults;
 use App\Models\MacroGsheetSetting;
 use App\Models\MacroOutput;
 use App\Models\MacroImportRun;
@@ -22,7 +23,7 @@ use Illuminate\Support\Facades\Log;
 
 class ImportMacroFromGoogleSheet implements ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use Dispatchable, InteractsWithQueue, Queueable, RestoresMissingDefaults; // SerializesModels, at ang payload na mas luma sa klase
 
     public int $timeout = 3600;
     public int $tries   = 1;

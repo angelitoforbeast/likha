@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Jobs\Concerns\RestoresMissingDefaults;
 use App\Models\AppSetting;
 use App\Models\JntBatchRun;
 use App\Models\JntShipment;
@@ -16,7 +17,7 @@ use Illuminate\Support\Facades\Schema;
 
 class ProcessJntCreateOrdersBatch implements ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use Dispatchable, InteractsWithQueue, Queueable, RestoresMissingDefaults; // SerializesModels, at ang payload na mas luma sa klase
 
     public int $timeout = 1200;
 

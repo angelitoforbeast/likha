@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Jobs\Concerns\RestoresMissingDefaults;
 use App\Services\BotcakeCustomerSync;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -12,7 +13,7 @@ use Illuminate\Queue\SerializesModels;
 /** Ang "Sync Botcake customers now" button ng /page-settings: isang page, sa queue (maaaring ilang minuto). */
 class SyncBotcakeCustomersJob implements ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use Dispatchable, InteractsWithQueue, Queueable, RestoresMissingDefaults; // SerializesModels, at ang payload na mas luma sa klase
 
     public int $timeout = 3600;
     public int $tries = 1;
