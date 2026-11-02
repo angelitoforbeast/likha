@@ -33,6 +33,8 @@ return new class extends Migration {
 
     public function down(): void
     {
+        // Gaya ng up(): hindi naghihintay nang matagal sa lock ng table.
+        if (DB::getDriverName() === 'mysql') DB::statement('SET SESSION lock_wait_timeout = 5');
         if (Schema::hasColumn('chatbot_sequence_subscriptions', 'attempt')) {
             Schema::table('chatbot_sequence_subscriptions', fn (Blueprint $table) => $table->dropColumn('attempt'));
         }
