@@ -81,6 +81,8 @@ After review 2 (c51c0571): full suite failures ExampleTest, ItemTableFitScriptTe
 
 Merge of live main 73bf3778 (spec 221, only `app/Services/Chatbot/ProblemsPanel.php` and its tests; conflict in `qa/stories.md` only, both slices kept): merge commit 8feddbef. On the merge: `tests/Feature/Item` 330 tests, 1 failure (ItemTableFitScriptTest, base), 1 skipped; the 220 and stock files 122 tests, all passed, 1 skipped.
 
+After the final review (77d9939a): `tests/Feature/Item` 335 tests, 1 failure (ItemTableFitScriptTest, base), 1 skipped; the six 220 files 98 tests, all passed, 1 skipped. The full suite was not re-run for this change (sync, page warning and tests only; the last full run, on c51c0571, had no new failure).
+
 ## Review fixes (after the first result)
 
 Live preview on production (read-only, by the reviewer): the returned query took 835 ms using
@@ -134,6 +136,14 @@ partial is still untouched).
 Kept: an item missing from a valid non-empty answer is zeroed (logged), skipped items are protected, all-invalid
 answers are malformed. The test fixtures now send the real Nexus shape.
 
+### Final review
+
+| # | Finding | Fix | Test |
+|---|---|---|---|
+| F-1 | Pin a real sample; a date-format drift must not skip silently | A fixture with the exact live shape (an item with `[{"date":"2026-10-31","lots":2,"pieces":48}]`, a shelf-only item with `stock_in: []`, ints, DATE_ATOM `as_of`). `stock_in[].date` is read as a Manila date: "Y-m-d" as is; a datetime (with or without offset, or UTC) is parsed and converted to Manila before comparing with the asked day; unreadable → the item is skipped (and now visible, F-2) | `test_a_pinned_live_sample_of_the_nexus_answer_is_stored`, `test_a_stock_in_date_is_compared_as_a_manila_date_even_if_nexus_sends_a_datetime` |
+| F-2 | Skipped items were only in the log | A run with skipped items is still ok, and records `nexus_stock_last_error` = `{kind: skipped, count, names (up to 5), message}`; /item shows "<n> Nexus items skipped for bad values: … (their old numbers are kept)"; a run with nothing skipped clears it. It does not count as a token problem or make the numbers stale | `test_skipped_items_leave_a_non_failing_warning_that_a_clean_run_clears`, `test_a_skipped_items_warning_reaches_the_page_without_marking_a_token_problem`, view test |
+| F-3 | Days after a 429 in a long run were dropped | The day that stopped the run and every day after it that was not asked are failed days, so those before the next normal window go on the pending list | `test_days_after_a_429_in_a_long_run_go_to_the_pending_list` |
+
 ## Story changes
 
 - **S-220.1.2**: one `?date=` request per day from the start (33 as of 2026-11-03), each window one day; the stored
@@ -162,7 +172,7 @@ answers are malformed. The test fixtures now send the real Nexus shape.
 - **From review 2**: the timed acceptance (old S-220.1.15) and the mass-empty guard (old S-220.1.19) are removed.
   New S-220.1.15 (an empty stored day is kept, listed and not a failure), S-220.1.19 (`--accept-empty`), S-220.1.20
   (the daily pass drops a day that has items again), S-220.1.21 (a skipped daily pass is recorded), S-220.1.22 (the
-  real Nexus `stock_in` shape), S-220.1.23 (429 stops the run). S-220.1.12 now states the per-day meaning of a missing
+  real Nexus `stock_in` shape), S-220.1.23 (429 stops the run). From the final review: S-220.1.24 (pinned live sample), S-220.1.25 (Manila date of stock_in entries), S-220.1.26 (skipped-items warning), S-220.1.27 (days after a 429 stay pending). S-220.1.12 now states the per-day meaning of a missing
   item.
 
 ## Config keys
@@ -175,7 +185,7 @@ answers are malformed. The test fixtures now send the real Nexus shape.
 | `stock_returned_source` | app_settings | `jnt` (seeded) | Owner only: `jnt` or `nexus`. No UI; a database edit. |
 | `nexus_stock_last_synced_at` | app_settings | — | Written by the sync after a fully successful run (Manila). |
 | `nexus_stock_synced_through` | app_settings | — | Last date through which every day succeeded. |
-| `nexus_stock_last_error` | app_settings | — | JSON `{at, kind, message, day}`; empty after a success. |
+| `nexus_stock_last_error` | app_settings | — | JSON `{at, kind, message, day}`; empty after a success. After a successful run that skipped items: kind `skipped` with `count` and up to 5 `names` (shown on /item, not a failure); empty after a run with nothing skipped. |
 | `nexus_stock_pending_days` | app_settings | — | JSON list of days that failed outside the normal window (`--from`, `--days`); asked again by the next run. |
 | `nexus_stock_unconfirmed_empty` | app_settings | — | JSON list of days Nexus answered empty although rows are stored; the rows are kept and /item warns. Cleared per day by `--accept-empty` or by a later answer with items. |
 | `nexus_stock_daily_pass` | app_settings | — | JSON `{at, status}` of the last daily 7-day pass (`ok`, `failed`, `skipped_locked`); /item warns on `skipped_locked`. |
