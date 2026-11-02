@@ -3912,6 +3912,51 @@ Slice 219 (first written as 218). Threat model: queue payloads are trusted (writ
 | S-219.3 | negative | Given any queued job under `app/Jobs` (subfolders included), then a typed property with no class default passes only as a required constructor parameter of the same name, or, with `RestoresMissingDefaults`, an optional parameter of the same name and type; anything else fails the guard; `HandleComment` without `until` in its payload keeps a 6-hour retry window | `test_S_219_3_every_queued_job_with_an_optional_typed_property_restores_missing_defaults`, `test_S_219_3_a_comment_job_with_or_without_until_in_the_payload_keeps_its_retry_window`, `test_S_219_3_the_guard_reads_subfolders` | 2026-11-03 passed |
 | S-219.4 | edge | Given the 15 job classes built with required and with all arguments, then every payload is byte for byte what f5d6d450 writes, and reading it back sets every typed property | `QueuedJobPayloadTest::test_S_219_4_every_payload_is_byte_for_byte_what_f5d6d450_writes`, `test_S_219_4_a_payload_written_now_is_read_by_the_f5d6d450_classes_the_same_way` | 2026-11-03 passed |
 
+## Slice 217 – Pages speed and ad group edit
+
+As the owner, I want /chatbot/pages to stay fast with every page and its ad groups, every ad group to have the same Edit window as its page, the running ads first, and a test run as a customer who came from a given ad.
+
+Slice 217. Threat model: untrusted pasted text, query and body parameters, and the AI's mapping (it only proposes; Save writes); trusted database and config. Medium: authorization of group edits (the same server-side check as page values).
+Tests: `tests/Feature/Chatblast/AdGroupEditTest.php`, `tests/Feature/Chatblast/TestFromAdTest.php` (sqlite), and the timing run with its case checks in real Chrome, `node tests/perf/pages217.mjs --phone --cpu=2` on the set of `tests/perf/set217.php` (the paste's AI answer faked). "Normal PC" = this machine's Chrome with the CPU slowed 2 times (see the result's Rulings).
+
+### S-217.1 The pages screen is fast (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-217.1.1 | happy | Given a seeded set like live (80 pages, 30 values each, 3 Ad-based pages with 6 groups and 250 ads each), when /chatbot/pages loads, then the server answers in under 1 s and the page is usable (rows visible, scrolling smooth, no long task over 200 ms after load) in under 2 s on a normal PC; record before/after numbers (server ms, HTML/JSON KB, DOM nodes, longest main-thread task) | `pages217.mjs` "S-217.1.1 server < 1 s, usable < 2 s, no task over 200 ms after" (before/after in the result) | 2026-11-03 passed |
+| S-217.1.2 | happy | Given an Ad-based page, then its groups and ad lists are built only when expanded (lazy), and collapsing frees them | `pages217.mjs` "S-217.1.2 groups and ad lists built only when shown, freed when hidden" | 2026-11-03 passed |
+| S-217.1.3 | negative | Given the speed work, then every existing feature of the screen still works: inline ✎ edit, multi-cell paste, Edit window, History/Restore, Check column, filters, Replies switch, ad groups expand (S-172/174/181/192/212 suites stay green) | `pages217.mjs` "S-217.1.3 …" (14 checks); `AdGroupPagesTest`, `AdGroupRunTest`, `AdGroupsTest`, `AdBasedPagesTest`, `AdPreviewTest`, `AdGroupAllValuesTest`, `CommentRepliesTest`, `ChatbotNoHangTest`, `ChatbotPageEditTest`, `ChatbotPasteTest` | 2026-11-03 passed |
+| S-217.1.4 | edge | Given a 390 px phone, then the screen loads and scrolls without freezing | `pages217.mjs --phone` "S-217.1.4 loads and scrolls without freezing at 390 px" | 2026-11-03 passed |
+
+### S-217.2 Every ad group has an Edit like the page (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-217.2.1 | happy | Given an Ad-based page, then each group row (in the list and in Manage in Edit) has an **Edit** button that opens the same Edit window as the page, titled with the page and the group name, showing every group value field (the same fields the page Edit shows; empty = "uses default" with the page value shown muted) | `pages217.mjs` "S-217.2.1 …" (5 checks) | 2026-11-03 passed |
+| S-217.2.2 | happy | Given that window, when a row copied from Google Sheets is pasted, then the AI maps each value to its field exactly as for the page (same endpoint and rules), the preview is shown, Apply fills the fields, and Save writes the group values with history and Restore | `AdGroupEditTest::test_S_217_2_2_and_2_5_…`, `test_S_217_2_2_a_bad_value_in_the_group_edit_saves_nothing`; `pages217.mjs` "S-217.2.2 …" (7 checks) | 2026-11-03 passed |
+| S-217.2.3 | negative | Given identity or switch keys (token, provider, On/Off, Botcake ID, the adgroup mode), then the group Edit neither shows nor saves them (192's exclusion list) | `AdGroupEditTest::test_S_217_2_3_…`; `pages217.mjs` "S-217.2.3 …" | 2026-11-03 passed |
+| S-217.2.4 | negative | Given a user who cannot edit the page's values, then the group Edit is not shown and its saves are refused server-side (403) | `AdGroupEditTest::test_S_217_2_4_…` | 2026-11-03 passed |
+| S-217.2.5 | edge | Given a paste with blanks and "Paste blanks as empty" off/on, then the group behaves exactly like the page | `AdGroupEditTest::test_S_217_2_2_and_2_5_…`; `pages217.mjs` "S-217.2.5 …" (2 checks) | 2026-11-03 passed |
+
+### S-217.3 Running ads first (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-217.3.1 | happy | Given an Ad-based page expanded, then groups with at least one On ad come first, then by customers in 30 days, then name; inside a group, On ads first, then New, then by customers | `AdGroupEditTest::test_S_217_3_1_…`; `pages217.mjs` "S-217.3.1 …" | 2026-11-03 passed |
+| S-217.3.2 | happy | Given "Ads not in a group yet" in Manage in Edit, then On and New ads come first, then by customers | `AdGroupEditTest::test_S_217_3_2_…` (New, then On, then customers: the 174 order, see Story changes) | 2026-11-03 passed |
+| S-217.3.3 | edge | Given a group just created or edited by hand that has no On ad, then it stays visible (212's rule) and sorts after the running groups | `AdGroupEditTest::test_S_217_3_3_…` | 2026-11-03 passed |
+
+### S-217.4 Test as a customer from an ad (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-217.4.1 | happy | Given /chatbot/test with an Ad-based page chosen, then an **Ad** dropdown lists the page's ads (grouped ads by group, then ads not in a group), each with ad name, status and id, On ads first; choosing one runs the test as a customer whose latest ad is that id | `TestFromAdTest::test_S_217_4_1_…`; `pages217.mjs` "S-217.4.1 …" | 2026-11-03 passed |
+| S-217.4.2 | happy | Given an ad in a group (by ad, ad set or campaign id, 212's matching), then the test uses that group's values and flow, and the log line says "Ad <id> → group <name>"; an ad in no group says "→ Default" and uses the page values | `TestFromAdTest::test_S_217_4_2_…`; `pages217.mjs` "S-217.4.2 …" | 2026-11-03 passed |
+| S-217.4.3 | negative | Given a Page-based page, then the Ad dropdown is hidden and tests run as today | `TestFromAdTest::test_S_217_4_3_…`; `pages217.mjs` "S-217.4.3 …" | 2026-11-03 passed |
+| S-217.4.4 | edge | Given the existing "Ad group" picker, then it keeps working; when both are set, the Ad wins and the log says so | `TestFromAdTest::test_S_217_4_4_…` | 2026-11-03 passed |
+
+### S-217.5 Clear way to manage groups (P2)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-217.5.1 | happy | Given an Ad-based page expanded, then "Manage in Edit" is a normal-size primary button next to the "N ads not in a group yet" count, and opens the Edit window at the Ad groups section | `pages217.mjs` "S-217.5.1 …" (2 checks) | 2026-11-03 passed |
+| S-217.5.2 | happy | Given the Default row, then it is labelled "Default (page values)" and shows the page's values exactly as the page row does | `pages217.mjs` "S-217.5.2 …" | 2026-11-03 passed |
+
 ## Slice 220 – Stock on /item = Nexus stock-in + J&T returned − shipped
 
 As the owner, I want stock on /item to follow what really came in (the warehouse's Nexus stock-in) plus what J&T returned, minus what shipped, so I know what to order.

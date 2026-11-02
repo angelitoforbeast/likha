@@ -209,7 +209,7 @@ class ChatbotTabsController extends Controller
         [$page, $pageId] = $this->testPage($request);
         if ($page === null) return response()->json(['error' => 'Pick a page that has a Botcake ID.'], 422);
         $flowId = (int) $this->str($request, 'flow_id', 20);
-        $group = $this->testGroup($request, $page);
+        [$group, $adNote] = $this->testAd($request, $page, $this->testGroup($request, $page));
         $flow = $flowId ? ChatbotFlow::find($flowId) : $this->pageFlow($page, $group);
         $version = $this->str($request, 'version', 10) === 'published' ? 'published' : 'draft';
         $graph = $flow ? ($version === 'published' ? $flow->graph : $flow->draft()) : null;
@@ -223,7 +223,7 @@ class ChatbotTabsController extends Controller
         $engine->run($run, $this->testOutbox($request));
         TestHistory::record($fields, $message, $run);
 
-        return response()->json($this->testResult($flow, $version, $run, $fields));
+        return response()->json($this->testResult($flow, $version, $run, $fields) + ($adNote !== null ? ['ad_note' => $adNote] : []));
     }
 
     /**
@@ -250,7 +250,7 @@ class ChatbotTabsController extends Controller
         $fields->clear(CustomerFields::TEST_SKIP);
         if (!$node) return response()->json(['ran' => false, 'skip_in' => null, 'error' => 'The waiting step is not in this flow any more.']);
 
-        $group = $this->testGroup($request, $page);
+        [$group] = $this->testAd($request, $page, $this->testGroup($request, $page));
         $run = new FlowRun($flow->id, $graph, $page, $pageId, $chatbotPage->botfields($page, $group), $fields, null,
             '', 'Test Customer', now('Asia/Manila')->format('Y-m-d H:i'), true);
         $run->adGroup = $group;
@@ -317,6 +317,23 @@ class ChatbotTabsController extends Controller
         $id = (int) $this->str($request, 'ad_group', 20);
 
         return $id > 0 && isset(app(\App\Services\Chatbot\AdGroups::class)->groups($page)[$id]) ? $id : null;
+    }
+
+    /**
+     * Ang ad na pinili sa Test (ad): sa Ad-based na page, ang test customer ay galing sa ad na iyon, kaya ang group ay
+     * hinahanap gaya ng sa takbo (ang ad mismo, ang ad set nito, saka ang campaign nito; walang tawag sa Meta). Ang ad ay
+     * nananaig sa napiling Ad group. Ang Page-based na page, o walang ad (o hindi ID): ang napiling group, gaya ng dati.
+     * @return array{0: ?int, 1: ?string} ang group (null = ang page values) at ang linya sa Test chat
+     */
+    private function testAd(Request $request, string $page, ?int $picked): array
+    {
+        $ad = $this->str($request, 'ad', 65);
+        $groups = app(\App\Services\Chatbot\AdGroups::class);
+        if (!preg_match('/^\d{1,64}$/', $ad) || !$groups->adBased($page)) return [$picked, null];
+        $group = $groups->groupForAd($page, $ad);
+        $name = $group !== null ? ($groups->groups($page)[$group]['name'] ?? null) : null;
+
+        return [$group, 'Ad ' . $ad . ' → ' . ($name !== null ? 'group ' . $name : 'Default') . ($picked !== null ? ' (the Ad is used, not the Ad group picked)' : '')];
     }
 
     private function pageFlow(string $page, ?int $group = null): ?ChatbotFlow

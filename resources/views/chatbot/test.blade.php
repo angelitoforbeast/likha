@@ -37,6 +37,10 @@
             <label id="t-group-box" class="hidden flex-col text-xs text-slate-500">Ad group
                 <select id="t-group" class="max-w-[16rem] rounded-md border border-slate-300 px-2 py-1 text-sm text-gray-900"></select>
             </label>
+            {{-- Ad-based na page: ang test customer ay galing sa ad na ito (ang group nito, gaya ng sa takbo; nananaig sa Ad group). --}}
+            <label id="t-ad-box" class="hidden flex-col text-xs text-slate-500">Ad
+                <select id="t-ad" class="max-w-[16rem] rounded-md border border-slate-300 px-2 py-1 text-sm text-gray-900"></select>
+            </label>
             <span id="t-pageflow" class="text-xs text-slate-500"></span>
             <button type="button" id="t-reset" class="cb-btn cb-btn-sm ml-auto">Reset test customer</button>
             <label class="flex w-full items-center gap-2 text-xs text-slate-700">
@@ -74,13 +78,28 @@
         .then(async r => ({ok: r.ok, data: await r.json().catch(() => ({}))}));
     const log = node => { $('t-log').append(node); $('t-log').scrollTop = $('t-log').scrollHeight; };
     const showPageFlow = () => { const f = $('t-page').selectedOptions[0]?.dataset.flow; $('t-pageflow').textContent = f ? 'Page flow: ' + f : 'This page has no flow yet.'; };
-    // Ang mga ad group ng page (kapag mayroon): ang napili ay ipinapadala bilang ad_group.
+    // ad-options:start
+    // Ang Ad dropdown ng Ad-based na page: ang mga ID ng bawat group (sa ayos ng mga group), saka ang mga ad na wala pa sa
+    // group; sa bawat isa, ang On muna (saka ang ayos ng server). Bawat ad: pangalan, status at ID. Ang Page-based: wala.
+    const adStatus = a => a.status === 'on' ? 'On' : a.status === 'off' ? 'Off since ' + a.off_since + (a.off_days == null ? '' : ' (' + a.off_days + ' day' + (a.off_days === 1 ? '' : 's') + ')') : 'No report data';
+    function adOptions(d) {
+        if (!d || d.mode !== 'ad') return [];
+        const onFirst = list => [...(list || [])].sort((a, b) => (b.status === 'on') - (a.status === 'on'));
+        const opt = a => ({value: String(a.ad_id), text: (a.name || '(no name)') + ' · ' + adStatus(a) + ' · ' + a.ad_id});
+        return [...(d.groups || []).map(g => ({label: g.name, ads: onFirst(g.ads).map(opt)})), {label: 'Not in a group', ads: onFirst(d.unassigned).map(opt)}].filter(g => g.ads.length);
+    }
+    // ad-options:end
+    // Ang mga ad group ng page (kapag mayroon): ang napili ay ipinapadala bilang ad_group; ang napiling ad, bilang ad.
     const loadGroups = () => fetch($('tst').dataset.groupsUrl + '?page=' + encodeURIComponent($('t-page').value), {headers: {'Accept': 'application/json'}})
         .then(r => r.ok ? r.json() : {groups: []}).catch(() => ({groups: []})).then(d => {
             $('t-group').replaceChildren(el('option', {value: '', text: 'Page values'}), ...(d.groups || []).map(g => el('option', {value: String(g.id), text: g.name})));
             $('t-group-box').classList.toggle('hidden', !(d.groups || []).length); $('t-group-box').classList.toggle('flex', !!(d.groups || []).length);
+            const ads = adOptions(d);
+            $('t-ad').replaceChildren(el('option', {value: '', text: 'No ad (as before)'}), ...ads.map(g => el('optgroup', {label: g.label}, g.ads.map(a => el('option', {value: a.value, text: a.text})))));
+            $('t-ad-box').classList.toggle('hidden', !ads.length); $('t-ad-box').classList.toggle('flex', !!ads.length);
         });
-    $('t-page').addEventListener('change', () => { showPageFlow(); loadGroups(); $('t-log').replaceChildren(); stopSkip(); });
+    // Ang ad at group ng dating page ay hindi naipapadala habang kinukuha pa ang sa bagong page.
+    $('t-page').addEventListener('change', () => { $('t-ad').replaceChildren(); $('t-group').replaceChildren(); showPageFlow(); loadGroups(); $('t-log').replaceChildren(); stopSkip(); });
     showPageFlow();
     loadGroups();
 
@@ -88,9 +107,11 @@
     const SHEET_KEY = 'chatbot-test-write-sheet';
     $('t-write-sheet').checked = localStorage.getItem(SHEET_KEY) === '1';
     $('t-write-sheet').addEventListener('change', () => localStorage.setItem(SHEET_KEY, $('t-write-sheet').checked ? '1' : '0'));
-    const base = () => ({page_name: $('t-page').value, flow_id: $('t-flow').value, version: $('t-version').value, ad_group: $('t-group').value, write_sheet: $('t-write-sheet').checked});
+    const base = () => ({page_name: $('t-page').value, flow_id: $('t-flow').value, version: $('t-version').value, ad_group: $('t-group').value, ad: $('t-ad').value, write_sheet: $('t-write-sheet').checked});
 
     function render(data) {
+        // Ang napiling ad at ang group nito (o Default), gaya ng sa takbo.
+        if (data.ad_note) log(el('div', {class: 'text-xs text-slate-500', text: data.ad_note}));
         (data.sends || []).forEach(s => s.messages.forEach(m => log(el('div', {class: 'flex'}, el('div', {class: 'max-w-[80%] whitespace-pre-line break-words rounded-lg bg-white px-3 py-1.5 shadow-sm'},
             m.type === 'image' ? [el('img', {src: m.url, alt: '', referrerpolicy: 'no-referrer', class: 'max-h-40 rounded'}), el('div', {class: 'break-all text-xs text-slate-500', text: m.url})] : m.text)))));
         (data.sheet_rows || []).forEach(r => log(r.error

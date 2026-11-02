@@ -224,7 +224,8 @@ class AdGroupPagesTest extends ChatblastTestCase
         $this->chat('7002', '40002', daysAgo: 2);
         $id = app(AdGroups::class)->save('Page P', null, 'Serum', ['40001', '50002', '60001', '999999'], [])['id'];
 
-        $rows = collect($this->panel()['groups'])->firstWhere('id', $id)['ads'];
+        // Ayon sa ID (ang ayos sa screen, ang tumatakbo muna, ay sa S-217.3.1).
+        $rows = collect(collect($this->panel()['groups'])->firstWhere('id', $id)['ads'])->sortBy('ad_id')->values()->all();
         $pick = fn ($r) => [$r['ad_id'], $r['kind'], $r['name'], $r['status'], $r['off_since'], $r['customers'], $r['last']];
         $this->assertSame([
             ['40001', 'ad', 'Serum Sale / Women 25+ / Ad 40001', 'on', null, 1, '2026-10-20 10:00'],
@@ -360,7 +361,7 @@ class AdGroupPagesTest extends ChatblastTestCase
         // 7.2: idinagdag nang mano-mano sa nakatagong group: nakikita ulit; ang lumang tahimik na ID ay nakatiklop pa rin.
         $this->postJson('/chatbot/ad-groups/add', ['page' => 'Page P', 'id' => $old, 'ads' => '44002'])->assertOk();
         $this->assertFalse($g()[$old]['hidden']);
-        $this->assertSame([['41001', true], ['44002', false]], array_map(fn ($r) => [$r['ad_id'], $r['quiet']], $g()[$old]['ads']));
+        $this->assertSame([['44002', false], ['41001', true]], array_map(fn ($r) => [$r['ad_id'], $r['quiet']], $g()[$old]['ads']), 'ang tahimik sa dulo (S-217.3.1)');
         // 7.6: Rename, History, Remove at Delete ay gaya ng dati sa nakatagong group.
         $this->travel(8)->days();
         $this->assertSame([true, true], [$g()[$fresh]['hidden'], $g()[$old]['hidden']], '7.3: lampas 7 araw, walang traffic: nakatiklop');
@@ -530,13 +531,13 @@ class AdGroupPagesTest extends ChatblastTestCase
         $this->assertSame(['text' => 'Show hidden (4)', 'pressed' => 'false', 'tag' => 'BUTTON', 'type' => 'button', 'groups' => [$serum],
             'folded' => '2 hidden ads (quiet for 7+ days)', 'unassigned' => ['40001', '60001', '47778']], $out['before']);
         $this->assertSame(['text' => 'Hide again', 'pressed' => 'true', 'groups' => [$serum, $old], 'oldDim' => true,
-            'tags' => ['Ad', 'Ad set', 'Campaign', 'Not found in Ads Manager', 'Ad', 'Ad', 'Ad'], 'rawName' => true, 'ids' => 7], $out['after']);
+            'tags' => ['Ad', 'Campaign', 'Ad set', 'Not found in Ads Manager', 'Ad', 'Ad', 'Ad'], 'rawName' => true, 'ids' => 7], $out['after']); // ang tumatakbo muna (S-217.3.1)
         $this->assertNotSame('Show all', substr($out['before']['text'], 0, 8));
         $this->assertSame('Remove ad set 50002 from "Serum"? Its customers get the page values again.', $out['confirm']);
         $this->assertStringContainsString('That group is hidden', $out['refused']);
         $this->assertSame('Added to "Serum". Already in this group: 40001.', $out['note']);
         $this->assertSame(['Hide again', 'Hide again', 'Hide again'], [$out['afterAdd'], $out['afterSearch'], $out['afterRemove']]);
-        $this->assertSame(['groups' => [$serum], 'toggle' => 'Show hidden (3)', 'count' => [2, 2], 'shown' => [$serum, $old], 'tags' => ['Ad set', 'Campaign']], $out['readOnly']);
+        $this->assertSame(['groups' => [$serum], 'toggle' => 'Show hidden (3)', 'count' => [2, 2], 'shown' => [$serum, $old], 'tags' => ['Campaign', 'Ad set']], $out['readOnly']); // ang tumatakbo muna (S-217.3.1)
         $this->assertTrue($out['noneToggle']);
         $this->assertSame(['Add 2 ads to group', 'Add 1 ad to group', ['47778']], [$out['tickedShown'], $out['tickedHidden'], $out['addedTicked']], 'A3: ang nakatagong naka-tick ay hindi idinadagdag');
     }

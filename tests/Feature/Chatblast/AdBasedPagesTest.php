@@ -95,7 +95,8 @@ class AdBasedPagesTest extends ChatblastTestCase
 
         $data = $this->getJson('/chatbot/ad-groups?page=Precious%20Lopez')->assertOk()->json();
         $this->assertSame('2026-10-19', $data['as_of']);
-        $ads = collect($data['groups'])->firstWhere('id', $a)['ads'];
+        // Ayon sa ID (ang ayos sa screen, ang tumatakbo muna, ay sa S-217.3.1).
+        $ads = collect(collect($data['groups'])->firstWhere('id', $a)['ads'])->sortBy('ad_id')->values()->all();
         $pick = fn (array $r) => [$r['ad_id'], $r['status'], $r['off_since'], $r['off_days'], $r['new']];
         $this->assertSame([
             ['501', 'on', null, null, false],
@@ -141,7 +142,7 @@ class AdBasedPagesTest extends ChatblastTestCase
 
         $this->postJson('/chatbot/ad-groups/add', ['page' => 'Precious Lopez', 'id' => $a, 'ads' => ['601', '602']])->assertOk();
         $data = $this->getJson('/chatbot/ad-groups?page=Precious%20Lopez')->json();
-        $this->assertSame(['601', '602', '999'], array_column(collect($data['groups'])->firstWhere('id', $a)['ads'], 'ad_id'));
+        $this->assertSame(['602', '601', '999'], array_column(collect($data['groups'])->firstWhere('id', $a)['ads'], 'ad_id'), 'On, saka ang bago, saka ang customers (S-217.3.1)');
         $this->assertSame(['604', '605', '603'], array_column($data['unassigned'], 'ad_id'));
         $this->assertSame(1, $data['new_unassigned']);
     }
