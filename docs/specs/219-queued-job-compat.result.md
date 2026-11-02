@@ -35,8 +35,12 @@ Now:
   `ProcessJntCreateOrdersBatch`, `ProcessPancakeConversationsUpload` (`$userId` each), `ProcessPaymentActivityUpload`
   (`$uploadedBy`, `$diskName`, `$uploadLogId`), `ExportJntStatusToGsheet` (`$status`, `$dateRangeRaw`),
   `SyncFromJntStatusByTrack` (`$dryRun`), `SyncJntOrderQueryByDate` (`$page`).
-- `HandleComment` is unchanged: it does not use `SerializesModels`, and its only typed property, `$until`, is always set
-  in the constructor, so every payload carries it.
+- `HandleComment` does not use `SerializesModels`: plain `serialize()` writes every property, defaults included. Its
+  `$until` is computed in the constructor (now + 6 hours), so the trait could not restore it; it now has a class default
+  (`public ?int $until = null`) and `retryUntil()` falls back to now + 6 hours, as a fresh dispatch. Its payload bytes are
+  unchanged (S-219.4 still matches the f5d6d450 fixture).
+- The trait restores the parameter's raw default, so it works only for a property that is promoted, or assigned straight
+  from the parameter of the same name and type; its docblock says so, and the guard enforces it.
 
 ## Payload format unchanged: the evidence
 
@@ -65,8 +69,8 @@ payloads with the recorded bytes: identical for all 29.
 |---|---|---|---|
 | S-219.1 | `QueuedJobCompatTest::test_S_219_1…` (the exact production payload) | fails: `Error: Typed property App\Jobs\RunChatbotSequenceStep::$earlier must not be accessed before initialization` | passes |
 | S-219.2 | `test_S_219_2…` (resume and gateway watch jobs) | passes | passes |
-| S-219.3 | `test_S_219_3_every_queued_job_with_an_optional_typed_property_restores_missing_defaults` (recursive over `app/Jobs`, subfolders such as `Boardroom` included; the rule: every queued job with an optional typed property uses the trait), `test_S_219_3_the_guard_reads_subfolders` | fails, listing 20 properties in 14 classes | passes |
-| S-219.4 | `QueuedJobPayloadTest` (2 tests, 29 payloads) | passes (it is the recorded state) | passes |
+| S-219.3 | `test_S_219_3_every_queued_job_with_an_optional_typed_property_restores_missing_defaults` (recursive over `app/Jobs`, subfolders such as `Boardroom` included, every `ShouldQueue` class with or without the trait; a typed property with no class default passes only as a required constructor parameter of the same name, or, in a class with the trait, an optional parameter of the same name and type), `test_S_219_3_a_comment_job_with_or_without_until_in_the_payload_keeps_its_retry_window`, `test_S_219_3_the_guard_reads_subfolders` | without the trait: fails, listing 20 properties in 14 classes; without `HandleComment`'s class default: the guard lists `HandleComment::$until` and the comment test throws the uninitialized-property error | passes |
+| S-219.4 | `QueuedJobPayloadTest` (2 tests, 29 payloads; the test pins `queue.chatbot_connection`, `order_encode.forbeast.queue` and `app.timezone` itself) | passes (it is the recorded state) | passes, also with `QUEUE_CONNECTION=redis` and `FORBEAST_ORDERS_QUEUE=orders` in the environment (before the pin that run failed on `RunChatbotSequenceStep#0`) |
 
 The guard's docblock records the known gap: a new **required** constructor parameter on a job that is already queued is not
 covered (there is no default to restore); such a change needs a default or a drained queue before the deploy.
@@ -80,7 +84,7 @@ covered (there is no default to restore); such a change needs a default or a dra
 
 - **No new failure.** The 4 are the known ones: BigBroadcastTest S-167.1, ExampleTest, ItemTableFitScriptTest,
   AstraAddressRulesTest S-26.18.
-- **The 6 new tests pass:** QueuedJobCompatTest 4, QueuedJobPayloadTest 2.
+- **The new tests pass:** QueuedJobCompatTest 4 (5 after the re-review), QueuedJobPayloadTest 2.
 - **Green in the same run:**
   - the 6 Sequence classes (ReRun with 1 MySQL-only skip);
   - the 14 listed suites;
@@ -89,6 +93,12 @@ covered (there is no default to restore); such a change needs a default or a dra
     BotcakeWindowRead, ChatblastSetupCheck, ChatbotContentCheck, CommentReplies, AdsDataRefusal,
     AdsManagerUploadCharacterization, ImportStart, NightImportCommand, ForbeastOrders, BotcakePanel, SyncAll,
     PaymentDateOrder.
+
+### Re-review run (after the minors, before the merge of 81d106ac)
+
+Only `HandleComment` changed in app code (its `$until` default), so no full suite. Green: QueuedJobCompatTest 5,
+QueuedJobPayloadTest 2, the 6 Sequence classes (ReRun with its 1 MySQL-only skip), the 14 listed suites (QueueRedisHorizon
+with its 1 skip) and CommentRepliesTest 32.
 
 ## Deploy notes
 
