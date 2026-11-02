@@ -195,7 +195,7 @@ class SequenceDurabilityTest extends SequenceHandoffTestCase
         DB::listen(function ($q) use (&$sql) { $sql[] = strtolower($q->sql); });
         $this->assertSame(3, BotcakeSendQueue::sweepSequence()['pruned']);
         $this->assertSame(['pending', 'resumed', 'resumed'], $this->tickets()->pluck('status')->all(), 'the waiting one, the reply pool\'s own and the recent one are left');
-        $deletes = collect($sql)->filter(fn ($s) => str_starts_with($s, 'select') && str_contains($s, '"id" <= ?') && str_contains($s, 'priority'));
+        $deletes = collect($sql)->filter(fn ($s) => str_starts_with($s, 'select') && str_contains(str_replace(['"', '`'], '', $s), 'id <= ?') && str_contains($s, 'priority'));
         $this->assertCount(3, $deletes, 'each status read up to the id cutoff, through (status, priority, id)');
 
         DB::table(BotcakeSendQueue::TABLE)->where('status', 'pending')->update(['status' => 'done']); // the old waiting one is done now
