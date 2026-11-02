@@ -3911,3 +3911,18 @@ Slice 219 (first written as 218). Threat model: queue payloads are trusted (writ
 | S-219.2 | happy | The same for `ResumeChatbotSequenceSend` and `GatewayAfterSend`: a payload with only the properties the class had when first queued runs normally | `test_S_219_2_the_resume_and_gateway_watch_jobs_run_from_their_first_payload_shape` | 2026-11-03 passed |
 | S-219.3 | negative | Given any queued job under `app/Jobs` (subfolders included), then a typed property with no class default passes only as a required constructor parameter of the same name, or, with `RestoresMissingDefaults`, an optional parameter of the same name and type; anything else fails the guard; `HandleComment` without `until` in its payload keeps a 6-hour retry window | `test_S_219_3_every_queued_job_with_an_optional_typed_property_restores_missing_defaults`, `test_S_219_3_a_comment_job_with_or_without_until_in_the_payload_keeps_its_retry_window`, `test_S_219_3_the_guard_reads_subfolders` | 2026-11-03 passed |
 | S-219.4 | edge | Given the 15 job classes built with required and with all arguments, then every payload is byte for byte what f5d6d450 writes, and reading it back sets every typed property | `QueuedJobPayloadTest::test_S_219_4_every_payload_is_byte_for_byte_what_f5d6d450_writes`, `test_S_219_4_a_payload_written_now_is_read_by_the_f5d6d450_classes_the_same_way` | 2026-11-03 passed |
+
+## Slice 221 – Quiet and obsolete pages
+
+As the owner, I want the problems banner to call a setup warning urgent only for a page that sells, so the urgent count means something.
+
+Slice 221 (narrowed by Amendment 221-1 to S-221.1; S-221.2 and S-221.3 removed). Threat model: page names come from page_settings and macro_output (trusted database); no new input, route, table, column, migration or config. Risk tier: medium (what staff are warned about). Tests: `tests/Feature/Chatblast/QuietSetupTest.php`.
+
+### S-221.1 The setup warning is urgent only for a page that sells (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-221.1.1 | happy | Given a page with a setup X that is "sending" and has at least one order (`macro_output`, by its order date) in the last 14 days, then its setup line is orange (urgent) as today | `test_S_221_1_1_a_sending_page_with_an_order_in_the_last_14_days_is_orange` (order 13 days ago, the oldest day of the window) | 2026-11-03 passed |
+| S-221.1.2 | happy | Given the same page with no order in the last 14 days, then its setup line is white and reads "Quiet (no order in 14 days), setup incomplete: <reason>", and it does not count as urgent | `test_S_221_1_2_a_sending_page_with_no_order_in_14_days_is_white_and_not_urgent` (order 14 days ago only) | 2026-11-03 passed |
+| S-221.1.3 | happy | Given a quiet page that gets an order, then within the banner's cache time (≤ 60 s) its setup line is orange again | `test_S_221_1_3_a_quiet_page_that_gets_an_order_is_orange_again_within_the_cache_time` | 2026-11-03 passed |
+| S-221.1.4 | edge | Given page names that differ only in case or spacing between the settings and the orders, then they are matched the way `PageSettings::pageKey` matches pages | `test_S_221_1_4_page_names_that_differ_in_case_or_spacing_are_matched_like_page_key` | 2026-11-03 passed |
+| S-221.1.5 | edge | Given 80 pages, then the order counts come from one grouped query per banner build (no per-page query), within the existing cache | `test_S_221_1_5_eighty_pages_take_one_grouped_order_query_per_banner_build_within_the_cache` | 2026-11-03 passed |
