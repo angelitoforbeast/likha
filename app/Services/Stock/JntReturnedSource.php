@@ -32,7 +32,12 @@ class JntReturnedSource implements ReturnedSource
         return $this->fromRows($this->rows($start, $until));
     }
 
-    /** Ang SQL (para sa EXPLAIN): bindings() ang ayos ng mga value. */
+    /**
+     * Ang SQL (para sa EXPLAIN): bindings() ang ayos ng mga value.
+     * "fj.submission_time >= START OR EXISTS (...)": kadalasang may submission_time ang Returned row mismo, kaya bihirang
+     * kailanganin ang EXISTS. Kung EXISTS lang, ginagawa itong semijoin ng MySQL na nagsisimula sa buong scan ng from_jnts
+     * imbes na sa mga Returned row (index ng status).
+     */
     public static function sql(): string
     {
         $item = ItemStockService::col('ITEM_NAME');
@@ -48,7 +53,8 @@ class JntReturnedSource implements ReturnedSource
                     AND (fj.signingtime IS NULL OR fj.signingtime >= ?)
                     AND NOT EXISTS (SELECT 1 FROM from_jnts n WHERE n.waybill_number = fj.waybill_number AND n.id > fj.id)
                     AND NOT EXISTS (SELECT 1 FROM from_jnts b WHERE b.waybill_number = fj.waybill_number AND b.submission_time < ?)
-                    AND EXISTS (SELECT 1 FROM from_jnts a WHERE a.waybill_number = fj.waybill_number AND a.submission_time >= ?)) r
+                    AND (fj.submission_time >= ?
+                         OR EXISTS (SELECT 1 FROM from_jnts a WHERE a.waybill_number = fj.waybill_number AND a.submission_time >= ?))) r
               ON r.waybill_number = mo.waybill
             WHERE " . ItemStockService::notCancelledSql() . "
             GROUP BY $item";
@@ -59,7 +65,7 @@ class JntReturnedSource implements ReturnedSource
     {
         $from = $start . ' 00:00:00';
 
-        return array_merge([$until, $until, self::STATUS, $from, $from, $from], HoldService::CANCELLED_STATUSES);
+        return array_merge([$until, $until, self::STATUS, $from, $from, $from, $from], HoldService::CANCELLED_STATUSES);
     }
 
     /** Raw grouped rows (para sa cache): [[item_name, returned_cnt, unsigned_cnt, future_cnt], ...] */
