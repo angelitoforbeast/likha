@@ -75,6 +75,8 @@ class PageGridOrdersTest extends BotcakeApiTestCase
         $this->orders('Page Big', 2);
         $this->get('/chatblast/page-settings')->assertOk(); // auth at profile; pinupuno rin ang cache
         Cache::flush();
+        // Ang banner ng mga problema ay may sariling order query (spec 221, cache na 60 s): binubuo muna, para ang grid lang ang binibilang.
+        app(\App\Services\Chatbot\ProblemsPanel::class)->panel();
 
         $macro = function (string $url): int {
             DB::flushQueryLog();

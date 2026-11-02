@@ -41,6 +41,8 @@ class PsidCoverageTest extends BotcakeApiTestCase
         $this->order('Page Uno', 'D', null, '', $this->day(4));
         $this->order('Page Uno', 'F', null, null, $this->day(9)); // labas sa default na 7 araw
         $this->order('Page Dos', 'G', null, null, $this->day(1));
+        // Ang banner ng mga problema ay may sariling order query (spec 221, cache na 60 s): binubuo muna, para ang summary lang ang binibilang.
+        app(\App\Services\Chatbot\ProblemsPanel::class)->panel();
 
         $queries = 0;
         DB::listen(function ($q) use (&$queries) { if (str_contains($q->sql, 'macro_output')) $queries++; });
