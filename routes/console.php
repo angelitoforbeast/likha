@@ -275,3 +275,10 @@ Schedule::command('ads:data-health --record')
     ->timezone('Asia/Manila')
     ->dailyAt((string) config('services.meta_ads.data_health_at', '12:00'))
     ->withoutOverlapping(30);
+
+// Nexus stock-in (warehouse) → nexus_stock_ins para sa stock sa /item: kada oras sa :10 Manila, kahapon at ngayon
+// (ang unang takbo ay mula sa item_stock_start). Walang token = walang tawag (hindi naka-configure).
+Schedule::command('nexus:sync-stock')
+    ->timezone('Asia/Manila')
+    ->hourlyAt(10)
+    ->withoutOverlapping(30);

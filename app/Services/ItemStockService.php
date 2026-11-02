@@ -456,6 +456,12 @@ class ItemStockService
 
     private function stockStart(): ?string
     {
+        return self::startSetting();
+    }
+
+    /** app_settings.item_stock_start kapag totoong petsa (Y-m-d); kung hindi, null (wala pang stock). */
+    public static function startSetting(): ?string
+    {
         if (!Schema::hasTable('app_settings')) return null;
         $v = DB::table('app_settings')->where('key', self::START_SETTING)->value('value');
         $v = is_string($v) ? trim($v) : '';

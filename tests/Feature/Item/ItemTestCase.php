@@ -7,6 +7,7 @@ use App\Models\User;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
@@ -59,7 +60,14 @@ abstract class ItemTestCase extends TestCase
             $t->id();
             $t->string('waybill_number')->nullable();
             $t->string('submission_time')->nullable();
+            $t->string('status')->nullable();
+            $t->string('signingtime')->nullable();
         });
+
+        // Walang totoong tawag sa Nexus (o kahit saan): ang hindi naka-fake na request ay bagsak ang test.
+        Http::preventStrayRequests();
+        // Default ng /item test = walang Nexus (lumang PO-received na stock); ang Nexus test ang nagse-set ng token.
+        config(['services.nexus.token' => null, 'services.nexus.url' => 'https://nexus.test']);
 
         // supply_settings: kapareho ng 2026_04_24_000003 (hindi mapatakbo mag-isa — may item_class_thresholds ito).
         Schema::create('supply_settings', function (Blueprint $t) {
@@ -98,6 +106,7 @@ abstract class ItemTestCase extends TestCase
             'database/migrations/2026_10_02_100400_seed_item_palugit_settings.php',
             'database/migrations/2026_10_02_100500_hide_category_column_owner_private.php',
             'database/migrations/2026_10_16_300000_create_item_edit_logs_table.php',
+            'database/migrations/2026_11_16_100000_create_nexus_stock_ins_table.php',
         ];
     }
 
@@ -124,8 +133,42 @@ abstract class ItemTestCase extends TestCase
     }
 
     /** Waybill na nasa J&T na (shipped → hindi HOLD). */
-    protected function shipped(string $waybill, ?string $submittedAt = null): void
+    protected function shipped(string $waybill, ?string $submittedAt = null, ?string $status = null, ?string $signedAt = null): void
     {
-        DB::table('from_jnts')->insert(['waybill_number' => $waybill, 'submission_time' => $submittedAt]);
+        DB::table('from_jnts')->insert([
+            'waybill_number' => $waybill, 'submission_time' => $submittedAt, 'status' => $status, 'signingtime' => $signedAt,
+        ]);
+    }
+
+    /** Naka-configure ang Nexus (pekeng token, test lang). */
+    protected function nexusOn(): void
+    {
+        config(['services.nexus.token' => 'fake-test-token-220', 'services.nexus.url' => 'https://nexus.test']);
+    }
+
+    /** Isang naka-store na Nexus stock-in row (parang galing na sa sync). */
+    protected function nexusStockIn(string $name, int $pieces, string $date, int $lots = 1, ?int $remaining = null, ?string $asOf = null): void
+    {
+        DB::table('nexus_stock_ins')->insert([
+            'stock_date'      => $date,
+            'name_key'        => \App\Services\Nexus\StockInSync::nameKey($name),
+            'item_name'       => $name,
+            'stock_in_lots'   => $lots,
+            'stock_in_pieces' => $pieces,
+            'remaining'       => $remaining,
+            'as_of'           => $asOf,
+            'created_at'      => now(),
+            'updated_at'      => now(),
+        ]);
+    }
+
+    /** Isang app_settings row; null = burahin. */
+    protected function appSetting(string $key, ?string $value): void
+    {
+        if ($value === null) {
+            DB::table('app_settings')->where('key', $key)->delete();
+            return;
+        }
+        DB::table('app_settings')->updateOrInsert(['key' => $key], ['value' => $value, 'created_at' => now(), 'updated_at' => now()]);
     }
 }
