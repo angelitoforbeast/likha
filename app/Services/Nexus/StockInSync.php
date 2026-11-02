@@ -17,9 +17,12 @@ use Illuminate\Support\Facades\Schema;
  * ang ?from=&to= ng Nexus ay kabuuan ng buong range (walang hati kada araw), kaya hindi ito mailalagay kada araw.
  *
  * Mga araw na tinatanong: mula sa nexus_stock_synced_through (inuulit: "ngayon" pa iyon nang i-store) o mula sa
- * item_stock_start sa unang takbo, hanggang ngayon (Manila); laging kasama ang kahapon. Ang sagot ng isang araw ang
- * totoo para sa araw na iyon: overwrite (hindi dagdag), at ang naka-store na item na wala sa sagot ay ginagawang 0.
- * Ang walang laman o sirang sagot ay hindi gumagalaw sa naka-store; walang binubura kahit kailan.
+ * item_stock_start sa unang takbo, hanggang ngayon (Manila); laging kasama ang kahapon, at ang mga araw na bumagsak sa
+ * naunang --from / --days na takbo (nexus_stock_pending_days). Ang sagot ng isang araw ang totoo para sa araw na iyon:
+ * overwrite (hindi dagdag), at ang naka-store na item na wala sa sagot ay ginagawang 0 — maliban sa item na nilaktawan
+ * dahil sira ang numero (nananatili ang dati). Sirang sagot (pati puro sirang item) = babala, walang nagbabago.
+ * Walang laman ang sagot ng naka-store na araw: babala sa unang takbo; tanggap (0 ang araw) kapag walang laman din
+ * isang oras o higit pagkatapos, o kapag bago pa ang kahapon ang araw. Walang binubura kahit kailan.
  *
  * Ang token ay nasa Authorization header lang: hindi ito nilo-log, iniimbak o ibinabalik.
  */
@@ -30,6 +33,12 @@ class StockInSync
     public const LAST_SYNCED    = 'nexus_stock_last_synced_at';
     public const SYNCED_THROUGH = 'nexus_stock_synced_through';
     public const LAST_ERROR     = 'nexus_stock_last_error';
+    /** JSON na listahan ng mga araw na bumagsak (hal. sa --from o --days) at itatanong ulit ng susunod na takbo. */
+    public const PENDING_DAYS   = 'nexus_stock_pending_days';
+    /** JSON {araw: unang oras na walang laman ang sagot} para sa naka-store na araw na naging walang laman. */
+    public const EMPTY_SEEN     = 'nexus_stock_empty_seen';
+    /** Ilang segundo bago tanggapin ang ikalawang walang-lamang sagot ng naka-store na araw (kahapon o ngayon). */
+    private const EMPTY_CONFIRM = 3600;
     private const MAX_COUNT     = 2147483647;
     private const TZ            = 'Asia/Manila';
 
@@ -38,17 +47,23 @@ class StockInSync
         return trim((string) config('services.nexus.token')) !== '';
     }
 
-    /** NFC, trim, isang space, lowercase: ang batayan ng name_key (at ng hindi-tugmang listahan). */
+    /** NFC, trim, isang space (kasama ang NBSP at iba pang Unicode space), lowercase: batayan ng name_key. */
     public static function normalizeName(string $name): string
     {
-        $s = trim($name);
+        $s = self::trimName($name);
         if (class_exists(\Normalizer::class)) {
             $n = \Normalizer::normalize($s, \Normalizer::FORM_C);
             if (is_string($n)) $s = $n;
         }
-        $s = preg_replace('/\s+/u', ' ', $s) ?? $s;
+        $s = preg_replace('/[\s\p{Z}]+/u', ' ', $s) ?? $s;
 
         return mb_strtolower(trim($s), 'UTF-8');
+    }
+
+    /** trim() na kasama ang NBSP at iba pang Unicode space (\p{Z}); ang loob ng pangalan ay hindi ginagalaw. */
+    public static function trimName(string $name): string
+    {
+        return preg_replace('/^[\s\p{Z}]+|[\s\p{Z}]+$/u', '', $name) ?? trim($name);
     }
 
     public static function nameKey(string $name): string
@@ -60,7 +75,7 @@ class StockInSync
      * @return array{status:string, lines:array<int,string>}
      *   status: not_configured | no_table | no_start | bad_from | locked | ok | failed
      */
-    public function run(?string $from = null): array
+    public function run(?string $from = null, ?int $days = null): array
     {
         if (!self::configured()) {
             return ['status' => 'not_configured', 'lines' => ['Nexus not configured (services.nexus.token is empty): nothing asked, nothing changed.']];
@@ -81,13 +96,13 @@ class StockInSync
             return ['status' => 'locked', 'lines' => ['Another nexus:sync-stock is already running: nothing asked.']];
         }
         try {
-            return $this->sync($start, $from);
+            return $this->sync($start, $from, $days);
         } finally {
             $lock->release();
         }
     }
 
-    private function sync(string $start, ?string $from): array
+    private function sync(string $start, ?string $from, ?int $days): array
     {
         $now       = Carbon::now(self::TZ);
         $today     = $now->toDateString();
@@ -96,33 +111,62 @@ class StockInSync
         $through   = self::validDate((string) $through) ? (string) $through : null;
 
         $first = $from ?? ($through !== null ? min($through, $yesterday) : $start);
+        // --days=N: ang huling N araw bago ngayon (para sa stock-in na inilagay ng warehouse sa nakaraang petsa).
+        if ($days !== null && $days > 0) $first = min($first, $now->copy()->subDays($days)->toDateString());
         $first = max($first, $start);
         if ($first > $today) {
             return ['status' => 'ok', 'lines' => ["The stock start ($start) is after today: nothing to ask."]];
         }
 
+        // Mga araw na bumagsak sa naunang takbo (labas sa karaniwang hanay) ay itinatanong muna.
+        $pending = array_values(array_filter(
+            (array) json_decode((string) $this->setting(self::PENDING_DAYS), true),
+            fn ($d) => is_string($d) && self::validDate($d) && $d >= $start && $d < $first
+        ));
+        $askDays = array_values(array_unique(array_merge(
+            $pending, array_map(fn ($d) => $d->toDateString(), iterator_to_array(CarbonPeriod::create($first, $today)))
+        )));
+        sort($askDays);
+
+        $emptySeen  = (array) json_decode((string) $this->setting(self::EMPTY_SEEN), true);
         $lines      = [];
         $failure    = null;      // unang error (ito ang itinatala)
+        $mainFailed = false;     // may bumagsak na sa karaniwang hanay ($first..ngayon)
         $contiguous = null;      // huling araw na tuloy-tuloy na OK mula sa $first
         $stored     = 0;
+        $failedDays = [];
+        $okDays     = [];
 
-        foreach (CarbonPeriod::create($first, $today) as $d) {
-            $day = $d->toDateString();
-            $res = $this->day($day);
+        foreach ($askDays as $day) {
+            $res = $this->day($day, $yesterday, $now, $emptySeen);
             if ($res['ok']) {
+                $okDays[] = $day;
                 $stored += $res['rows'];
-                if ($failure === null) $contiguous = $day;
+                if ($day >= $first && !$mainFailed) $contiguous = $day;
                 $lines[] = "$day: {$res['rows']} items" . ($res['skipped'] ? ", {$res['skipped']} skipped" : '') . ($res['zeroed'] ? ", {$res['zeroed']} set to 0" : '');
                 continue;
             }
+            $failedDays[] = $day;
+            if ($day >= $first) $mainFailed = true;
             $failure ??= $res + ['day' => $day];
             $lines[] = "$day: {$res['message']}";
             if ($res['stop']) break;
         }
 
+        $newThrough = $through;
         if ($contiguous !== null && ($through === null || $contiguous > $through)) {
+            $newThrough = $contiguous;
             $this->put(self::SYNCED_THROUGH, $contiguous);
         }
+        // Ang bumagsak na araw na hindi na sakop ng karaniwang hanay ng susunod na takbo ay itinatabi para itanong ulit.
+        $nextFirst = $newThrough === null ? $start : min($newThrough, $yesterday);
+        $keep = array_values(array_filter(
+            array_diff(array_unique(array_merge($pending, $failedDays)), $okDays),
+            fn ($d) => $d < $nextFirst
+        ));
+        sort($keep);
+        $this->put(self::PENDING_DAYS, json_encode($keep));
+        $this->put(self::EMPTY_SEEN, json_encode((object) $emptySeen));
         if ($failure === null) {
             $this->put(self::LAST_SYNCED, $now->format('Y-m-d H:i:s'));
             $this->put(self::LAST_ERROR, '');
@@ -139,8 +183,11 @@ class StockInSync
         return ['status' => 'failed', 'lines' => $lines];
     }
 
-    /** Isang araw: tanong, suri, at store. */
-    private function day(string $day): array
+    /**
+     * Isang araw: tanong, suri, at store.
+     * @param array<string,string> $emptySeen araw => unang oras na walang laman ang sagot (binabago dito)
+     */
+    private function day(string $day, string $yesterday, Carbon $now, array &$emptySeen): array
     {
         $fail = fn (string $kind, string $message, bool $stop = false) => ['ok' => false, 'kind' => $kind, 'message' => $message, 'stop' => $stop];
 
@@ -168,35 +215,59 @@ class StockInSync
             }
         }
 
-        [$items, $skipped] = $this->parseItems($json['items'], $day);
+        [$items, $skipped, $protected] = $this->parseItems($json['items'], $day);
+        if ($json['items'] !== [] && !$items) {
+            // May laman pero lahat ay sira: hindi ito "walang dumating".
+            return $fail('malformed', 'Every item in the Nexus answer is invalid');
+        }
         if (!$items) {
-            // Walang dumating = normal na araw, kung wala pang naka-store. May naka-store pero walang laman = kahina-hinala.
-            if ($json['items'] === [] && DB::table(self::TABLE)->where('stock_date', $day)->exists()) {
+            $stored = DB::table(self::TABLE)->where('stock_date', $day)
+                ->where(fn ($q) => $q->where('stock_in_pieces', '>', 0)->orWhere('stock_in_lots', '>', 0))->exists();
+            if (!$stored) {
+                // Walang dumating at walang naka-store: normal na araw.
+                unset($emptySeen[$day]);
+                return ['ok' => true, 'rows' => 0, 'skipped' => 0, 'zeroed' => 0];
+            }
+            // Naka-store pero walang laman ngayon: tanggap kung bago pa ang kahapon, o kung walang laman din ito
+            // isang oras o higit bago (dalawang takbo); kung hindi, babala lang ngayong takbo.
+            $firstSeen = isset($emptySeen[$day]) ? Carbon::parse((string) $emptySeen[$day], self::TZ) : null;
+            $confirmed = $day < $yesterday || ($firstSeen !== null && $firstSeen->diffInSeconds($now, true) >= self::EMPTY_CONFIRM);
+            if (!$confirmed) {
+                $emptySeen[$day] ??= $now->format('Y-m-d H:i:s');
                 return $fail('empty_for_stored_day', 'Nexus answered with no items for a day that has stored items');
             }
-            return ['ok' => true, 'rows' => 0, 'skipped' => $skipped, 'zeroed' => 0];
+            unset($emptySeen[$day]);
+            $zeroed = DB::transaction(fn () => $this->store($day, [], null, []));
+            return ['ok' => true, 'rows' => 0, 'skipped' => 0, 'zeroed' => $zeroed];
         }
+        unset($emptySeen[$day]);
 
         $asOf   = $this->asOf($json['as_of'] ?? null);
-        $zeroed = DB::transaction(fn () => $this->store($day, $items, $asOf));
+        $zeroed = DB::transaction(fn () => $this->store($day, $items, $asOf, $protected));
 
         return ['ok' => true, 'rows' => count($items), 'skipped' => $skipped, 'zeroed' => $zeroed];
     }
 
-    /** @return array{0: array<string,array>, 1: int} name_key => row; skipped count */
+    /**
+     * @return array{0: array<string,array>, 1: int, 2: array<int,string>}
+     *   name_key => row; ilan ang nilaktawan; name_key ng mga nilaktawan na may maayos na pangalan (hindi ginagawang 0)
+     */
     private function parseItems(array $raw, string $day): array
     {
         $out = [];
         $skipped = 0;
+        $protected = [];
         foreach ($raw as $i => $it) {
-            $name = is_array($it) && is_string($it['item'] ?? null) ? trim($it['item']) : '';
+            $name = is_array($it) && is_string($it['item'] ?? null) ? self::trimName($it['item']) : '';
             $pieces = is_array($it) ? self::count($it['stock_in_pieces'] ?? null) : null;
             $lots   = is_array($it) ? self::count($it['stock_in'] ?? null) : null;
-            if ($name === '' || mb_strlen($name) > 255 || $pieces === null || $lots === null) {
+            $badName = $name === '' || mb_strlen($name) > 255;
+            if ($badName || $pieces === null || $lots === null) {
                 $skipped++;
+                if (!$badName) $protected[] = self::nameKey($name);
                 Log::warning('nexus:sync-stock item skipped', [
                     'day' => $day, 'index' => $i, 'item' => mb_substr($name, 0, 80),
-                    'reason' => $name === '' || mb_strlen($name) > 255 ? 'name' : 'count',
+                    'reason' => $badName ? 'name' : 'count',
                 ]);
                 continue;
             }
@@ -215,25 +286,31 @@ class StockInSync
             ];
         }
 
-        return [$out, $skipped];
+        return [$out, $skipped, array_values(array_unique($protected))];
     }
 
-    /** Upsert ng sagot ng araw; ang naka-store na wala sa sagot = 0 (naka-log). Returns ilan ang ginawang 0. */
-    private function store(string $day, array $items, ?string $asOf): int
+    /**
+     * Upsert ng sagot ng araw; ang naka-store na wala sa sagot = 0 (naka-log), maliban sa nilaktawang item ($protected).
+     * Returns ilan ang ginawang 0.
+     */
+    private function store(string $day, array $items, ?string $asOf, array $protected): int
     {
         $now  = Carbon::now(self::TZ);
         $rows = [];
         foreach ($items as $r) {
             $rows[] = $r + ['stock_date' => $day, 'as_of' => $asOf, 'created_at' => $now, 'updated_at' => $now];
         }
-        DB::table(self::TABLE)->upsert(
-            $rows, ['stock_date', 'name_key'],
-            ['item_name', 'stock_in_lots', 'stock_in_pieces', 'remaining', 'as_of', 'updated_at']
-        );
+        if ($rows) {
+            DB::table(self::TABLE)->upsert(
+                $rows, ['stock_date', 'name_key'],
+                ['item_name', 'stock_in_lots', 'stock_in_pieces', 'remaining', 'as_of', 'updated_at']
+            );
+        }
 
         $zeroed = 0;
+        $keep = array_merge(array_keys($items), $protected);
         $missing = DB::table(self::TABLE)->where('stock_date', $day)
-            ->whereNotIn('name_key', array_keys($items))
+            ->when($keep, fn ($q) => $q->whereNotIn('name_key', $keep))
             ->where(fn ($q) => $q->where('stock_in_pieces', '>', 0)->orWhere('stock_in_lots', '>', 0))
             ->get(['id', 'name_key', 'stock_in_pieces']);
         foreach ($missing as $m) {

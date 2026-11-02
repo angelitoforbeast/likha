@@ -442,4 +442,137 @@ class NexusStockSyncTest extends ItemTestCase
         $this->assertSame(1, $code);
         Http::assertNothingSent();
     }
+
+    // ── Review fixes ─────────────────────────────────────────────────────────
+
+    public function test_a_skipped_item_keeps_its_stored_row_and_the_skip_is_logged(): void
+    {
+        foreach (['48.0', 48.5, -3, 'abc'] as $bad) {
+            DB::table('nexus_stock_ins')->delete();
+            $this->logs = [];
+            $this->alreadySynced();
+            $this->nexusStockIn('GLOW TAPE', 48, '2026-11-03');
+            $this->fakeNexus(['2026-11-03' => [$this->item('glow tape', $bad), $this->item('ROPE', 2)]]);
+
+            $this->sync();
+
+            $this->assertSame([['2026-11-03', 'GLOW TAPE', 1, 48, null], ['2026-11-03', 'ROPE', 1, 2, null]], $this->rows(), var_export($bad, true));
+            $this->assertNotEmpty(array_filter($this->logs, fn ($l) => str_contains($l, 'item skipped') && str_contains($l, 'glow tape')));
+            $this->assertEmpty(array_filter($this->logs, fn ($l) => str_contains($l, 'zeroed')));
+        }
+    }
+
+    public function test_S_220_2_4_a_non_empty_answer_with_only_invalid_items_is_malformed_and_changes_nothing(): void
+    {
+        $this->alreadySynced();
+        $this->nexusStockIn('GLOW TAPE', 48, '2026-11-03');
+        $this->fakeNexus(['2026-11-02' => [$this->item('ROPE', -1)], '2026-11-03' => [$this->item('GLOW TAPE', 'x'), ['item' => '']]]);
+
+        $this->sync();
+
+        $this->assertSame([['2026-11-03', 'GLOW TAPE', 1, 48, null]], $this->rows());
+        $this->assertSame('2026-11-03 09:10:00', $this->settingValue('nexus_stock_last_synced_at'));
+        $this->assertSame('malformed', json_decode((string) $this->settingValue('nexus_stock_last_error'), true)['kind']);
+
+        // Hindi umaabante ang synced_through kapag puro sirang item ang sagot ng isang araw.
+        DB::table('nexus_stock_ins')->delete();
+        $this->appSetting('nexus_stock_synced_through', '2026-11-01');
+        $this->fakeNexus(['2026-11-01' => [$this->item('A', 1)], '2026-11-02' => [$this->item('ROPE', -1)]]);
+        $this->sync();
+        $this->assertSame('2026-11-01', $this->settingValue('nexus_stock_synced_through'));
+    }
+
+    public function test_a_stored_day_that_answers_empty_twice_an_hour_apart_is_accepted_and_zeroed(): void
+    {
+        $this->alreadySynced();
+        $this->nexusStockIn('GLOW TAPE', 48, '2026-11-03');
+        $this->fakeNexus(['2026-11-02' => [$this->item('ROPE', 1)]]);   // 11-03 walang laman
+
+        $this->sync();                                                   // 10:10: unang walang laman = babala
+        $this->assertSame(48, (int) DB::table('nexus_stock_ins')->where('stock_date', '2026-11-03')->value('stock_in_pieces'));
+        $this->assertSame('empty_for_stored_day', json_decode((string) $this->settingValue('nexus_stock_last_error'), true)['kind']);
+
+        Carbon::setTestNow(Carbon::parse('2026-11-03 11:09:59', 'Asia/Manila'));
+        $this->fakeNexus(['2026-11-02' => [$this->item('ROPE', 1)]]);
+        $this->sync();                                                   // wala pang isang oras: babala pa rin
+        $this->assertSame(48, (int) DB::table('nexus_stock_ins')->where('stock_date', '2026-11-03')->value('stock_in_pieces'));
+
+        Carbon::setTestNow(Carbon::parse('2026-11-03 11:10:00', 'Asia/Manila'));
+        $this->logs = [];
+        $this->fakeNexus(['2026-11-02' => [$this->item('ROPE', 1)]]);
+        [$code] = $this->sync();                                         // isang oras: tanggap
+
+        $this->assertSame(0, $code);
+        $this->assertSame(0, (int) DB::table('nexus_stock_ins')->where('stock_date', '2026-11-03')->value('stock_in_pieces'));
+        $this->assertSame('2026-11-03 11:10:00', $this->settingValue('nexus_stock_last_synced_at'));
+        $this->assertSame('', (string) $this->settingValue('nexus_stock_last_error'));
+        $zeroed = array_values(array_filter($this->logs, fn ($l) => str_contains($l, 'zeroed')));
+        $this->assertCount(1, $zeroed);
+        $this->assertStringContainsString('"old_pieces":48', $zeroed[0]);
+    }
+
+    public function test_a_stored_day_before_yesterday_that_answers_empty_is_accepted_at_once(): void
+    {
+        $this->appSetting('nexus_stock_synced_through', '2026-11-01');
+        $this->nexusStockIn('GLOW TAPE', 7, '2026-11-01');
+        $this->fakeNexus([]);
+
+        [$code] = $this->sync();
+
+        $this->assertSame(0, $code);
+        $this->assertSame(0, (int) DB::table('nexus_stock_ins')->where('stock_date', '2026-11-01')->value('stock_in_pieces'));
+        $this->assertSame('2026-11-03', $this->settingValue('nexus_stock_synced_through'));
+        $this->assertNotEmpty(array_filter($this->logs, fn ($l) => str_contains($l, 'zeroed') && str_contains($l, '2026-11-01')));
+    }
+
+    public function test_the_daily_pass_asks_the_last_7_days_and_the_hourly_stays_on_yesterday_and_today(): void
+    {
+        Artisan::call('schedule:list');
+        $events = collect(app(Schedule::class)->events())->filter(fn ($e) => str_contains((string) $e->command, 'nexus:sync-stock'))
+            ->mapWithKeys(fn ($e) => [trim(substr((string) $e->command, strpos((string) $e->command, 'nexus:sync-stock'))) => $e]);
+
+        $this->assertSame(['nexus:sync-stock', 'nexus:sync-stock --days=7'], $events->keys()->sort()->values()->all());
+        $this->assertSame('10 * * * *', $events['nexus:sync-stock']->expression);
+        $this->assertSame('40 2 * * *', $events['nexus:sync-stock --days=7']->expression);
+        $this->assertSame('Asia/Manila', $events['nexus:sync-stock --days=7']->timezone);
+        $this->assertTrue($events['nexus:sync-stock --days=7']->withoutOverlapping);
+
+        $this->alreadySynced();
+        $this->fakeNexus([]);
+        $this->sync(['--days' => '7']);
+        $this->assertSame(['2026-10-27', '2026-10-28', '2026-10-29', '2026-10-30', '2026-10-31', '2026-11-01', '2026-11-02', '2026-11-03'], $this->requestedDates());
+    }
+
+    public function test_days_that_fail_in_a_from_run_are_asked_again_by_the_next_hourly_run(): void
+    {
+        $this->alreadySynced();
+        $this->fakeNexus(['2026-10-20' => 500, '2026-10-25' => 'timeout']);
+        $this->sync(['--from' => '2026-10-19']);
+
+        $this->assertSame(['2026-10-20', '2026-10-25'], json_decode((string) $this->settingValue('nexus_stock_pending_days'), true));
+
+        $this->fakeNexus(['2026-10-20' => [$this->item('GLOW TAPE', 3)], '2026-10-25' => 500]);
+        $this->sync();
+        $this->assertSame(['2026-10-20', '2026-10-25', '2026-11-02', '2026-11-03'], $this->requestedDates());
+        $this->assertSame(['2026-10-25'], json_decode((string) $this->settingValue('nexus_stock_pending_days'), true));
+        $this->assertSame(3, (int) DB::table('nexus_stock_ins')->where('stock_date', '2026-10-20')->value('stock_in_pieces'));
+
+        $this->fakeNexus([]);
+        $this->sync();
+        $this->assertSame([], json_decode((string) $this->settingValue('nexus_stock_pending_days'), true));
+    }
+
+    public function test_nbsp_and_other_unicode_spaces_are_normalised_and_trimmed(): void
+    {
+        $this->alreadySynced();
+        $this->fakeNexus(['2026-11-02' => [$this->item("\u{00A0}Glow\u{00A0}\u{2009}Tape\u{3000}", 5), $this->item('glow tape', 2)]]);
+
+        $this->sync();
+
+        $this->assertSame(\App\Services\Nexus\StockInSync::nameKey('glow tape'), \App\Services\Nexus\StockInSync::nameKey("\u{00A0}GLOW\u{202F}TAPE\u{00A0}"));
+        $rows = $this->rows();
+        $this->assertCount(1, $rows);
+        $this->assertSame("Glow\u{00A0}\u{2009}Tape", $rows[0][1], 'ang dulo lang ang tinatanggal; ang loob ay buo');
+        $this->assertSame(7, $rows[0][3]);
+    }
 }
