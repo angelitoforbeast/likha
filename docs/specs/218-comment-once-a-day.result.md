@@ -46,7 +46,7 @@ PHP is Herd's `php84`. Tests use sqlite in memory, as `phpunit.xml` sets, and Fo
    - S-218.1.1 and S-218.1.7 passed, because they guard behavior that already works (see Red lines).
 2. After the code, before adjusting the older tests: `php vendor/bin/phpunit tests/Feature/Chatblast/CommentRepliesTest.php` gave `Tests: 50, Assertions: 216, Failures: 3`. The three are S-149.8, S-149.18 and S-149.9, which sent several comments from one `from_id` (see Story changes).
 3. Same command after the adjustment: `OK (50 tests, 231 assertions)`.
-4. Full suite, `php vendor/bin/phpunit`: FULL_SUITE_RESULT
+4. Full suite, `php vendor/bin/phpunit`: `Tests: 4187, Assertions: 45505, Failures: 4, PHPUnit Deprecations: 94, Skipped: 5.` The 4 failures are exactly the known baseline (`BigBroadcastTest::test_S_167_1_…`, `ExampleTest::test_the_application_returns_a_successful_response`, `ItemTableFitScriptTest::test_every_catalog_column_id_has_a_minimum_width_…`, `AstraAddressRulesTest::test_S_26_18_…`), so no new failure. S_26_23 passed on this run.
 
 ## Red lines
 
