@@ -59,10 +59,10 @@ class RtsSetByMapTest extends OwnerPrivateTestCase
 
         $map = $this->map();
 
-        $this->assertSame('Person A', $map['page one||itema||2026-09-28||70.00']);
-        $this->assertSame('Person A', $map['page one||itema||2026-10-01||70.00']);
-        $this->assertSame('Person C', $map['page one||itema||2026-10-03||65.00']);
-        $this->assertSame('Person D', $map['page one||itema||2026-09-01||60.00']);
+        $this->assertSame('Person A', $map['page one||itema||2026-09-28||70.00']['name']);
+        $this->assertSame('Person A', $map['page one||itema||2026-10-01||70.00']['name']);
+        $this->assertSame('Person C', $map['page one||itema||2026-10-03||65.00']['name']);
+        $this->assertSame('Person D', $map['page one||itema||2026-09-01||60.00']['name']);
     }
 
     public function test_page_key_unknown_email_and_date_limit(): void
@@ -73,7 +73,7 @@ class RtsSetByMapTest extends OwnerPrivateTestCase
         $map = $this->map('2026-10-01');
 
         // case/space-insensitive; hindi kilalang email = bahagi bago ang @ lang
-        $this->assertSame('unknown.person', $map['page two||itemb||2026-09-30||70.00']);
+        $this->assertSame('unknown.person', $map['page two||itemb||2026-09-30||70.00']['name']);
         // dated pagkatapos ng as-of date = wala sa map
         $this->assertArrayNotHasKey('page one||itemd||2026-10-02||70.00', $map);
     }

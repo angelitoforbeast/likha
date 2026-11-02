@@ -81,7 +81,8 @@ class AiUsageSenderTest extends AiKeyPoolTestCase
         $this->assertSame('Bearer fbs_test_incepxion_key_not_real', $inc[0]->header('Authorization')[0]);
         $this->assertSame(['req-00001', 'req-00002'], array_column($inc[0]->data()['records'], 'client_ref'));
         $this->assertSame(['req-00003'], array_column($this->usageCalls(self::FORBEAST)[0]->data()['records'], 'client_ref'));
-        // Ang gateway ng row ay mula sa chatbot.gateway ng page sa oras ng tawag.
+        // Ang gateway ng row ay mula sa chatbot.gateway ng page sa oras ng tawag (page na dumadaan sa gateway, spec 216).
+        $this->onGateway('Page Uno');
         app(PageSettings::class)->set('Page Uno', 'chatbot', 'gateway', 'incepxionbot', false, null, true);
         $this->assertSame('incepxionbot', \App\Services\Chatbot\ChatbotAiUsage::gatewayOf('Page Uno'));
     }

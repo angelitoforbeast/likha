@@ -1541,3 +1541,10 @@ Minor review findings, accepted (none is on a new untrusted path, and no page us
 - **The first no-answer after the window switches every reached page in that one send job**; if the job dies partway, the pages it did not reach switch on their next no-answer. Reason: same switches as before, only in one job; `settleHolds` covers the case where no send comes.
 - **"Held on Forbeast" is the label for an Incepxionbot hold too** (history, Problems panel, page note). Reason: the reason text names the gateway; the label change touches three readers outside this spec.
 - **Health GET failing (5xx) on 5+ pages while sends work makes a held+recovered pair about every 3 minutes** (a probe burst starts a hold, the next send of a burst page ends it and resets the counters). Reason: the pages correctly stay on the gateway since sends work; only the feed gets the extra rows.
+
+## Set by on hover (spec 216), accepted review minors
+
+- **A daily cogs sync row names "system (cogs sync)" as the Item Value setter**, not the person who first set the price it carries. Reason: S-216.1.2 asks for exactly this; crediting the person who started the run (as `rtsSetByMap` does) is a proposed follow-up for the owner to decide.
+- **A removed user shows as the email's local part on the RTS hover but as the full email on the Item Value hover.** Reason: the RTS name rule is today's `rtsSetByMap` (unchanged); S-216.1.9 asks for the email on the new lookup. One shared fallback would change the existing RTS text.
+- **No test for a value spread by apply-through or copied by the cogs_ceo mirror** (both show no "Set by", by the same value check that S-216.1.7 tests). Reason: same code path as the tested mismatch case.
+- **The S-216.1.10 time half is measured by hand, not in the suite.** Reason: a timing assertion in a shared test run would be flaky; the before/after numbers are in the result.
