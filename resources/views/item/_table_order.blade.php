@@ -18,7 +18,8 @@
       <th class="sortable" x-show="ilIdOn('order_qty')" :class="ac('il_next')" tabindex="0" @click="sb('il_next')" @keydown.enter="sb('il_next')"
           title="The one thing to do next for this item"><span>Next step</span><span x-text="arr('il_next')"></span></th>
       <th class="sortable" x-show="ilIdOn('order_qty')" :class="ac('order_qty')" tabindex="0" @click="sb('order_qty')" @keydown.enter="sb('order_qty')"
-          title="How many pieces to order now"><span>Qty to order</span><span x-text="arr('order_qty')"></span></th>
+          title="How many pieces to order now"><span>Qty to order</span><span x-text="arr('order_qty')"></span><span
+          class="il-warn-mark" x-show="stockWarnings().length" :title="stockWarnings().join(' · ')" role="img" aria-label="Stock warning">⚠</span></th>
       <th class="sortable" x-show="ilIdOn('doi')" :class="ac('doi')" tabindex="0" @click="sb('doi')" @keydown.enter="sb('doi')"
           title="How many days the stock and incoming pieces last after the orders on hold"><span>Days left</span><span x-text="arr('doi')"></span></th>
       <th class="sortable" x-show="ilIdOn('proj_pct_7d')" :class="ac('il_profit7')" tabindex="0" @click="sb('il_profit7')" @keydown.enter="sb('il_profit7')"

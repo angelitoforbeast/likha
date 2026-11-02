@@ -361,6 +361,14 @@
     /* To order (006 T2): isang kahulugan kada kulay — pula = kumilos ngayon, kahel = bilangin, dilaw = malapit, berde = ok. */
     .il-tone-orange { color:#c2410c; }
     .il-tone-yellow { color:#a16207; }
+    /* Pinanggalingan ng stock (Nexus sync, returned) sa itaas ng To order; balot sa makitid na screen. */
+    .il-stock-src{display:flex; flex-wrap:wrap; gap:4px 12px; align-items:baseline; font-size:12px; color:#475569; margin:6px 2px 8px; overflow-wrap:anywhere;}
+    .il-stock-src .il-src-warn{color:#b45309; font-weight:700;}
+    .il-stock-src .il-src-bad{color:#b91c1c; font-weight:700;}
+    .il-unmatched{flex-basis:100%; min-width:0;}
+    .il-unmatched summary{cursor:pointer; color:#b45309; font-weight:600;}
+    .il-unmatched ul{margin:4px 0 0; padding-left:18px; max-height:180px; overflow:auto;}
+    .il-warn-mark{margin-left:4px; color:#b45309; cursor:help;}
     .il-tone-green { color:#15803d; }
     .il-cf { display:inline-block; border-radius:6px; padding:2px 8px; line-height:1.3; }
     .il-cf-sub { font-size:11px; font-weight:600; }
@@ -867,6 +875,27 @@
                 :aria-selected="ilTab === 'sales' ? 'true' : 'false'" @click="setTab('sales')"
                 title="Orders, profit, profit % and ad spend per item">Sales &amp; Profit</button>
       </div>
+      {{-- Saan galing ang stock (Nexus sync, returned) at ang hindi-tugmang Nexus names: To order lang. x-text lang. --}}
+      <template x-if="ilTab === 'order' && stock.meta">
+        <div class="il-stock-src" id="il-stock-src" role="status">
+          <span x-text="stockSourceText()"></span>
+          <template x-for="(w, i) in stockSourceIssues()" :key="'src-' + i">
+            <span :class="w.bad ? 'il-src-bad' : 'il-src-warn'" x-text="'⚠ ' + w.text"></span>
+          </template>
+          <template x-if="stockNexus() && stockNexus().unmatched_count > 0">
+            <details class="il-unmatched">
+              <summary x-text="num(stock.meta.nexus.unmatched_count) + ' Nexus names not matched'"
+                       title="Nexus items whose name matches no Likha item: their stock-in is not counted. Rename one side or add an item mapping."></summary>
+              <ul>
+                <template x-for="u in stock.meta.nexus.unmatched" :key="'um-' + u.name">
+                  <li><span x-text="u.name"></span> · <span x-text="num(u.pieces) + ' pcs'"></span><span x-show="u.ambiguous"
+                      class="il-src-warn" title="This name fits more than one Likha item through an item mapping, so it is not counted"> · ambiguous</span></li>
+                </template>
+              </ul>
+            </details>
+          </template>
+        </div>
+      </template>
       <div class="card il-card" id="item-layout-new">
         {{-- Isang table lang ang nasa DOM (x-if): ang napiling tab. --}}
         <template x-if="ilTab === 'order'">
@@ -1497,7 +1526,7 @@
         { key:'naka_order', label:'Ordered, waiting' },
       ],
       // Stock / DOI / order qty / category / item value kada base item — /item/stock (lahat ng role).
-      stock: { items:{}, values:{}, categories:[], start:null, ready:false, loaded:false, loading:false, error:'', _req:0 },
+      stock: { items:{}, values:{}, categories:[], start:null, ready:false, loaded:false, loading:false, error:'', _req:0, meta:null },
       categoryFilter: '',   // '' = lahat, '__none' = walang category, else category id
       stockEdit: { key:null, mode:null, lead:'', safety:'', newCat:'', saving:false, error:'' },   // isang editor lang kada bukas (supKey)
       _photoTarget: null,     // item_name na kasalukuyang ina-upload-an ng photo
@@ -3299,6 +3328,7 @@
           this.stock.categories = j.categories || [];
           this.stock.start      = j.start || null;
           this.stock.ready      = !!j.stock_ready;
+          this.stock.meta = j.stock_meta || null;
           this.stock.loaded     = true;
           this.stock.error      = '';
         }catch(e){
@@ -3312,6 +3342,63 @@
       itemValue(name){ const v = this.stock.values[String(name||'').trim().toLowerCase()]?.item_value; return v == null ? null : v; },
       itemValueCeo(name){ const v = this.stock.values[String(name||'').trim().toLowerCase()]?.item_value_ceo; return v == null ? null : v; },
       stockPending(){ return !this.stock.loaded && !this.stock.error; },
+      // ── Pinanggalingan ng stock (/item/stock stock_meta): Nexus sync, returned source, hindi-tugmang pangalan ──
+      stockNexus(){ const m = this.stock.meta; return m && m.mode === 'nexus' ? m.nexus : null; },
+      // Isang linya: saan galing ang stock at kailan huling na-sync. Laging ipinapakita pa rin ang mga numero.
+      stockSourceText(){
+        const m = this.stock.meta;
+        if (!m) return '';
+        if (m.mode !== 'nexus') return 'Nexus not configured: stock = PO received − shipped';
+        const n = m.nexus;
+        return 'Stock = Nexus stock-in + returned − shipped · '
+          + (n.synced ? 'Nexus last synced ' + n.last_synced_at : 'Nexus not synced yet');
+      },
+      // Mga babala (pula = token, kahel = iba): ipinapakita sa linya at sa tabi ng Qty to order.
+      stockSourceIssues(){
+        const n = this.stockNexus(), r = this.stock.meta?.returned, out = [];
+        // Walang token pero dati nang may Nexus sync (hindi Incepxion): malakas na babala, hindi tahimik.
+        if (!n && this.stock.meta?.nexus?.previously_synced) out.push({ text: 'Nexus token missing — stock shows the old PO count', bad: true });
+        if (!n) return out;
+        if (n.token_problem) out.push({ text: 'Nexus token needs fixing', bad: true });
+        if (n.stale) out.push({ text: 'Nexus not synced for more than 3 hours: the numbers may be old', bad: false });
+        // Walang laman ang sagot ng Nexus para sa araw na may naka-store: nananatili ang dati hanggang tanggapin ng owner.
+        if ((n.unconfirmed_empty_days || []).length) out.push({ text: 'Nexus returned nothing for ' + n.unconfirmed_empty_days.join(', ') + '; old numbers kept', bad: false });
+        // Nilaktawang item ng Nexus (sirang numero): hindi pagkabigo, pero dapat makita.
+        if (n.last_error && n.last_error.kind === 'skipped') out.push({ text: n.last_error.message + ' (their old numbers are kept)', bad: false });
+        if (n.daily_pass && n.daily_pass.status === 'skipped_locked') out.push({ text: 'Nexus daily 7-day pass skipped (locked) at ' + n.daily_pass.at, bad: false });
+        if (r && r.warning === 'unavailable') out.push({ text: 'Returned is not available (Nexus RTS)', bad: false });
+        if (r && r.warning === 'unknown_source') out.push({ text: 'Unknown returned source setting: using J&T', bad: false });
+        return out;
+      },
+      stockWarnings(){
+        const n = this.stockNexus();
+        const w = this.stockSourceIssues().map(i => i.text);
+        if (n && !n.synced) w.push('Nexus not synced yet');
+        if (n && n.unmatched_count > 0) w.push(this.num(n.unmatched_count) + ' Nexus names not matched: their stock-in is not counted');
+        return w;
+      },
+      // "stock-in 100 + returned 4 − shipped 30 = 74" (details); '' kapag hindi Nexus o walang start.
+      stockBreakdown(name){
+        const S = this.stockFor(name);
+        if (!this.stockNexus() || !this.stock.ready || !S || S.stock_in == null) return '';
+        const ret = S.returned == null ? 'n/a' : this.num(S.returned);
+        return 'stock-in ' + this.num(S.stock_in) + ' + returned ' + ret + ' − shipped ' + this.num(S.shipped)
+          + ' = ' + (S.stock_raw < 0 ? '−' + this.num(-S.stock_raw) : this.num(S.stock_raw))
+          + (S.returned_over_shipped ? ' (returned is more than shipped: check)' : '');
+      },
+      // Nexus "remaining" (nasa shelf ngayon) at ang diperensiya (Likha − Nexus); display lang.
+      nexusCrossText(name){
+        const n = this.stockNexus(), S = this.stockFor(name);
+        if (!n || !S) return '';
+        if (S.nexus_remaining == null) return 'Nexus on shelf —';
+        const d = S.nexus_diff;
+        return 'Nexus on shelf ' + this.num(S.nexus_remaining)
+          + (S.nexus_remaining_as_of ? ' (as of ' + S.nexus_remaining_as_of + ')' : '')
+          + (S.nexus_remaining_stale ? ' (old)' : '')
+          + (S.nexus_remaining_mixed ? ' (an older Nexus name left out)' : '')
+          + (d == null ? '' : ', difference ' + (d > 0 ? '+' : d < 0 ? '−' : '') + this.num(Math.abs(d)));
+      },
+      nexusCrossTip(){ return 'Nexus also counts the stock from before the start, so a difference is expected'; },
       // Isang profit figure kada BASE item para pareho ang set sa lahat ng variant row nito:
       //   basePct = Σ projected_profit_last_7d ÷ Σ gross_sales_last_7d × 100
       // (aggregate ng bawat item row ng page, parehong numerator/denominator ng Prof.%(7D)).

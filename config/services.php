@@ -35,6 +35,16 @@ return [
         ],
     ],
 
+    // Nexus (warehouse app): read-only API ng stock-in para sa /item (nexus:sync-stock). Walang token = hindi naka-configure:
+    // walang tawag, at ang stock sa /item ay ang dating PO-received.
+    'nexus' => [
+        'url'     => env('NEXUS_API_URL') ?: 'https://srv1972783.hstgr.cloud',
+        'token'   => env('NEXUS_API_TOKEN'),
+        'timeout' => (int) (env('NEXUS_API_TIMEOUT') ?: 20),
+        // Ilang segundo maghihintay ang cold /item/stock sa ibang request na kumukuwenta na ng parehong stock inputs.
+        'cold_wait' => 15,
+    ],
+
     // Meta Ads (Marketing API): ang app ng "Connect Facebook" sa /ads_manager/report. Walang app id = "Meta app not set up yet".
     'meta_ads' => [
         'app_id'        => env('META_ADS_APP_ID'),
