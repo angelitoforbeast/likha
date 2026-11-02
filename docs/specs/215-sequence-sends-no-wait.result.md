@@ -173,6 +173,16 @@ Visibility 3, Bench 10), the 14 listed suites, PageOwnersScreenTest, and the oth
 all green. The full suite was not re-run for round 4 (only these files changed; the `TicketPool` change is a method that
 returns the same constant for the other pools).
 
+## Release check (on dee40807)
+
+| # | Fix | Test |
+|---|---|---|
+| 1 | `test_N_and_6` matched the prune query with `"id" <= ?`, which MySQL writes with backticks. It now strips both quote styles before matching. The other new tests were checked: the backstop and sweep shape tests and S-215b.9 already accept both styles; no other quote-dependent match is left. | `SequenceDurabilityTest::test_N_and_6…` (sqlite green; the failing line was the only MySQL failure) |
+| 2 | The migration's `down()` also sets `SET SESSION lock_wait_timeout = 5` on MySQL. | by reading (MySQL only) |
+
+Run on sqlite after the release check: the 6 Sequence classes (Durability 14, Handoff 11, Safety 28, ReRun 12 with
+1 skipped, Visibility 3, Bench 10), all green.
+
 ## Bench (Done when)
 
 Fake handler and clocks, 4 simulated workers at each job's measured time, the API answering after 2.9 s, the pool every
@@ -244,7 +254,7 @@ Accepted:
    `php artisan migrate --force --path=database/migrations/2026_11_15_100000_add_send_request_to_chatbot_sequence_subscriptions.php`.
    It adds two nullable columns to `chatbot_sequence_subscriptions`, `send_request_id` (string 36, with an index) and
    `attempt` (string 80), each only when missing; no row changes. On MySQL it sets `SET SESSION lock_wait_timeout = 5`
-   first, so a long transaction on the table makes it fail fast instead of blocking the table; run it again a few minutes
+   first (its `down()` too), so a long transaction on the table makes it fail fast instead of blocking the table; run it again a few minutes
    later if it does. Until it runs nothing changes (the hand-off stays off, and the step keeps its cache-based guard).
    Anyone who ran the round 2 version of this migration locally (only `send_request_id`) must roll it back
    (`php artisan migrate:rollback --path=…`) and run it again; the guarded version also adds the missing column on its own.
@@ -317,3 +327,6 @@ taken for a dead pool) and seven minors. Second round (independent review and My
    and by the MySQL-only test, not by the sqlite suite.
 8. **AI nodes in a sequence step still run inline** (out of this spec); with the 280 s timeout a step with several slow
    AI calls can still be killed, and is then recorded, not run again (fix 1).
+10. **The prune's per-status select on MySQL** can pick the `(status, next_at)` index with a filesort when a large old
+    backlog is retained (70–190 ms measured in the release check). Accepted: it runs at most once a minute and drains
+    5,000 per status per pass; the idle case is 0.1–5 ms. No `forceIndex` (not portable).
