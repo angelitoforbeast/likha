@@ -3878,3 +3878,16 @@ Tests: `tests/Feature/OwnerPrivate/SetByHoverTest.php` (item-summary rows, sqlit
 | S-216.2.2 | negative | Given a Botcake page (not served through a gateway), then its AI rows keep cost_micros but get no usage_status (or `no_gateway`) and nothing is sent to Forbeast | `test_S_216_2_2_a_botcake_page_keeps_its_cost_but_gets_no_gateway_and_nothing_is_sent` | 2026-11-02 passed |
 | S-216.2.3 | negative | Given a Botcake page, then the AI-load check (`ChatbotAiLoad`) is not asked for it and its AI never stops for load | `test_S_216_2_3_a_botcake_page_is_never_load_checked_and_its_ai_never_stops_for_load` | 2026-11-02 passed |
 | S-216.2.4 | edge | Given a page moved from Botcake to the gateway (or back), then rows after the move follow the new path; older rows are unchanged | `test_S_216_2_4_a_page_moved_between_botcake_and_the_gateway_follows_the_new_path_and_older_rows_stay` | 2026-11-02 passed |
+
+## Slice 219 – A deploy never breaks the jobs already waiting in the queue
+
+As the owner, I want a job queued by the previous version of a class to run after a deploy exactly as a fresh dispatch of the new version would.
+
+Slice 219 (first written as 218). Threat model: queue payloads are trusted (written by this app); no new input. No migration, table, route or config. Risk tier: medium (every queued job's unserialize path). Tests: `tests/Feature/Chatblast/QueuedJobCompatTest.php`, `tests/Feature/Chatblast/QueuedJobPayloadTest.php` (fixture recorded on f5d6d450 in `tests/Feature/Chatblast/fixtures/219/`).
+
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-219.1 | happy | Given a `RunChatbotSequenceStep` payload serialized by the previous class version (`subscriptionId`, `claim`, `connection`, `queue` only), when a worker unserializes it after the deploy and runs `handle()`, then the step runs as a fresh dispatch with no earlier claim would | `test_S_219_1_a_step_job_queued_by_the_previous_class_version_runs_after_the_deploy` | 2026-11-03 passed |
+| S-219.2 | happy | The same for `ResumeChatbotSequenceSend` and `GatewayAfterSend`: a payload with only the properties the class had when first queued runs normally | `test_S_219_2_the_resume_and_gateway_watch_jobs_run_from_their_first_payload_shape` | 2026-11-03 passed |
+| S-219.3 | negative | Given any queued job under `app/Jobs` (subfolders included), then a typed property with no class default passes only as a required constructor parameter of the same name, or, with `RestoresMissingDefaults`, an optional parameter of the same name and type; anything else fails the guard; `HandleComment` without `until` in its payload keeps a 6-hour retry window | `test_S_219_3_every_queued_job_with_an_optional_typed_property_restores_missing_defaults`, `test_S_219_3_a_comment_job_with_or_without_until_in_the_payload_keeps_its_retry_window`, `test_S_219_3_the_guard_reads_subfolders` | 2026-11-03 passed |
+| S-219.4 | edge | Given the 15 job classes built with required and with all arguments, then every payload is byte for byte what f5d6d450 writes, and reading it back sets every typed property | `QueuedJobPayloadTest::test_S_219_4_every_payload_is_byte_for_byte_what_f5d6d450_writes`, `test_S_219_4_a_payload_written_now_is_read_by_the_f5d6d450_classes_the_same_way` | 2026-11-03 passed |
