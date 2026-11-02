@@ -25,6 +25,8 @@ class AiKeyCostTest extends AiKeyPoolTestCase
         parent::setUp();
         $this->travelTo('2026-11-15 10:00:00');
         $this->live('Page Uno');
+        // Ang usage ay pending lang para sa page na dumadaan sa gateway (spec 216).
+        $this->onGateway('Page Uno');
     }
 
     public function test_S_210_4_1_a_successful_call_records_provider_model_key_tokens_and_cost_in_micro_usd(): void
