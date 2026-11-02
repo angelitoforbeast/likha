@@ -44,7 +44,8 @@
   function kindWord(a) { return KINDS[a.kind] ? KINDS[a.kind].toLowerCase() : 'ID'; }
 
   /**
-   * opts: {csrf, urls: {index, save, add, del, history, restore, mode, value, removeAd, ad}, onChange()}
+   * opts: {csrf, urls: {index, save, add, del, history, restore, mode, value, removeAd, ad}, onChange(), edit(r, g)}
+   * edit: binubuksan ang Edit ng group (ang parehong Edit ng page); wala = walang Edit button.
    * Ang onChange ay tinatawag kapag may bagong data (ang table ay muling ipinipinta); ang bukas na panel sa Edit ay
    * muling ipinipinta rito mismo.
    */
@@ -343,8 +344,16 @@
       return sel;
     }
 
-    /** Rename, History (may Restore) at Delete ng group: sa Edit lang. */
-    function manageLinks(page, g) {
+    /** Ang Edit ng group (ang Edit window ng page, para sa group): sa row ng group sa table at sa Manage in Edit. */
+    function editButton(r, g, cls) {
+      if (!opts.edit) return null;
+      var b = el('button', {type: 'button', class: cls, 'aria-label': 'Edit ' + g.name + ' of ' + r.page, title: 'Edit ' + g.name}, [el('span', {'aria-hidden': 'true', text: '✎'}), ' Edit']);
+      b.addEventListener('click', function () { opts.edit(r, g); });
+      return b;
+    }
+
+    /** Edit, Rename, History (may Restore) at Delete ng group: sa Edit lang. */
+    function manageLinks(page, g, r) {
       var hist = el('button', {type: 'button', class: LINK, text: 'History', 'aria-label': 'History of ' + g.name});
       hist.addEventListener('click', function () { history(page, g); });
       var rename = el('button', {type: 'button', class: LINK, text: 'Rename', 'aria-label': 'Rename ' + g.name});
@@ -358,7 +367,7 @@
         if (!confirm('Delete the group "' + g.name + '"? Its ' + plural(g.ads.length, 'id') + ' go back to the page values.')) return;
         post(u.del, {page: page, id: g.id}).then(after(page, true, 'Deleted "' + g.name + '".'));
       });
-      return el('div', {class: 'flex flex-wrap gap-x-3 font-normal'}, [rename, hist, del]);
+      return el('div', {class: 'flex flex-wrap gap-x-3 font-normal'}, [editButton(r, g, LINK), rename, hist, del]);
     }
 
     /** Ang row ng group sa table: pangalan, ang mga value nito (✎ gaya ng mga cell ng page) at ang flow. */
@@ -367,7 +376,8 @@
       return el('tr', {class: 'ag-sub', 'data-ag-group': String(g.id)}, [
         el('td', {class: 'stick-1 ' + TD + ' font-medium break-words' + muted}, [
           el('div', {class: 'flex items-start gap-1'}, [el('span', {'aria-hidden': 'true', class: 'text-slate-400', text: '↳'}), el('span', {class: 'min-w-0 break-words', text: g.name})]),
-          el('div', {class: 'font-normal text-slate-500', text: plural(g.ads.length, 'id') + (g.all_off ? ' · all ads off' : '') + (g.hidden ? ' · hidden' : '')})]),
+          el('div', {class: 'font-normal text-slate-500', text: plural(g.ads.length, 'id') + (g.all_off ? ' · all ads off' : '') + (g.hidden ? ' · hidden' : '')}),
+          editButton(r, g, 'mt-1 inline-flex items-center gap-1 rounded border border-slate-300 bg-white px-1.5 py-0.5 text-xs font-normal text-slate-600 hover:bg-slate-50 hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500')]),
         el('td', {class: 'stick-2 ' + TD + muted}, aiButton(page, r, g, keys)),
         el('td', {class: 'stick-3 ' + TD + muted}, flowSelect(page, g, flows)),
         el('td', {class: 'stick-4 ' + TD}),
@@ -453,7 +463,7 @@
         if (!st.error && !st.loading) { st.loading = true; load(page).then(function () { st.loading = false; }); }
         return [wide(ctx.cols, st.error ? el('span', {class: 'text-red-600', text: st.error}) : el('span', {class: 'text-slate-500', text: 'Loading ad groups…'}))];
       }
-      var manage = el('button', {type: 'button', class: 'cb-btn cb-btn-sm', text: 'Manage in Edit', 'aria-label': 'Manage the ad groups of ' + page + ' in its Edit window'});
+      var manage = el('button', {type: 'button', class: 'cb-btn cb-btn-primary', text: 'Manage in Edit', 'aria-label': 'Manage the ad groups of ' + page + ' in its Edit window'});
       manage.addEventListener('click', function () { ctx.manage(); });
       var rest = st.q ? null : d.unassigned_total;
       var out = [wide(ctx.cols, [
@@ -524,7 +534,7 @@
         out.push(el('div', {class: 'mt-2 rounded-md border border-slate-200 p-2' + (g.all_off ? ' bg-slate-50' : '') + (g.hidden ? ' opacity-60' : ''), 'data-ag-group': String(g.id)}, [
           el('div', {class: 'flex flex-wrap items-baseline gap-x-2'}, [el('h4', {class: 'min-w-0 break-words text-sm font-semibold text-slate-800', text: g.name}),
             el('span', {class: 'text-slate-500', text: plural(g.ads.length, 'id') + (g.all_off ? ' · all ads off' : '') + (g.hidden ? ' · hidden' : '')})]),
-          manageLinks(page, g),
+          manageLinks(page, g, r),
           valuesBlock(page, r, g, d),
           el('div', {class: 'mt-2'}, adsBlock(page, g, true))]));
       });
@@ -559,7 +569,21 @@
       isOpen: function (page) { return open.has(page); },
       toggle: function (page) { if (open.has(page)) open.delete(page); else { open.add(page); pages.delete(page); } },
       groupCount: function (page) { var st = pages.get(page); return st && st.data ? st.data.groups.length : null; },
-      subRows: subRows, mount: mount, unmount: unmount, setMode: setMode, statusText: statusText,
+      subRows: subRows, mount: mount, unmount: unmount, setMode: setMode, statusText: statusText, history: history,
+      /** Ang mga value ng group na naka-save ngayon (null kapag wala pang data o na-delete ang group). */
+      group: function (page, id) { var st = pages.get(page), g = st && st.data ? st.data.groups.find(function (x) { return x.id === id; }) : null; return g || null; },
+      /**
+       * Ang Save ng Edit ng group: ilang value sa isang request (ang parehong endpoint ng isang value: history, Restore,
+       * throttle at access). Pagkatapos, ang bagong data ng page. Sagot: {ok} o {error}.
+       */
+      saveValues: function (page, g, values) {
+        return post(u.value, {page: page, id: g.id, values: values}).then(function (r) {
+          if (!r.ok) return {error: r.data.error || r.data.message || 'Not saved (' + r.status + ').'};
+          say(page, 'Saved ' + plural(Object.keys(values).length, 'value') + ' of "' + g.name + '".');
+          load(page);
+          return {ok: true};
+        });
+      },
     };
   }
 

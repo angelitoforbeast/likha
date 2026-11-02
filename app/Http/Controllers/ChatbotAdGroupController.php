@@ -20,6 +20,8 @@ use Illuminate\Support\Facades\Auth;
  */
 class ChatbotAdGroupController extends Controller
 {
+    private const MAX_VALUES = 300; // kada Save ng Edit ng group: higit pa sa lahat ng field ng page (pati 99 Seq at 99 Seq Img)
+
     public function __construct(private AdGroups $groups, private PageSettings $settings, private ChatbotFields $fields)
     {
     }
@@ -143,12 +145,27 @@ class ChatbotAdGroupController extends Controller
         return response()->json(['rows' => $id === null ? [] : $this->groups->history($page, $id)]);
     }
 
-    /** Isang value ng group (ang cell ng group sa row ng page): blangko = ang default (page value). History gaya ng Save. */
+    /**
+     * Isang value ng group (ang cell ng group sa row ng page), o ilang value nang sabay (values: key => value, ang Save ng
+     * Edit ng group): blangko = ang default (page value). History gaya ng Save; lahat o wala.
+     */
     public function value(Request $request)
     {
         $this->checkAccess();
         $page = $this->page($request);
         $id = $this->id($request);
+        if ($request->has('values')) {
+            $in = $request->input('values');
+            if ($id === null || !is_array($in) || $in === [] || array_is_list($in)) return response()->json(['error' => 'Pick a group and the values to save.'], 422);
+            if (count($in) > self::MAX_VALUES) return response()->json(['error' => 'At most ' . self::MAX_VALUES . ' values per save.'], 422);
+            $values = [];
+            foreach ($in as $key => $value) {
+                if (!is_scalar($value) && $value !== null) return response()->json(['error' => 'Values are text.'], 422);
+                $values[mb_substr((string) $key, 0, 100)] = (string) $value;
+            }
+
+            return $this->result($this->groups->setValues($page, $id, $values, Auth::id()));
+        }
         [$key, $value] = [$request->input('key'), $request->input('value', '')];
         if ($id === null || !is_string($key) || (!is_scalar($value) && $value !== null)) return response()->json(['error' => 'Pick a group, a field and a text value.'], 422);
 

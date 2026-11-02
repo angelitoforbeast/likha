@@ -15,11 +15,12 @@ function files(dir, out = []) {
     return out;
 }
 
-export async function tailwindCss(root) {
+/** extra: more CSS for the compiler (the layout's own text/tailwindcss rules, with @apply). */
+export async function tailwindCss(root, extra = '') {
     const pkg = require.resolve('tailwindcss/package.json');
     const {compile} = await import('file://' + join(dirname(pkg), 'dist/lib.mjs').replace(/\\/g, '/'));
     const base = dirname(pkg);
-    const compiler = await compile('@import "tailwindcss";', {
+    const compiler = await compile('@import "tailwindcss";\n' + extra, {
         base,
         loadStylesheet: async (id, from) => {
             const file = id === 'tailwindcss' ? join(base, 'index.css') : join(base, id.replace(/^tailwindcss\//, '') + (id.endsWith('.css') ? '' : '.css'));

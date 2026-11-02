@@ -594,7 +594,18 @@ class AdGroups
      */
     public function setValue(string $page, int $id, string $key, string $value, ?int $userId = null): array
     {
-        return $this->change($page, $id, fn (array $g) => [$g['name'], $g['ads'], [$key => $value]], $userId);
+        return $this->setValues($page, $id, [$key => $value], $userId);
+    }
+
+    /**
+     * Ilang value ng group nang sabay (ang Save ng Edit ng group): isang lock, isang pagsuri at isang transaction, lahat o
+     * wala; ang pangalan at ads ay binabasa sa loob ng lock (hindi nawawala ang sabay na idinagdag). Blangko = page value.
+     * @param array<string, string> $values
+     * @return array{ok: bool, id?: int, error?: string}
+     */
+    public function setValues(string $page, int $id, array $values, ?int $userId = null): array
+    {
+        return $this->change($page, $id, fn (array $g) => [$g['name'], $g['ads'], $values], $userId);
     }
 
     /**
@@ -663,7 +674,8 @@ class AdGroups
      * group), ang huling araw ng report (as_of), at ang "Ads not in a group yet": ang mga ad na nakita sa page sa huling
      * UNASSIGNED_DAYS araw (ang ad_id ng mga chat, at ang ad_id ng botcake_psids ng page) na wala sa group, mismo man o
      * sa ad set o campaign nito; ang hindi tahimik muna, saka ang bago, saka ang On, saka ang pinakamaraming customer,
-     * hanggang $limit; $q = bahagi ng ad ID o ng pangalan. new_unassigned = ilang bago ang wala pa sa group (hindi ayon
+     * hanggang $limit. Ang mga ID sa loob ng group: ang hindi tahimik, saka ang On, saka ang bago, saka ang customers. Ang
+     * mga group: ang may On na ID muna, saka ang may pinakamaraming customer, saka ayon sa pangalan; ang nakatago sa dulo; $q = bahagi ng ad ID o ng pangalan. new_unassigned = ilang bago ang wala pa sa group (hindi ayon
      * sa $q). Ang pagtatago ay sa screen lang: walang isinusulat, at ang takbo ay hindi nagbabago. Walang tawag sa Meta.
      * @return array{groups: array<int, array<string, mixed>>, unassigned: array<int, array<string, mixed>>, unassigned_total: int, new_unassigned: int, as_of: ?string, hidden: array{groups: int, ids: int, unassigned: int}}
      */
@@ -700,11 +712,15 @@ class AdGroups
                 $touched = max($times['added'][$id][$x] ?? 0, $times['edited'][$id] ?? 0);
                 $rows[] = $r + ['kind' => $kind, 'quiet' => self::quiet($r, $touched ?: null, $cutAt)];
             }
+            usort($rows, fn ($a, $b) => self::running($b) <=> self::running($a));
             $isHidden = $rows && ($times['created'][$id] ?? PHP_INT_MAX) < $cutAt[1] && !array_filter($rows, fn ($r) => !$r['quiet']);
             if ($isHidden) $hidden['groups']++;
             else $hidden['ids'] += count(array_filter($rows, fn ($r) => $r['quiet']));
             $outGroups[$id] = $g + ['rows' => $rows, 'all_off' => $rows && !array_filter($rows, fn ($a) => $a['status'] !== 'off'), 'hidden' => $isHidden];
         }
+        // Ang mga group na tumatakbo muna (ang staff ay ang mga ad na On ang inaayos), kahit ang bago o inayos na wala pang On.
+        $order = fn (array $g) => [$g['hidden'], !array_filter($g['rows'], fn ($r) => $r['status'] === 'on'), -array_sum(array_column($g['rows'], 'customers')), mb_strtolower($g['name'])];
+        uasort($outGroups, fn ($a, $b) => $order($a) <=> $order($b));
         $q = mb_strtolower(trim($q));
         $out = [];
         $new = 0;
@@ -719,6 +735,12 @@ class AdGroups
         usort($out, fn ($a, $b) => [!$b['quiet'], $b['new'], $b['status'] === 'on', $b['customers'], (string) $b['last']] <=> [!$a['quiet'], $a['new'], $a['status'] === 'on', $a['customers'], (string) $a['last']]);
 
         return ['groups' => $outGroups, 'unassigned' => array_slice($out, 0, $limit), 'unassigned_total' => count($out), 'new_unassigned' => $new, 'as_of' => $status['as_of'], 'hidden' => $hidden];
+    }
+
+    /** Ang ayos ng isang ID sa loob ng group (mas malaki = mas nauuna): ang hindi tahimik, ang On, ang bago, ang customers, ang huli. */
+    private static function running(array $r): array
+    {
+        return [!$r['quiet'], $r['status'] === 'on', (bool) $r['new'], (int) $r['customers'], (string) $r['last']];
     }
 
     /** Ilang bagong ad (New) ang wala pa sa group ng page (mismo, o sa ad set o campaign nito): ang badge ng nakasarang Ad-based na row. */
