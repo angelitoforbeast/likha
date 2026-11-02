@@ -52,10 +52,20 @@ class SequenceSendPool extends TicketPool
         return max(1, (int) config('services.botcake.sequence_concurrency', 100));
     }
 
+    public static function beatKey(): string
+    {
+        return self::BEAT . ':' . ChatbotSequences::site();
+    }
+
+    public static function stalledKey(): string
+    {
+        return self::STALLED . ':' . ChatbotSequences::site();
+    }
+
     /** Buhay ang pool at ito ang bersyong nagpapadala ng sequence ticket (ang tanda sa beat). */
     public static function capable(): bool
     {
-        $beat = Cache::get(self::BEAT);
+        $beat = Cache::get(self::beatKey());
 
         return self::alive() && (int) ($beat['sequence'] ?? 0) === 1 && empty($beat['stopped']) && !self::stalled();
     }
@@ -63,6 +73,7 @@ class SequenceSendPool extends TicketPool
     /** Ang huling galaw (may nakuha, may natapos, o walang naghihintay): sa beat, para makita ng tick ang pool na buhay pero hindi umuusad. */
     private int $progressAt = 0;
     public const STALL_SECONDS = 300;
+    public const IDLE_CHECK_SECONDS = 60;
     public const STALLED = 'sequence-send-pool:stalled';
 
     protected function beatInfo(): array
@@ -73,14 +84,14 @@ class SequenceSendPool extends TicketPool
     /** Buhay ang beat pero walang galaw nang STALL_SECONDS habang may naghihintay. */
     public static function stalled(): bool
     {
-        $beat = Cache::get(self::BEAT);
+        $beat = Cache::get(self::beatKey());
 
         if (!self::alive() || !empty($beat['stopped']) || !isset($beat['progress_at'])) return false;
         // Nakita nang hindi umuusad (ng tick): hindi pa rin, hangga't walang bagong galaw, kahit naubos na ang naghihintay.
-        if (Cache::get(self::STALLED) === ($beat['owner'] ?? '') . ':' . $beat['progress_at']) return true;
+        if (Cache::get(self::stalledKey()) === ($beat['owner'] ?? '') . ':' . $beat['progress_at']) return true;
         // Ang beat muna (walang query sa karaniwang takbo); saka kung may naghihintay talaga.
         if ((int) $beat['progress_at'] >= now()->getTimestamp() - self::STALL_SECONDS || !BotcakeSendQueue::sequencePending()) return false;
-        Cache::put(self::STALLED, ($beat['owner'] ?? '') . ':' . $beat['progress_at'], 3600);
+        Cache::put(self::stalledKey(), ($beat['owner'] ?? '') . ':' . $beat['progress_at'], 3600);
 
         return true;
     }
@@ -91,7 +102,7 @@ class SequenceSendPool extends TicketPool
      */
     public function stop(): void
     {
-        if ((Cache::get(self::BEAT)['owner'] ?? null) === $this->owner) Cache::put(self::BEAT, ['owner' => $this->owner, 'at' => now()->getTimestamp(), 'stopped' => true], 60);
+        if ((Cache::get(self::beatKey())['owner'] ?? null) === $this->owner) Cache::put(self::beatKey(), ['owner' => $this->owner, 'at' => now()->getTimestamp(), 'stopped' => true], 60);
     }
 
     protected function nowMs(): int
@@ -118,7 +129,9 @@ class SequenceSendPool extends TicketPool
             $started = count(BotcakeSendQueue::claim($this->owner, $this->max() - count($this->jobs), fn (object $c) => $this->room($c), fn (object $row) => $this->take($row),
                 $this->fullPages(), [], false, true));
             // Galaw: may nakuha, o walang hawak at walang naghihintay.
-            if ($started > 0 || (!$this->jobs && !BotcakeSendQueue::sequencePending())) $this->progressAt = now()->getTimestamp();
+            // Walang hawak: ang "may naghihintay ba" ay binabasa lang kapag lampas 60 s na ang huling galaw (hindi kada 200 ms).
+            if ($started > 0) $this->progressAt = now()->getTimestamp();
+            elseif (!$this->jobs && now()->getTimestamp() - $this->progressAt >= self::IDLE_CHECK_SECONDS && !BotcakeSendQueue::sequencePending()) $this->progressAt = now()->getTimestamp();
         }
         $this->lanes();
         $this->pump();
