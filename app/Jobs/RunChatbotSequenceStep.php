@@ -15,7 +15,7 @@ use Illuminate\Queue\SerializesModels;
  * lang kada subscription habang naghihintay sa queue: ang lock ay binibitawan ng Laravel bago tumakbo ang handle, kaya ang
  * claim ay itinatala ulit sa simula ng step at may tanda habang tumatakbo (hanggang sa timeout); ang job na namatay ay kinukuha
  * ulit ng tick pagkalipas ng 2 minuto (ipinapasa ang padala) o 10 minuto (naghihintay ang job sa padala, gaya ng dati), at ang
- * step na nagsimula na ay hindi inuulit kapag may epekto na o maaaring naipadala na (ChatbotSequences::ATTEMPT).
+ * step na nagsimula na ay hindi inuulit kapag may epekto na o maaaring naipadala na (ang attempt sa row ng subscription).
  */
 class RunChatbotSequenceStep implements ShouldQueue, ShouldBeUniqueUntilProcessing
 {

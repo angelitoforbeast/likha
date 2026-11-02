@@ -88,7 +88,8 @@ class ChatbotSequences
     /** Ang pagbura ng tali sa ticket (kapag may column): bawat sumusulat ng status o step ay kasama ito. */
     public static function unlink(): array
     {
-        return self::hasInFlight() ? ['send_request_id' => null, 'attempt' => null] : [];
+        // Ang attempt ay hindi kasama: ang takbo ng step lang ang nagbubura nito (ang paglipat ng page habang tumatakbo ay hindi).
+        return self::hasInFlight() ? ['send_request_id' => null] : [];
     }
 
     /** Ilang minuto bago kunin ulit ang claim na walang galaw: 2 kapag ipinapasa ang padala, 10 kapag naghihintay ang job. */
@@ -370,7 +371,8 @@ class ChatbotSequences
             // Nasa himpapawid ang padala ng step: ang ticket ang magtatapos.
             if ($inFlight && $sub->send_request_id !== null) return 'gone';
             // Tumatakbo pa ang ibang takbo ng step (ayon sa row, kahit nabura ang cache): walang galaw.
-            if ($inFlight && self::runningAttempt($sub->attempt)) return 'gone';
+            $current = self::readAttempt((int) $sub->id, $inFlight ? $sub->attempt : null);
+            if (self::runningAttempt($current)) return 'gone';
             // Hinihintay pa ang sagot ng AI ng customer (chatbot:ai-pool): parang hawak ang lock, mamaya na ang step.
             if (ChatbotAiQueue::pending(new CustomerFields($sub->page_id, $sub->psid))) {
                 $release(['next_send_at' => now()->addMinutes(self::LOCKED_RETRY_MINUTES)]);
@@ -453,15 +455,15 @@ class ChatbotSequences
             // Ang naunang takbo ng parehong step (parehong due) ay namatay bago natapos (naiwan ang tanda nito): hindi na inuulit kapag
             // maaaring may naipadala na (padalang naghintay), may epekto na bago ang unang padala, o naulit na nang isang beses.
             // Nasa row (hindi sa cache): ang deploy na nagbubura ng cache ay hindi nagpapaulit ng takbo.
-            $prev = $inFlight ? self::parseAttempt($sub->attempt, (int) $step->position, $detail['due']) : null;
+            $prev = self::parseAttempt($current, (int) $step->position, $detail['due']);
             if ($prev !== null && ($prev['sending'] || self::preSendEffects((array) $flow->graph) || $prev['attempts'] >= 2)) {
                 $this->event($sub->page_id, $sub->psid, ['op' => 'failed', 'error' => $prev['sending'] ? self::NOT_RESENT : self::NOT_RERUN] + $detail);
                 return $this->advance($sub, $seq, $step, $prev['sending']);
             }
-            if ($inFlight) {
-                $attempt = self::attemptValue((int) $step->position, $detail['due'], ($prev['attempts'] ?? 0) + 1, false);
-                if (!DB::table('chatbot_sequence_subscriptions')->where('id', $sub->id)->where('status', 'active')
-                    ->where(fn ($q) => $sub->attempt === null ? $q->whereNull('attempt') : $q->where('attempt', $sub->attempt))->update(['attempt' => $attempt])) return 'gone';
+            $attempt = self::attemptValue((int) $step->position, $detail['due'], ($prev['attempts'] ?? 0) + 1, false);
+            if (!self::writeAttempt((int) $sub->id, $current, $attempt)) {
+                unset($attempt);
+                return 'gone';
             }
 
             $group = $this->groups->forSequence((int) $seq->id, $fields, $page);
@@ -496,7 +498,7 @@ class ChatbotSequences
             $lock->release();
             Cache::forget(self::running((int) $sub->id));
             // Natapos ang takbo (hindi pinatay): ang tanda ng takbo sa row ay binubura (kondisyonal: ang sa takbong ito lang).
-            if (isset($attempt)) DB::table('chatbot_sequence_subscriptions')->where('id', $sub->id)->where('attempt', 'like', self::attemptPrefix($attempt) . '%')->update(['attempt' => null]);
+            if (isset($attempt)) self::clearAttempt((int) $sub->id, $attempt);
         }
     }
 
@@ -514,7 +516,47 @@ class ChatbotSequences
     /** Ang tanda ng tumatakbong job sa cache (pabilis lang; ang row ang tama): kasama ang site, kahit iisa ang Redis. */
     public static function running(int $subscriptionId): string
     {
-        return self::RUNNING . substr(sha1((string) config('app.url')), 0, 8) . ':' . $subscriptionId;
+        return self::RUNNING . self::site() . ':' . $subscriptionId;
+    }
+
+    /** Ang site sa mga cache key (iisang Redis o prefix man ang dalawang site). */
+    public static function site(): string
+    {
+        return substr(sha1((string) config('app.url')), 0, 8);
+    }
+
+    /** Ang attempt kapag wala pang column (hindi pa na-migrate): sa cache, kaya ang job na namatay sa tawag ay hindi nagpapadala ulit. */
+    private static function attemptCacheKey(int $id): string
+    {
+        return 'chatbot-seq-attempt:' . self::site() . ':' . $id;
+    }
+
+    /** Ang attempt ng step: ang row (may column), o ang cache (wala pa). */
+    public static function readAttempt(int $id, ?string $rowValue): ?string
+    {
+        return self::hasInFlight() ? $rowValue : Cache::get(self::attemptCacheKey($id));
+    }
+
+    /** Isulat ang attempt kung hindi ito nagbago mula sa nabasa ($old). */
+    private static function writeAttempt(int $id, ?string $old, string $new): bool
+    {
+        if (!self::hasInFlight()) {
+            Cache::put(self::attemptCacheKey($id), $new, 2 * 86400);
+            return true;
+        }
+
+        return DB::table('chatbot_sequence_subscriptions')->where('id', $id)->where('status', 'active')
+            ->where(fn ($q) => $old === null ? $q->whereNull('attempt') : $q->where('attempt', $old))->update(['attempt' => $new]) === 1;
+    }
+
+    /** Burahin ang attempt ng takbong ito (ang kapareho ng step, due at bilang lang). */
+    private static function clearAttempt(int $id, string $value): void
+    {
+        if (!self::hasInFlight()) {
+            if (str_starts_with((string) Cache::get(self::attemptCacheKey($id)), self::attemptPrefix($value))) Cache::forget(self::attemptCacheKey($id));
+            return;
+        }
+        DB::table('chatbot_sequence_subscriptions')->where('id', $id)->where('attempt', 'like', self::attemptPrefix($value) . '%')->update(['attempt' => null]);
     }
 
     /** Ang laman ng attempt: "step|due|ilang takbo|may tawag na|simula (unix)". */
@@ -552,12 +594,12 @@ class ChatbotSequences
     public static function markSending(FlowRun $run): void
     {
         $s = $run->sequenceTicket;
-        if (!$s || !self::hasInFlight()) return;
-        $row = DB::table('chatbot_sequence_subscriptions')->where('id', (int) $s['subscription_id'])->value('attempt');
+        if (!$s) return;
+        $id = (int) $s['subscription_id'];
+        $row = self::readAttempt($id, self::hasInFlight() ? DB::table('chatbot_sequence_subscriptions')->where('id', $id)->value('attempt') : null);
         $a = self::parseAttempt($row, (int) $s['step'], $s['due'] ?? null);
         if ($a === null || $a['sending']) return;
-        DB::table('chatbot_sequence_subscriptions')->where('id', (int) $s['subscription_id'])->where('attempt', $row)
-            ->update(['attempt' => self::attemptValue((int) $s['step'], $s['due'] ?? null, $a['attempts'], true, $a['started'])]);
+        self::writeAttempt($id, $row, self::attemptValue((int) $s['step'], $s['due'] ?? null, $a['attempts'], true, $a['started']));
     }
 
     /** May node ba bago ang unang padala (mula sa Start) na may epekto kapag inulit (ang wala sa allowlist ng BotcakeSendQueue)? */
@@ -873,8 +915,13 @@ class ChatbotSequences
         $alive = SequenceSendPool::alive(BotcakeSendQueue::DEAD_POOL_SECONDS);
         // Buhay ang beat pero walang galaw nang 5 minuto habang may naghihintay: itinuturing na patay para sa pagkansela.
         $stalled = $alive && SequenceSendPool::stalled();
-        if ($stalled) Log::warning('sequence send pool: no progress for 5 minutes; waiting sequence sends are cancelled and sent inline');
-        $live = $alive && !$stalled ? (Cache::get(SequenceSendPool::BEAT)['owner'] ?? null) : null;
+        // Isang beses kada pagtigil (hindi kada tick): ang bilang ng linya ay ang bilang ng pagtigil.
+        $stall = $stalled ? Cache::get(SequenceSendPool::stalledKey()) : null;
+        if ($stall !== null && Cache::get(SequenceSendPool::stalledKey() . ':logged') !== $stall) {
+            Cache::put(SequenceSendPool::stalledKey() . ':logged', $stall, 3600);
+            Log::warning('sequence send pool: no progress for 5 minutes; waiting sequence sends are cancelled and sent inline');
+        }
+        $live = $alive && !$stalled ? (Cache::get(SequenceSendPool::beatKey())['owner'] ?? null) : null;
         // Patay (walang beat nang DEAD_POOL_SECONDS; ang malinis na paghinto ay nag-iiwan ng beat na "stopped") o hindi umuusad:
         // ang hindi pa natawag ay kinakansela at pinapatakbo ng tick nang naghihintay; ang natawag na ay walang sagot, walang ulit.
         if ($live === null) {
@@ -904,7 +951,7 @@ class ChatbotSequences
     private function cancel(object $t, string $why): void
     {
         // Ang pool na kasisimula lang (bagong beat): ang hawak nito ay hindi kinakansela.
-        $beat = Cache::get(SequenceSendPool::BEAT);
+        $beat = Cache::get(SequenceSendPool::beatKey());
         $owner = SequenceSendPool::alive(BotcakeSendQueue::DEAD_POOL_SECONDS) && !SequenceSendPool::stalled() ? ($beat['owner'] ?? null) : null;
         if (DB::table(BotcakeSendQueue::TABLE)->where('id', $t->id)->whereIn('status', ['pending', 'sending'])->whereNull('called_at')
             ->when($owner !== null, fn ($q) => $q->where(fn ($w) => $w->whereNull('claimed_by')->orWhere('claimed_by', '!=', $owner)))

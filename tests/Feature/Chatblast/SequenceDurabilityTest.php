@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Queue;
 
 /**
@@ -182,16 +183,98 @@ class SequenceDurabilityTest extends SequenceHandoffTestCase
         foreach ($sweep as $s) $this->assertMatchesRegularExpression('/where [`"]status[`"] = \? and [`"]priority[`"] = \?/', $s, 'status = ? and priority = ? lead, as the (status, priority, id) index');
     }
 
-    public function test_N_old_sequence_tickets_are_pruned_in_chunks_and_recent_ones_kept(): void
+    public function test_N_and_6_old_sequence_tickets_are_pruned_up_to_an_id_cutoff_at_most_once_a_minute(): void
     {
         $row = fn (string $status, string $kind, int $days) => ['request_id' => uniqid('', true), 'kind' => $kind, 'priority' => $kind === 'sequence' ? 3 : 0,
             'customer' => 'c', 'page_id' => 1001, 'page_name' => 'Page Uno', 'psid' => '1', 'payload' => '{}', 'status' => $status,
             'deadline_at' => now(), 'created_at' => now()->subDays($days), 'updated_at' => now()->subDays($days)];
-        DB::table(BotcakeSendQueue::TABLE)->insert([$row('resumed', 'sequence', 3), $row('failed', 'sequence', 3), $row('done', 'sequence', 3), $row('resumed', 'sequence', 1),
-            $row('pending', 'sequence', 3), $row('resumed', 'chatbot', 3)]);
+        // In the order they were made (ids follow created_at).
+        DB::table(BotcakeSendQueue::TABLE)->insert([$row('resumed', 'sequence', 3), $row('failed', 'sequence', 3), $row('done', 'sequence', 3),
+            $row('pending', 'sequence', 3), $row('resumed', 'chatbot', 3), $row('resumed', 'sequence', 1)]);
+        $sql = [];
+        DB::listen(function ($q) use (&$sql) { $sql[] = strtolower($q->sql); });
         $this->assertSame(3, BotcakeSendQueue::sweepSequence()['pruned']);
-        $this->assertSame(['resumed', 'pending', 'resumed'], $this->tickets()->pluck('status')->all(), 'the recent one, the waiting one and the reply pool\'s own are left');
+        $this->assertSame(['pending', 'resumed', 'resumed'], $this->tickets()->pluck('status')->all(), 'the waiting one, the reply pool\'s own and the recent one are left');
+        $deletes = collect($sql)->filter(fn ($s) => str_starts_with($s, 'select') && str_contains($s, '"id" <= ?') && str_contains($s, 'priority'));
+        $this->assertCount(3, $deletes, 'each status read up to the id cutoff, through (status, priority, id)');
+
+        DB::table(BotcakeSendQueue::TABLE)->where('status', 'pending')->update(['status' => 'done']); // the old waiting one is done now
+        $this->assertSame(0, BotcakeSendQueue::sweepSequence()['pruned'], 'not again within the minute');
+        $this->travel(61)->seconds();
+        $this->assertSame(1, BotcakeSendQueue::sweepSequence()['pruned']);
     }
+
+    public function test_R4_1_without_the_column_a_killed_inline_call_is_not_sent_twice(): void
+    {
+        Schema::table('chatbot_sequence_subscriptions', function ($t) {
+            $t->dropIndex(['send_request_id']);
+            $t->dropColumn(['send_request_id', 'attempt']);
+        });
+        ChatbotSequences::forgetSchema();
+        $seq = $this->sequence('No column', [$this->stepFlow(['Hi'])->id, [$this->stepFlow(['Two'])->id, 1, 'days']]);
+        $id = $this->join($seq, '7001');
+        $during = null;
+        Http::fake(['botcake.io/*' => function () use ($id, &$during) {
+            $during = ChatbotSequences::parseAttempt(ChatbotSequences::readAttempt($id, null), 1, '2026-11-02 10:00:00');
+            return Http::response(['success' => true]);
+        }]);
+        $this->steps();
+        $this->assertTrue($during['sending'] ?? false, 'the inline call is marked in the cache when the column is missing');
+        $this->assertNull(ChatbotSequences::readAttempt($id, null), 'cleared when the run ends');
+
+        $id2 = $this->join($seq, '7002');
+        Cache::put('chatbot-seq-attempt:' . ChatbotSequences::site() . ':' . $id2, ChatbotSequences::attemptValue(1, '2026-11-02 10:00:00', 1, true, now()->subMinutes(10)->getTimestamp()), 3600);
+        $this->steps();
+        $this->assertCount(1, Http::recorded(fn ($r) => str_contains($r->url(), 'send_content')), 'the step whose job died during its call is not sent again');
+        $this->assertSame(2, (int) DB::table('chatbot_sequence_subscriptions')->where('id', $id2)->value('current_step'));
+    }
+
+    public function test_R4_2_a_page_hold_during_a_running_step_leaves_its_attempt(): void
+    {
+        $seen = [];
+        $seq = $this->aiStep('Hold', function () use (&$seen) {
+            app(\App\Services\Chatbot\PageTransfers::class)->hold('Page Uno', 1001, true, 'T9');
+            $seen[] = DB::table('chatbot_sequence_subscriptions')->value('attempt');
+        });
+        $this->join($seq, '7001');
+        $this->steps();
+        $this->assertNotNull($seen[0] ?? null, 'the transfer writer does not clear the running step\'s attempt');
+        $this->assertNull(DB::table('chatbot_sequence_subscriptions')->value('attempt'), 'the step\'s own end clears it');
+    }
+
+    public function test_R4_3_an_idle_pool_reads_for_waiting_tickets_at_most_once_a_minute(): void
+    {
+        $n = 0;
+        DB::listen(function ($q) use (&$n) { if (str_starts_with(strtolower($q->sql), 'select exists') && str_contains($q->sql, 'next_at')) $n++; });
+        for ($i = 0; $i < 20; $i++) $this->round();
+        $this->assertSame(0, $n, 'fresh progress: no read');
+        $this->travel(61)->seconds();
+        for ($i = 0; $i < 20; $i++) $this->round();
+        $this->assertSame(1, $n, 'one read after a minute, then fresh again');
+    }
+
+    public function test_R4_4_and_5_the_stall_is_logged_once_and_its_keys_and_the_beat_name_the_site(): void
+    {
+        Http::fake(['botcake.io/*' => Http::response(['success' => true])]);
+        Log::spy();
+        $seq = $this->sequence('Stuck twice', [$this->stepFlow(['Hi'])->id]);
+        $this->join($seq, '7001');
+        $this->join($seq, '7002');
+        $this->steps();
+        $this->travel(6)->minutes();
+        $this->pool->beat();
+        $this->replyPool->beat();
+        $this->tick();
+        $this->tick();
+        Log::shouldHaveReceived('warning')->withArgs(fn ($m) => str_contains($m, 'sequence send pool: no progress'))->once();
+
+        [$beat, $stalled] = [SequenceSendPool::beatKey(), SequenceSendPool::stalledKey()];
+        $this->assertStringContainsString(ChatbotSequences::site(), $beat);
+        config(['app.url' => 'https://incepxion.example.test']);
+        $this->assertNotSame([$beat, $stalled], [SequenceSendPool::beatKey(), SequenceSendPool::stalledKey()]);
+        $this->assertFalse(SequenceSendPool::alive(), 'the other site does not see this site\'s pool');
+    }
+
 
 
     /** @var array<int, string> */

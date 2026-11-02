@@ -2,6 +2,7 @@
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration {
@@ -15,6 +16,8 @@ return new class extends Migration {
     public function up(): void
     {
         if (!Schema::hasTable('chatbot_sequence_subscriptions')) return;
+        // Hindi naghihintay nang matagal sa lock ng table (ang mahabang transaksyon ay hindi humaharang): pumapalya, at inuulit sa tahimik na oras.
+        if (DB::getDriverName() === 'mysql') DB::statement('SET SESSION lock_wait_timeout = 5');
         if (!Schema::hasColumn('chatbot_sequence_subscriptions', 'send_request_id')) {
             Schema::table('chatbot_sequence_subscriptions', function (Blueprint $table) {
                 $table->string('send_request_id', 36)->nullable();
