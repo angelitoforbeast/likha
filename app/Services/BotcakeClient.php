@@ -152,6 +152,7 @@ class BotcakeClient
             $this->throttle($token);
 
             try {
+                \App\Services\Chatbot\SequenceAttempt::beforeCall(); // ang padala ng sequence step: itinatala bago lumabas
                 if (($res = $this->mock($method, $path, $data)) === null) {
                     $req = Http::withHeaders(['access-token' => $token])->acceptJson()->connectTimeout(10)->timeout($this->timeout);
                     $res = $method === 'GET' ? $req->get(self::BASE . $path, $data) : $req->post(self::BASE . $path, $data);

@@ -3763,6 +3763,93 @@ Tests: `tests/Feature/Chatblast/ForbeastHoldTest.php` (Forbeast and Incepxionbot
 | S-214.10 | edge | Amendment 214-1. Given a hold, when health probes of the gateway's pages fail (`health_fails` or more), then they do not switch; when the hold ends unrecovered, every page over either threshold (3 no-answers or `health_fails` failed probes) switches in that same step with today's rows and switch-back rule; a recovery resets both counters | `test_S_214_10_health_failures_during_a_hold_do_not_switch_and_the_hold_end_switches_both_kinds_together`, `test_S_214_10_a_recovery_resets_the_health_counters_too` | 2026-11-01 passed |
 | S-214.11 | edge | Amendment 214-1. Given 5 or more pages of one gateway failing health probes within `burst_seconds` and no hold yet, then a hold starts as for a no-answer burst; a single page failing probes alone switches as today | `test_S_214_11_a_burst_of_failed_probes_starts_a_hold_and_one_page_alone_switches_as_today` | 2026-11-01 passed |
 
+## S-215 Sequence sends don't hold a worker while waiting on the send API
+
+As the owner of pages with sequence follow-ups, I want every sequence step to hand its send off and never hold a queue worker while it waits on the send API, the same way for Botcake and for the Forbeast gateway, so follow-ups go out on time at any volume, never twice, and never slow down first replies.
+
+Slice 215. Threat model: untrusted = message content and API responses (Meta, Botcake, gateway); trusted = page settings written by staff, config. The risk is operational: duplicate or lost customer messages, and slowed first replies. Risk tier: high.
+Tests: `tests/Feature/Chatblast/SequenceHandoffTest.php`, `SequenceSafetyTest.php`, `SequenceVisibilityTest.php`, `SequenceBenchTest.php` (shared harness `SequenceHandoffTestCase.php`). Priorities: S-215 to S-215e are P1, S-215f is P2 except S-215f.3 (P1).
+
+### S-215 Hand-off: sends don't hold a worker
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-215.1 (P1) | Given 4 workers, 300 due steps on 20 pages and a fake API at 2.9 s, When they run, Then peak in flight is at least 40 and all are sent within 60 virtual seconds | `SequenceBenchTest::test_S_215_1…` | passed |
+| S-215.2 (P1) | When a sequence step job hands its send off, Then `handle()` ends in under 0.5 s | `SequenceHandoffTest::test_S_215_2_and_3…` | passed |
+| S-215.3 (P1) | Given a send that succeeds, Then the subscription advances as `advance()` does today | `SequenceHandoffTest::test_S_215_2_and_3…` | passed |
+| S-215.4 (P1) | Given #551 or another 4xx, Then the send is logged failed with the same text, is not retried, and the step advances | `SequenceHandoffTest::test_S_215_4…` | passed |
+| S-215.5 (P1) | Given a 5xx or HTTP 0, Then it behaves as today's inline path, with exactly one row per attempt | `SequenceHandoffTest::test_S_215_5…` | passed |
+| S-215.6 (P1) | Given a step with several sends, Then they keep their order, a failed send doesn't stop the next send, and every row carries the sequence id and step | `SequenceHandoffTest::test_S_215_6…` | passed |
+| S-215.7 (P1) | Given "Wait for reply" in a step, Then the step doesn't park | `SequenceHandoffTest::test_S_215_7…` | passed |
+| S-215.8 (P1) | Given AI or Sheet nodes in a step, Then they don't run twice | `SequenceHandoffTest::test_S_215_8…`, `SequenceReRunTest::test_S_215_8_and_1b…` (killed before the send) | passed |
+| S-215.9 (P1) | Given non-ASCII, 2,000-character and image messages, Then what reaches the API is byte-identical to today's | `SequenceHandoffTest::test_S_215_9…` | passed |
+| S-215.10 (P1) | Given the flag off or the pool down, Then the step sends inline as before | `SequenceHandoffTest::test_S_215_10_and_c_5…` | passed |
+| S-215.11 (P1) | Inbox, Replies and /chatbot/speed show the same fields as today (via, sequence id and step, tags, UPDATE type, due) | `SequenceHandoffTest::test_S_215_11…` | passed |
+
+### S-215b Safety under load
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-215b.1 (P1) | Steps 1, 2, 3 go in order, once each | `SequenceSafetyTest::test_S_215b_1…` | passed |
+| S-215b.2 (P1) | A step whose send is in flight gets no second job or ticket | `SequenceSafetyTest::test_S_215b_2_and_3…` | passed |
+| S-215b.3 (P1) | A 12-minute backlog is not re-claimed | `SequenceSafetyTest::test_S_215b_2_and_3…` | passed |
+| S-215b.4 (P1) | A sequence ticket and a reply ticket for the same customer go one at a time, and a customer reply isn't held behind more than one sequence send | `SequenceSafetyTest::test_S_215b_4…` | passed |
+| S-215b.5 (P1) | Exit on reply while in flight: no later step, no double send | `SequenceSafetyTest::test_S_215b_5…` | passed |
+| S-215b.6 (P1) | Pause, page off or 24 h window closed: checked at send time | `SequenceSafetyTest::test_S_215b_6… (4 data sets)` | passed |
+| S-215b.7 (P1) | A page move while in flight: no double send | `SequenceSafetyTest::test_S_215b_7_and_11…` | passed |
+| S-215b.8 (P1) | Lock taken: retry in 1 minute as today | `SequenceSafetyTest::test_S_215b_8…` | passed |
+| S-215b.9 (P1) | The ticket and the subscription's link to it are written in one transaction, conditional on the claim; a pool tick in between sees no ticket, and a link that updates 0 rows leaves no ticket | `SequenceSafetyTest::test_S_215b_9…` | passed |
+| S-215b.10 (P1) | Re-subscribe while a step is in flight: the old result advances nothing, step 1 of the new subscription is sent once | `SequenceSafetyTest::test_S_215b_10…` | passed |
+| S-215b.11 (P1) | A page transfer while a ticket is in flight: a called ticket's step is advanced before the export (the new site sends the next step), an uncalled one is cancelled (the new site sends it); one send in total | `SequenceSafetyTest::test_S_215b_7_and_11…` | passed |
+
+### S-215c Restarts
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-215c.1 (P1) | A clean pool exit drains in-flight sends; each advances once | `SequenceSafetyTest::test_S_215c_1_a_clean…, test_S_215c_1_the_seconds…` | passed |
+| S-215c.2 (P1) | Pool killed after the call: no resend, recorded failed, not stuck | `SequenceSafetyTest::test_S_215c_2_and_3…` | passed |
+| S-215c.3 (P1) | Pool killed before the call: back to pending, sent once | `SequenceSafetyTest::test_S_215c_2_and_3…` | passed |
+| S-215c.4 (P1) | A worker restart between hand-off and result still advances once; a duplicate resume does nothing | `SequenceSafetyTest::test_S_215c_4…` | passed |
+| S-215c.5 (P1) | Pool down: inline fallback | `SequenceHandoffTest::test_S_215_10_and_c_5…` | passed |
+| S-215c.6 (P1) | A terminate and a pool restart together: rows plus failures equal steps due | `SequenceSafetyTest::test_S_215c_6…` | passed |
+| S-215c.7 (P1) | Mixed versions: a reply pool without the new beat flag means inline sends; a sequence ticket left done without a send by another process is resolved after the deadline plus 5 minutes, never resent when it was called | `SequenceSafetyTest::test_S_215c_7…, SequenceHandoffTest::test_S_215_10_and_c_5…` | passed |
+| S-215c.8 (P1) | The sequence pool dead past DEAD_POOL_SECONDS: uncalled tickets are cancelled and their steps go inline once; called ones are recorded failed, not resent | `SequenceSafetyTest::test_S_215c_8…` | passed |
+
+### S-215d Stale claim
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-215d.1 (P1) | A dead job's subscription is re-picked within about 2 minutes and sent once | `SequenceSafetyTest::test_S_215d_1_to_3…, test_S_215d_1_a_job_that_died…` | passed |
+| S-215d.2 (P1) | A queued job's row is not re-stamped | `SequenceSafetyTest::test_S_215d_1_to_3…` | passed |
+| S-215d.3 (P1) | A stale job after a newer claim never leaves a stuck row | `SequenceSafetyTest::test_S_215d_1_to_3…` | passed |
+| S-215d.4 (P1) | 2,000 due at once: no row hidden, tick within 50 s | `SequenceSafetyTest::test_S_215d_4…` | passed |
+| S-215d.5 (P1) | A job still running is never re-claimed (the claim is re-stamped at start, a running marker, job timeout below the stale window); a job killed mid-run is re-picked once after the window | `SequenceSafetyTest::test_S_215d_5…` | passed |
+| S-215d.6 (P1) | Migration not run: tick, claim, step and advance work as on the base, with inline sends | `SequenceSafetyTest::test_S_215d_6…` | passed |
+
+### S-215e Providers and other traffic
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-215e.1 (P1) | A Botcake page step goes via Botcake | `SequenceHandoffTest::test_S_215_e_1_and_e_2…` | passed |
+| S-215e.2 (P1) | A Forbeast gateway page step goes via the gateway with UPDATE and client_ref, and the ForbeastWatch hooks are still called | `SequenceHandoffTest::test_S_215_e_1_and_e_2…` | passed |
+| S-215e.3 (P1) | A gateway that fails or isn't set up: logged failed, no worker held | `SequenceHandoffTest::test_S_215_e_3…` | passed |
+| S-215e.4 (P1) | A provider switch mid-flight: exactly one provider, once | `SequenceSafetyTest::test_S_215e_4…` | passed |
+| S-215e.5 (P1) | The per-page rate holds; a 429 backs off that page only | `SequenceSafetyTest::test_S_215e_5_and_e_6…` | passed |
+| S-215e.6 (P1) | Sequence and inbox sends share the rate | `SequenceSafetyTest::test_S_215e_5_and_e_6…` | passed |
+| S-215e.7 (P1) | 2,000 steps in flight: a first reply waits at most one slot of its page (the slot already taken; the reply pool reserves the next), never behind the sequence queue; measured against the same fixture through the old code (story change 215: the old code hardly reached the page's rate, so its wait was about 0) | `SequenceBenchTest::test_S_215e_7…` | passed |
+| S-215e.8 (P1) | Chatblast unchanged and not starved either way | `SequenceSafetyTest::test_S_215e_8…` | passed |
+| S-215e.9 (P1) | A full pool means pending, no failure | `SequenceSafetyTest::test_S_215e_9…` | passed |
+
+### S-215f Visibility
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-215f.1 (P2) | /chatbot/speed Sequences shows average, p90 and max lateness per hour (S-182.11 and S-185.5 still pass) | `SequenceVisibilityTest::test_S_215f_1_and_f_3…` | passed |
+| S-215f.2 (P2) | A read-only artisan command shows per hour: steps sent, due but unsent, oldest overdue, average lateness, and pool pending | `SequenceVisibilityTest::test_S_215f_2_and_f_4…` | passed |
+| S-215f.3 (P1) | Lateness is measured due → sent at Meta, not due → hand-off | `SequenceVisibilityTest::test_S_215f_1_and_f_3…` | passed |
+| S-215f.4 (P2) | An empty hour shows blank, no error | `SequenceVisibilityTest::test_S_215f_2_and_f_4…` | passed |
+| S-215f.5 (P1) | A step with several sends: the `ran` event is stamped so /chatbot/speed matches its sends (the first one always), with the first send's lateness | `SequenceVisibilityTest::test_S_215f_5…` | passed |
+
 ## Slice 216 – Set by on hover; usage only for Forbeast pages
 
 As the owner, I want the Item Value (COGS) and RTS hovers on /owner/private to say who set the value and when, and I want AI usage sent to Forbeast only for pages whose messages go through a Forbeast gateway.
