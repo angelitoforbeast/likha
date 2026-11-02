@@ -64,10 +64,14 @@ class QueuedJobCompatTest extends SequenceHandoffTestCase
     }
 
     /**
-     * Every queued job (app/Jobs and its subfolders) with an optional typed property, that an older payload can leave
-     * uninitialized, uses RestoresMissingDefaults: the property is an optional constructor parameter (promoted or assigned)
-     * with no class-level default. The payload format stays as it is (no class defaults, which Laravel would leave out of the
-     * payload and the previous code could not read).
+     * Every queued job (app/Jobs and its subfolders, with or without the trait): a typed property with no class default, that
+     * an older payload can leave uninitialized, passes only if
+     *  - it is a REQUIRED constructor parameter of the same name (every payload carries it), or
+     *  - the class uses RestoresMissingDefaults and it is an OPTIONAL constructor parameter of the same name and the same type
+     *    (the trait restores the parameter's raw default, so the property must be promoted or assigned straight from it).
+     * Anything else fails, a property set in the constructor body from a computed value included: give it a class default.
+     * The payload format stays as it is for the trait's classes (no class defaults, which SerializesModels would leave out of
+     * the payload and the previous code could not read).
      *
      * Known gap: a new REQUIRED constructor parameter on a job that is already queued is not covered (there is no default to
      * restore); a job that gains a required parameter needs a default or a drained queue before the deploy.
@@ -84,17 +88,30 @@ class QueuedJobCompatTest extends SequenceHandoffTestCase
             if (!class_exists($class) || !is_subclass_of($class, ShouldQueue::class)) continue;
             $checked++;
             $r = new \ReflectionClass($class);
-            if (in_array(\App\Jobs\Concerns\RestoresMissingDefaults::class, class_uses_recursive($class), true)) continue;
+            $restores = in_array(\App\Jobs\Concerns\RestoresMissingDefaults::class, class_uses_recursive($class), true);
             $params = [];
             foreach ($r->getConstructor()?->getParameters() ?? [] as $p) $params[$p->getName()] = $p;
             foreach ($r->getProperties() as $prop) {
                 if ($prop->isStatic() || !$prop->hasType() || $prop->hasDefaultValue()) continue;
                 $param = $params[$prop->getName()] ?? null;
-                if ($param !== null && $param->isOptional()) $bad[] = $class . '::$' . $prop->getName();
+                if ($param !== null && !$param->isOptional()) continue;
+                if ($restores && $param !== null && (string) $param->getType() === (string) $prop->getType()) continue;
+                $bad[] = $class . '::$' . $prop->getName();
             }
         }
         $this->assertGreaterThan(40, $checked, 'every queued job class was read, subfolders included');
-        $this->assertSame([], $bad, 'use App\Jobs\Concerns\RestoresMissingDefaults in these classes');
+        $this->assertSame([], $bad, 'a required constructor parameter, RestoresMissingDefaults with an optional parameter of the same type, or a class default');
+    }
+
+    public function test_S_218_3_a_comment_job_with_or_without_until_in_the_payload_keeps_its_retry_window(): void
+    {
+        \Illuminate\Support\Carbon::setTestNow('2026-11-03 01:00:00');
+        $old = unserialize(self::payload(\App\Jobs\HandleComment::class, ['maxExceptions' => 1, 'until' => 1762138800, 'eventId' => 5]));
+        $this->assertSame(1762138800, $old->retryUntil()->getTimestamp(), 'the until in the payload is kept');
+
+        $missing = unserialize(self::payload(\App\Jobs\HandleComment::class, ['maxExceptions' => 1, 'eventId' => 5]));
+        $this->assertNull($missing->until, 'the class default, not an uninitialized property');
+        $this->assertSame(now()->addHours(6)->getTimestamp(), $missing->retryUntil()->getTimestamp(), '6 hours from now, like a fresh dispatch');
     }
 
     public function test_S_218_3_the_guard_reads_subfolders(): void
