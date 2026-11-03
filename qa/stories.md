@@ -4273,3 +4273,21 @@ Tests (`tests/Feature/Item/`): `StockFromFirstStockInTest`, `NexusStockHistoryTe
 | S-224.3.1 | happy | The Inbox thread shows "via Incepxion" for a reply whose recorded address is incepxion; the default address, Botcake and old rows keep today's label and data (no `via_label`) | `test_S_224_3_1_the_inbox_says_via_incepxion_only_for_a_reply_that_went_there` | pass |
 | S-224.3.2 | happy | A manual Inbox reply through incepxion comes back labelled "Incepxion" | `test_S_224_3_2_a_manual_inbox_reply_through_incepxion_comes_back_labelled` | pass |
 | S-224.3.3 | happy | The Replies screen (list and detail) shows "Incepxion" for that reply; the via filter is unchanged | `test_S_224_3_3_the_replies_screen_labels_the_address_too` | pass |
+
+## Spec 227: a send confirmation that arrives before its reply row
+
+### S-227.2 Keep and retry (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-227.2.1 | happy | Given a `send_status` whose `client_ref` has no reply yet, it is not counted unknown but sent again in 5 s; when the row appears, the retry confirms it with the gateway's `sent_at` | `test_S_227_2_1_a_send_status_before_its_reply_row_is_applied_when_the_row_appears` | pass |
+| S-227.2.2 | negative | Given the row never appears, it is retried after 5, 15, 40 and 60 s (try 1 to 4), then counted `send_status_unknown` once | `test_S_227_2_2_after_the_last_try_it_is_counted_unknown_and_not_retried_again` | pass |
+| S-227.2.3 | edge | Given the reply is already confirmed, a repeat changes nothing, is counted `send_status_repeat` and is not retried | `test_S_227_2_3_a_repeat_changes_nothing_and_is_not_retried` | pass |
+| S-227.2.4 | edge | Given an event without a `client_ref` and no reply near it, it is unknown at once (no retry) | `test_S_227_2_4_an_event_without_a_client_ref_and_no_match_is_unknown_at_once` | pass |
+| S-227.2.5 | edge | The retried event has no `queued_at` (not read as queue lag) and is otherwise the same event; an event queued by the live release (no `send_try`) is try 0 | `test_S_227_2_5_the_retry_carries_no_queue_time_and_an_event_from_the_live_release_is_try_zero` | pass |
+
+### S-227.3 Heal the last 24 h (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-227.3.1 | happy | Without `--apply`, the command prints the count of unconfirmed gateway replies of the last 24 h (accepted, with a `client_ref`), calls nothing and writes nothing | `test_S_227_3_1_the_dry_run_counts_the_candidates_and_asks_and_writes_nothing` | pass |
+| S-227.3.2 | happy | With `--apply`, each candidate's `client_ref` is posted again with its PSID and messages; a duplicate `sent` or `failed` fills the confirmation like a live event; a duplicate still `sending` is left; counts are printed | `test_S_227_3_2_apply_fills_the_final_state_from_the_duplicate_answer_and_leaves_a_send_still_going` | pass |
+| S-227.3.3 | negative | An answer that is not a duplicate (the gateway queued it as new) stops the run at once, exit 1, nothing more is asked | `test_S_227_3_3_an_answer_that_is_not_a_duplicate_stops_the_run` | pass |
