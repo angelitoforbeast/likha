@@ -126,8 +126,8 @@ class NexusStockReadTest extends ItemTestCase
     {
         $this->glowTapeOrders(false);                                             // B: walang umalis, walang stock-in
         $b = $this->item('glow tape');
-        // Walang Nexus stock-in = Not in Nexus (walang numero); ang i-order ay sa stock 0, may marka.
-        $this->assertSame([true, true, null, null, null, false], [$b['not_in_nexus'], $b['stock_assumed_zero'], $b['stock_in'], $b['stock_raw'], $b['stock'], $b['stock_needs_count']]);
+        // Walang kahit isang Nexus row: "not synced" (hindi "Not in Nexus"); walang numero; ang i-order ay sa stock 0, may marka.
+        $this->assertSame([false, 'not_synced', true, null, null, null, false], [$b['not_in_nexus'], $b['stock_unknown'], $b['stock_assumed_zero'], $b['stock_in'], $b['stock_raw'], $b['stock'], $b['stock_needs_count']]);
         $this->assertSame(150, $b['normal']['order_qty']);
         $this->assertSame('red', $b['normal']['colour']);
     }
@@ -171,7 +171,8 @@ class NexusStockReadTest extends ItemTestCase
 
         $json = $this->stock()->assertOk()->json();
 
-        $this->assertSame([null, null, false, true], [$json['items']['rope']['stock_raw'], $json['items']['rope']['stock'], $json['items']['rope']['stock_needs_count'], $json['items']['rope']['not_in_nexus']]);
+        $this->assertSame([null, null, false, false, 'not_synced'], [$json['items']['rope']['stock_raw'], $json['items']['rope']['stock'], $json['items']['rope']['stock_needs_count'], $json['items']['rope']['not_in_nexus'], $json['items']['rope']['stock_unknown']]);
+        $this->assertSame('not_synced', $json['stock_meta']['nexus']['match_state']);
         $this->assertFalse($json['stock_meta']['nexus']['synced']);
     }
 
@@ -358,7 +359,7 @@ class NexusStockReadTest extends ItemTestCase
 
         $json = $this->stock()->assertOk()->json();
 
-        $this->assertSame([true, null, null], [$json['items']['rope']['not_in_nexus'], $json['items']['rope']['stock_in'], $json['items']['rope']['stock_raw']]);
+        $this->assertSame(['not_synced', null, null], [$json['items']['rope']['stock_unknown'], $json['items']['rope']['stock_in'], $json['items']['rope']['stock_raw']]);
     }
 
     // ── S-220.3 name matching ────────────────────────────────────────────────
@@ -414,7 +415,8 @@ class NexusStockReadTest extends ItemTestCase
         $this->parcels('1 x ALAGANG PAMILYA VII', 1, 'A');
         $this->nexusStockIn('Alagang Pamilya II', 6, '2026-09-26');
 
-        $this->assertTrue($this->item('alagang pamilya vii')['not_in_nexus'], 'wala pang mapping: walang tugmang stock-in');
+        $before = $this->item('alagang pamilya vii');
+        $this->assertSame([false, 'no_matches'], [$before['not_in_nexus'], $before['stock_unknown']], 'may Nexus row pero walang tumugma: "no matches", hindi "Not in Nexus"');
 
         DB::table('item_type_mappings')->insert(['item_name' => 'Alagang Pamilya II', 'item_type' => 'Alagang Pamilya VII', 'created_at' => now(), 'updated_at' => now()]);
 
@@ -610,6 +612,6 @@ class NexusStockReadTest extends ItemTestCase
 
         $it = $this->item('tape');
 
-        $this->assertSame([0, null, null, true], [$it['incoming'], $it['stock_in'], $it['stock'], $it['not_in_nexus']]);
+        $this->assertSame([0, null, null, 'not_synced'], [$it['incoming'], $it['stock_in'], $it['stock'], $it['stock_unknown']]);
     }
 }

@@ -249,12 +249,14 @@ class StockFromFirstStockInTest extends ItemTestCase
         $this->items();
 
         $fj = array_values(array_filter($queries, fn ($q) => str_contains($q[0], 'from_jnts') && !str_contains($q[0], 'left join')));
-        $this->assertCount(2, $fj, 'shipped at returned: tig-isang query');
-        foreach ($fj as [$sql, $bindings]) {
-            $this->assertStringContainsString('group by', $sql);
-            $this->assertContains('2026-10-10 00:00:00', $bindings);
-            $this->assertNotContains('2026-01-15 00:00:00', $bindings);
-        }
-        $this->assertEmpty(array_filter($queries, fn ($q) => str_contains($q[0], 'from_jnts') && str_contains($q[0], 'item_stock_start')));
+        $grouped = array_values(array_filter($fj, fn ($q) => str_contains($q[0], 'group by')));
+        // Saradong araw (10-10..11-01): isang shipped at isang returned; live (11-02..ngayon): isang shipped at isang
+        // returned; at ang flags (COUNT, walang group by).
+        $this->assertCount(4, $grouped);
+        $this->assertCount(5, $fj);
+        $lows = array_map(fn ($q) => $q[1][array_search(true, array_map(fn ($b) => is_string($b) && preg_match('/^\d{4}-\d{2}-\d{2} 00:00:00$/', $b) === 1, $q[1]), true)], $grouped);
+        sort($lows);
+        $this->assertSame(['2026-10-10 00:00:00', '2026-10-10 00:00:00', '2026-11-02 00:00:00', '2026-11-02 00:00:00'], $lows);
+        foreach ($fj as [, $bindings]) $this->assertNotContains('2026-01-15 00:00:00', $bindings);
     }
 }

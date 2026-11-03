@@ -138,7 +138,7 @@ class StockWarmTest extends ItemTestCase
         $event = collect(app(Schedule::class)->events())->first(fn ($e) => str_contains((string) $e->command, 'stock:warm'));
 
         $this->assertNotNull($event);
-        $this->assertSame('*/10 * * * *', $event->expression);
+        $this->assertSame('5-59/10 * * * *', $event->expression, 'kada 10 minuto mula :05, wala sa :10 ng hourly sync');
         $this->assertSame('Asia/Manila', $event->timezone);
         $this->assertTrue($event->withoutOverlapping);
 

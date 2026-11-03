@@ -12,7 +12,7 @@ use Illuminate\Console\Command;
  */
 class StockWarm extends Command
 {
-    protected $signature = 'stock:warm';
+    protected $signature = 'stock:warm {--closed-days=0 : also recompute the last N closed days (before yesterday)}';
 
     protected $description = 'Compute and cache the /item stock inputs (Nexus mode) before a page needs them';
 
@@ -23,7 +23,7 @@ class StockWarm extends Command
             return self::SUCCESS;
         }
 
-        return self::report($this, app(ItemStockService::class)->warmInputs());
+        return self::report($this, app(ItemStockService::class)->warmInputs(max(0, (int) $this->option('closed-days'))));
     }
 
     /** Isang linya ng resulta; FAILURE kapag bumagsak (ang lumang cache ay nananatili). */

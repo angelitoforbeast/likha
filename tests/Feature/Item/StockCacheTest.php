@@ -62,7 +62,7 @@ class StockCacheTest extends ItemTestCase
         $this->assertSame($cold['items'], $warm['items']);
         $this->assertSame(8, $this->stockOf($warm));   // 10 + 1 − 3
         $fj = fn (array $q) => array_values(array_filter($q, fn ($s) => str_contains($s, 'from_jnts')));
-        $this->assertCount(3, $fj($q1), 'cold: HOLD + shipped + returned');
+        $this->assertCount(6, $fj($q1), 'cold: HOLD + saradong shipped at returned + live shipped at returned + flags');
         $this->assertCount(1, $fj($q2), 'warm: ang HOLD lang');
         $this->assertStringContainsString('left join "from_jnts"', $fj($q2)[0]);
         $this->assertSame([], array_values(array_filter($q2, fn ($s) => str_contains($s, 'nexus_stock_ins'))));
@@ -72,9 +72,13 @@ class StockCacheTest extends ItemTestCase
     {
         [, $q] = $this->fetchStock();
 
-        $returned = array_values(array_filter($q, fn ($s) => str_contains($s, 'fj.status = ?')));
-        $this->assertCount(1, $returned);
-        $this->assertStringContainsString('group by', $returned[0]);
+        // Isang grouped returned query bawat bahagi (saradong araw, live), parehong "signingtime mula–hanggang" lang.
+        $returned = array_values(array_filter($q, fn ($s) => str_contains($s, 'fj.status = ? and fj.signingtime >= ? and fj.signingtime <= ?')));
+        $this->assertCount(2, $returned);
+        foreach ($returned as $sql) {
+            $this->assertStringContainsString('group by', $sql);
+            $this->assertStringNotContainsString('signingtime is null', $sql, 'walang "OR signingtime IS NULL" na pumipigil sa index');
+        }
     }
 
     public function test_S_220_9_3_a_successful_sync_re_keys_the_cache_and_otherwise_it_lasts_15_minutes(): void

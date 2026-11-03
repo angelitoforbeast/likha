@@ -293,6 +293,6 @@ Schedule::command('nexus:sync-stock --days=7')
 // hindi tamaan ng page ang mabagal na cold na kuwenta. Sa background: ilang segundo ang isang cold na kuwenta.
 Schedule::command('stock:warm')
     ->timezone('Asia/Manila')
-    ->everyTenMinutes()
+    ->cron('5-59/10 * * * *')   // :05, :15, … — wala sa :10 ng hourly sync
     ->withoutOverlapping(10)
     ->runInBackground();

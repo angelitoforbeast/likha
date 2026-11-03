@@ -71,7 +71,7 @@ class ReturnedStockTest extends ItemTestCase
 
         $r = $this->returned();
         $this->assertSame([], $r->pieces);
-        $this->assertSame(0, $r->flags['unsigned'], "'For Return' ay hindi rin binibilang bilang walang signingtime");
+        $this->assertSame(0, app(JntReturnedSource::class)->flags('2026-11-03 10:10:00')['unsigned'], "'For Return' ay hindi rin binibilang bilang walang signingtime");
     }
 
     public function test_S_222_2_1_and_2_2_a_late_return_counts_whatever_the_ship_date_and_one_signed_before_the_start_does_not(): void
@@ -106,7 +106,7 @@ class ReturnedStockTest extends ItemTestCase
         $r = $this->returned();
 
         $this->assertSame(['glow tape' => 1], $r->pieces);
-        $this->assertSame(1, $r->flags['unsigned']);
+        $this->assertSame(1, app(JntReturnedSource::class)->flags('2026-11-03 10:10:00')['unsigned'], 'hiwalay na COUNT query');
         $this->assertNotEmpty(array_filter($this->logs, fn ($l) => str_contains($l, 'signingtime') && str_contains($l, '"unsigned":1')));
     }
 
@@ -144,7 +144,7 @@ class ReturnedStockTest extends ItemTestCase
         $r = $this->returned();
 
         $this->assertSame(['glow tape' => 1], $r->pieces);
-        $this->assertSame(2, $r->flags['future']);
+        $this->assertSame(2, app(JntReturnedSource::class)->flags('2026-11-03 10:10:00')['future'], 'hiwalay na COUNT query');
     }
 
     public function test_S_220_4_10_a_multi_row_waybill_counts_each_row_like_shipped(): void
