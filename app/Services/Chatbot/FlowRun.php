@@ -151,7 +151,7 @@ class FlowRun
         $run = [
             'last_input' => $this->input, 'full_name' => $this->fullName, 'first_name' => $first, 'psid' => $this->psid(),
             'page_id' => $this->pageId, 'page_name' => $this->pageName, 'current_date' => now('Asia/Manila')->toDateString(),
-            'last_interaction' => $this->receivedAt, 'replies_via' => ChatbotProvider::viaLabel($this->via()),
+            'last_interaction' => $this->receivedAt, 'replies_via' => ChatbotProvider::repliesVia($this->pageName, $this->via()),
         ] + ($this->usesOrderVars() ? ($this->orderVars ??= OrderVars::read($this->pageName, (string) $this->fields->psid)) : []);
         $base = ChatbotVars::merge($this->botfields, $this->fields->fields(), $run);
         $bot = array_map(fn ($v) => ChatbotVars::interpolate((string) $v, $base), $this->botfields);

@@ -36,7 +36,7 @@ class ChatbotFlowController extends Controller
         'last_input' => 'what the customer just typed', 'full_name' => 'the customer\'s name on Facebook', 'first_name' => 'the first word of the customer\'s name',
         'psid' => 'the customer\'s ID on this page', 'page_id' => 'the Facebook ID of the page', 'page_name' => 'the name of the page',
         'current_date' => 'today\'s date in Manila (YYYY-MM-DD)', 'last_interaction' => 'when the customer\'s last chat came in',
-        'replies_via' => 'which bot carries this chat: Botcake or Forbeast',
+        'replies_via' => 'which bot carries this chat: Botcake, Forbeast, or the page\'s gateway address (e.g. Incepxion)',
     ];
 
     /** Ang mga order_* variable (OrderVars): ang huling order row ng customer sa page, binabasa tuwing kailangan. */

@@ -53,6 +53,17 @@ class ChatbotProvider
         return Gateways::valid($via) ? Gateways::label($via) : 'Botcake';
     }
 
+    /**
+     * Ang {{replies_via}} ng page: ang pangalan ng address ng page (Gateways::route, hal. "Incepxion") kapag forbeast ang
+     * nagdadala at hindi default ang address; kung hindi, ang viaLabel. Walang GATEWAY_URLS = laging default ang address.
+     */
+    public static function repliesVia(string $pageName, string $via): string
+    {
+        if ($via === self::FORBEAST && $pageName !== '' && ($route = Gateways::route($pageName)) !== Gateways::FORBEAST) return Gateways::routeLabel($route);
+
+        return self::viaLabel($via);
+    }
+
     /** $once: isang subok lang sa Botcake (web request, hal. ang Inbox). Ang gateway ay pinipili sa bawat padala (ang aktibo). */
     public static function for(string $pageName, bool $once = false): MessagingProvider
     {

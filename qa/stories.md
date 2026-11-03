@@ -4244,3 +4244,14 @@ Tests (`tests/Feature/Item/`): `StockFromFirstStockInTest`, `NexusStockHistoryTe
 | S-223.6.2 | edge | Without handler context the cURL part of the message is used, without the URL | same | pass |
 | S-223.6.3 | happy | `GATEWAY_FORCE_IPV4` on: sends, typing, comment replies and health checks are IPv4 only; off by default | `test_S_223_6b_force_ipv4_makes_the_gateway_calls_ipv4_only` | pass |
 | S-223.6.4 | happy | The sequence pool records the same detail and is IPv4 only with the switch | `test_S_223_2d_and_6c_a_sequence_send_uses_the_page_address_ipv4_only_and_records_why_it_got_no_answer` | pass |
+
+## Spec 224: show the address a reply really went through
+
+### S-224.1 The flow variable (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-224.1.1 | happy | Given a page on the Forbeast gateway with no address, `{{replies_via}}` is "Forbeast" (with a gateway chat and without a chat) | `test_S_224_1_1_a_page_on_forbeast_without_an_address_is_forbeast` | pass |
+| S-224.1.2 | happy | Given a page on the Forbeast gateway with `gateway_app=incepxion`, `{{replies_via}}` is "Incepxion" | `test_S_224_1_2_a_page_on_the_incepxion_address_is_incepxion` | pass |
+| S-224.1.3 | negative | Given a page on Botcake (or a chat Botcake delivered), it stays "Botcake" even with an address set | `test_S_224_1_3_botcake_stays_botcake_even_with_an_address` | pass |
+| S-224.1.4 | edge | Given no `GATEWAY_URLS`, a page set to `incepxion` is still "Forbeast"; the incepxionbot gateway keeps "Incepxionbot" | `test_S_224_1_4_without_gateway_urls_the_label_is_todays` | pass |
+| S-224.1.5 | happy | The variable's help text names the address ("Incepxion") | `test_S_224_1_5_the_variable_help_names_the_address` | pass |
