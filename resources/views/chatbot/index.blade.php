@@ -469,6 +469,7 @@
         if (!res.ok) { notice('Could not load the pages (' + res.status + ').', 'text-red-600'); return; }
         const data = await res.json();
         columns = data.columns; rows = RowCache.merge(rows, data.rows); flows = data.flows || []; gatewayReady = !!data.gateway_ready; gatewayApps = data.gateway_apps || {}; bots = data.bots || []; aiSite = data.ai_site || null;
+        fillBulkVia();
         // Ang naka-cache na Check ay kasama sa data; ang wala pa ay kinukuha pagkatapos ng render (checkQueue).
         checks.clear();
         for (const r of rows) if (r.check) checks.set(r.page, r.check);
@@ -1232,7 +1233,7 @@
         ]);
         paintSwitch(b, r.active);
         if (url.activeUrl) b.addEventListener('click', () => toggle(r, b)); else b.disabled = true; // CEO lang ang makakapag-switch
-        td.append(b, providerSelect(r), gatewaySelect(r), gatewayAppSelect(r), aiButton(r));
+        td.append(b, repliesViaSelect(r), gatewaySelect(r), aiButton(r));
         if (r.ai_load) td.append(aiLoadNote(r.ai_load));
         if (r.auto_switched) td.append(autoSwitchNote(r.auto_switched));
         const err = errors.get(r.page);
@@ -1399,18 +1400,27 @@
         $('bulk-apply').disabled = !sel.length || !url.providerUrl;
         $('bulk-apply').textContent = sel.length ? 'Apply to ' + sel.length + ' selected' : 'Apply to selected';
     }
+    // Ang mga pili ng bulk "Replies via": gaya ng sa row (Botcake, saka Bot N kada address, o Forbeast kapag isa lang).
+    function fillBulkVia() {
+        const s = $('bulk-provider'), was = s.value;
+        const routes = viaRoutes().map(([v, t]) => el('option', {value: v, text: t}));
+        s.replaceChildren(el('option', {value: 'botcake', text: 'Botcake'}), ...(routes.length ? routes : [el('option', {value: 'gateway', text: 'Forbeast'})]));
+        s.value = [...s.options].some(o => o.value === was) ? was : 'botcake';
+    }
     $('bulk-apply').addEventListener('click', async () => {
-        const names = [...picked].filter(p => rows.some(r => r.page === p)), want = $('bulk-provider').value;
+        const names = [...picked].filter(p => rows.some(r => r.page === p)), choice = $('bulk-provider').value;
+        const [want, wantApp] = choice.split(':');
         if (!names.length) return;
         // Gateway: ang bawat page ay may gumaganang token sa sarili nitong gateway (Forbeast o Incepxionbot).
         const notReady = want === 'gateway' ? names.filter(p => { const r = rows.find(x => x.page === p); return !(r?.gateways || []).includes(r?.gateway); }) : [];
         if (notReady.length) { notice(NEEDS_TOKEN + ': ' + notReady.join(', '), 'text-red-600'); return; }
-        const label = want === 'gateway' ? [...new Set(names.map(p => provLabel(rows.find(x => x.page === p) || {}, 'gateway')))].join(' / ') : 'Botcake';
+        const label = wantApp ? $('bulk-provider').selectedOptions[0].textContent
+            : want === 'gateway' ? [...new Set(names.map(p => provLabel(rows.find(x => x.page === p) || {}, 'gateway')))].join(' / ') : 'Botcake';
         if (!confirm('Send and receive the chats of these ' + names.length + ' page' + (names.length === 1 ? '' : 's') + ' through ' + label + '?\n\n' + names.join('\n'))) return;
         $('bulk-apply').disabled = true;
         try {
-            const {ok, data} = await post(url.providerUrl, {page_names: names, provider: want});
-            if (ok) { rows.forEach(r => { if (names.includes(r.page)) { r.provider = data.provider; r.auto_switched = null; } }); picked.clear(); notice(names.length + ' page' + (names.length === 1 ? '' : 's') + ' now reply via ' + label + '.', 'text-green-700'); }
+            const {ok, data} = await post(url.providerUrl, {page_names: names, provider: want, ...(wantApp ? {gateway_app: wantApp} : {})});
+            if (ok) { rows.forEach(r => { if (names.includes(r.page)) { r.provider = data.provider; if (data.gateway_app) r.gateway_app = data.gateway_app; r.auto_switched = null; } }); picked.clear(); notice(names.length + ' page' + (names.length === 1 ? '' : 's') + ' now reply via ' + label + '.', 'text-green-700'); }
             else notice(data.error || data.message || 'Not changed.', 'text-red-600');
         } catch (e) { notice('No connection: not changed.', 'text-red-600'); }
         render();
@@ -1425,25 +1435,38 @@
         ]);
     }
 
-    // Ang Bot ng page (kung saan dumadaan ang chat at sagot): ang mga kumpletong koneksyon lang (Connected), kasama ang
-    // kasalukuyan. Isa lang: text, walang select. Ang gateway (Forbeast o Incepxionbot, ang aktibo ng page) ay kailangan
-    // ding naka-set up (GATEWAY_URL, INCEPXIONBOT_URL).
-    function providerSelect(r) {
-        const current = r.provider || 'botcake';
-        const options = ['botcake', 'gateway'].filter(p => p === current || ((r.connected || []).includes(provLabel(r, p)) && (p !== 'gateway' || gatewayReady)));
-        if (options.length < 2) return el('div', {class: 'mt-1 text-xs text-slate-600', title: 'Replies via', text: 'Bot: ' + provLabel(r, current)});
-        const sel = el('select', {class: 'mt-1 block w-full max-w-[9rem] rounded border border-slate-300 px-1 py-0.5 text-xs', 'aria-label': 'Bot of ' + r.page, title: 'Replies via'},
-            [el('option', {value: 'botcake', text: 'Botcake'}), el('option', {value: 'gateway', text: 'Forbeast'})].filter(o => options.includes(o.value)));
-        // Ang gateway option ay ang pangalan ng aktibong gateway ng page (Forbeast o Incepxionbot).
-        for (const o of sel.options) if (o.value === 'gateway') o.textContent = provLabel(r, 'gateway');
+    // Ang mga address ng Forbeast gateway bilang pili: [value, label] = ['gateway:<key>', 'Bot N (<pangalan>)'], ayon sa
+    // GATEWAY_URL saka GATEWAY_URLS. Isa lang ang address: walang listahan (ang pili ay "Forbeast" gaya ng dati).
+    function viaRoutes() {
+        const keys = Object.keys(gatewayApps || {});
+        return keys.length < 2 ? [] : keys.map((k, i) => ['gateway:' + k, 'Bot ' + (i + 1) + ' (' + gatewayApps[k] + ')']);
+    }
+
+    // Ang "Replies via" ng page (kung saan dumadaan ang chat at sagot), iisang pili: Botcake, o isang address ng gateway
+    // (Bot N), na isinusulat nang sabay (chatbot.provider at chatbot.gateway_app). Ang mga kumpletong koneksyon lang
+    // (Connected), kasama ang kasalukuyan; isa lang: text, walang select. Ang gateway (Forbeast o Incepxionbot, ang aktibo
+    // ng page) ay kailangan ding naka-set up (GATEWAY_URL, INCEPXIONBOT_URL). Ang mga address ay sa Forbeast gateway lang.
+    function repliesViaSelect(r) {
+        const provider = r.provider || 'botcake';
+        const routes = (r.gateway || 'forbeast') === 'forbeast' && url.providerUrl ? viaRoutes() : [];
+        const route = routes.some(([v]) => v === 'gateway:' + r.gateway_app) ? r.gateway_app : 'forbeast';
+        const current = provider === 'gateway' && routes.length ? 'gateway:' + route : provider;
+        const gatewayOk = (r.connected || []).includes(provLabel(r, 'gateway')) && gatewayReady;
+        const all = [['botcake', 'Botcake'], ...(routes.length ? routes : [['gateway', provLabel(r, 'gateway')]])];
+        const options = all.filter(([v]) => v === current || (v === 'botcake' ? (r.connected || []).includes(provLabel(r, 'botcake')) : gatewayOk));
+        const labelOf = v => (all.find(o => o[0] === v) || [v, v])[1];
+        if (options.length < 2) return el('div', {class: 'mt-1 text-xs text-slate-600', title: 'Replies via', text: 'Bot: ' + labelOf(current)});
+        const sel = el('select', {class: 'mt-1 block w-full max-w-[9rem] rounded border border-slate-300 px-1 py-0.5 text-xs', 'aria-label': 'Replies via of ' + r.page, title: 'Replies via'},
+            options.map(([v, t]) => el('option', {value: v, text: t})));
         sel.value = current;
         sel.addEventListener('change', async () => {
             const want = sel.value;
-            if (!confirm('Switch ' + r.page + ' from ' + provLabel(r, current) + ' to ' + provLabel(r, want) + '?')) { sel.value = current; return; }
+            if (!confirm('Switch ' + r.page + ' from ' + labelOf(current) + ' to ' + labelOf(want) + '?')) { sel.value = current; return; }
+            const [wantProvider, wantApp] = want.split(':');
             sel.disabled = true;
             try {
-                const {ok, data} = await post(url.providerUrl, {page_name: r.page, provider: want});
-                if (ok) { r.provider = data.provider; r.auto_switched = null; errors.delete(r.page); } else errors.set(r.page, data.error || data.message || 'Not changed.');
+                const {ok, data} = await post(url.providerUrl, {page_name: r.page, provider: wantProvider, ...(wantApp ? {gateway_app: wantApp} : {})});
+                if (ok) { r.provider = data.provider; if (data.gateway_app) r.gateway_app = data.gateway_app; r.auto_switched = null; errors.delete(r.page); } else errors.set(r.page, data.error || data.message || 'Not changed.');
             } catch (e) { errors.set(r.page, 'No connection: not changed.'); }
             redraw(r.page);
         });
@@ -1466,28 +1489,6 @@
             try {
                 const {ok, data} = await post(url.gatewayUrl, {page_name: r.page, gateway: want});
                 if (ok) { r.gateway = data.gateway; r.auto_switched = null; errors.delete(r.page); } else errors.set(r.page, data.error || data.message || 'Not changed.');
-            } catch (e) { errors.set(r.page, 'No connection: not changed.'); }
-            redraw(r.page);
-        });
-        return sel;
-    }
-
-    // Aling address ng Forbeast gateway ang tinatawag para sa page (ang Meta app ng address na iyon): kapag higit sa isa
-    // ang naka-configure (GATEWAY_URLS) at Forbeast ang gateway ng page.
-    function gatewayAppSelect(r) {
-        const keys = Object.keys(gatewayApps || {});
-        if (keys.length < 2 || (r.gateway || 'forbeast') !== 'forbeast' || !url.gatewayAppUrl) return document.createTextNode('');
-        const current = keys.includes(r.gateway_app) ? r.gateway_app : 'forbeast';
-        const sel = el('select', {class: 'mt-1 block w-full max-w-[9rem] rounded border border-slate-300 px-1 py-0.5 text-xs', 'aria-label': 'Gateway address of ' + r.page, title: 'Gateway address (Meta app)'},
-            keys.map(k => el('option', {value: k, text: 'App: ' + gatewayApps[k]})));
-        sel.value = current;
-        sel.addEventListener('change', async () => {
-            const want = sel.value;
-            if (!confirm('Send the replies of ' + r.page + ' through the ' + gatewayApps[want] + ' address instead of ' + gatewayApps[current] + '?')) { sel.value = current; return; }
-            sel.disabled = true;
-            try {
-                const {ok, data} = await post(url.gatewayAppUrl, {page_name: r.page, gateway_app: want});
-                if (ok) { r.gateway_app = data.gateway_app; errors.delete(r.page); } else errors.set(r.page, data.error || data.message || 'Not changed.');
             } catch (e) { errors.set(r.page, 'No connection: not changed.'); }
             redraw(r.page);
         });

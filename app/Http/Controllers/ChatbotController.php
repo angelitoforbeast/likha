@@ -353,9 +353,23 @@ class ChatbotController extends Controller
         // Gateway: ang bawat page ay may gumaganang token sa aktibong gateway nito (forbeast, o incepxionbot).
         $missing = $provider === ChatbotProvider::GATEWAY ? array_filter($pages, fn ($p) => !app(ForbeastPageSetup::class)->on(Gateways::active($p))->ready($p)) : [];
         if ($missing) return response()->json(['error' => ForbeastPageSetup::NEEDS_TOKEN . ': ' . implode(', ', array_slice(array_values($missing), 0, 10))], 422);
-        $status = DB::transaction(fn () => array_map(fn ($page) => $this->settings->set($page, ChatbotFields::PROVIDER, 'provider', $provider, false, Auth::id())['status'], $pages));
+        // Ang iisang "Replies via" (Bot N): kasama ang address ng gateway (chatbot.gateway_app) sa parehong save. Ang
+        // Botcake ay hindi gumagalaw sa address.
+        $route = $provider === ChatbotProvider::GATEWAY && $request->filled('gateway_app') ? strtolower($this->str($request, 'gateway_app', 30)) : null;
+        if ($route !== null) {
+            $routes = Gateways::routes();
+            if (count($routes) < 2) return response()->json(['error' => 'Only one gateway address is set up.'], 422);
+            if (!array_key_exists($route, $routes)) {
+                return response()->json(['error' => 'Pick ' . implode(' or ', array_map(fn ($k) => Gateways::routeLabel($k), array_keys($routes))) . '.'], 422);
+            }
+        }
+        $status = DB::transaction(fn () => array_map(function ($page) use ($provider, $route) {
+            if ($route !== null) $this->settings->set($page, ChatbotFields::PROVIDER, Gateways::ROUTE_KEY, $route, false, Auth::id(), true);
 
-        return response()->json(['status' => reset($status), 'provider' => $provider, 'pages' => array_values($pages)]);
+            return $this->settings->set($page, ChatbotFields::PROVIDER, 'provider', $provider, false, Auth::id())['status'];
+        }, $pages));
+
+        return response()->json(['status' => reset($status), 'provider' => $provider, 'pages' => array_values($pages)] + ($route !== null ? ['gateway_app' => $route] : []));
     }
 
     /**
