@@ -38,16 +38,25 @@
     #cb-table td.cb-cell:hover .cb-edit, #cb-table td.cb-cell:focus-within .cb-edit, #cb-table .cb-edit:focus { opacity: 1; }
     @media (hover: none), (max-width: 639px) { #cb-table .cb-edit { opacity: 1; } }
     #cb-table thead th { position: sticky; top: 0; z-index: 20; }
+    /* Ang mga naka-freeze na column ay may tiyak na lapad (min = max), kaya hindi lumalapad sa mahabang pangalan o select
+       at hindi kumikitid: ang left ng bawat isa ay ang kabuuan ng lapad ng mga nauna, kaya hindi natatakpan ang kasunod. */
+    #cb-table { --cb-w1: 8rem; --cb-w2: 11rem; --cb-w3: 10rem; --cb-w4: 14rem; }
+    #cb-table .stick-1 { width: var(--cb-w1); min-width: var(--cb-w1); max-width: var(--cb-w1); }
+    #cb-table .stick-2 { width: var(--cb-w2); min-width: var(--cb-w2); max-width: var(--cb-w2); }
+    #cb-table .stick-3 { width: var(--cb-w3); min-width: var(--cb-w3); max-width: var(--cb-w3); }
+    #cb-table .stick-4 { width: var(--cb-w4); min-width: var(--cb-w4); max-width: var(--cb-w4); }
+    #cb-table .stick-1, #cb-table .stick-2, #cb-table .stick-3, #cb-table .stick-4 { box-sizing: border-box; overflow-wrap: anywhere; }
     #cb-table .stick-1 { position: sticky; left: 0; z-index: 10; }
     #cb-table thead .stick-1, #cb-table thead .stick-2, #cb-table thead .stick-3, #cb-table thead .stick-4 { z-index: 30; }
     @media (min-width: 640px) {
-        #cb-table .stick-2 { position: sticky; left: 12rem; z-index: 10; }
-        #cb-table .stick-3 { position: sticky; left: 18rem; z-index: 10; box-shadow: 1px 0 0 #e2e8f0; }
+        #cb-table { --cb-w1: 12rem; }
+        #cb-table .stick-2 { position: sticky; left: var(--cb-w1); z-index: 10; }
+        #cb-table .stick-3 { position: sticky; left: calc(var(--cb-w1) + var(--cb-w2)); z-index: 10; box-shadow: 1px 0 0 #e2e8f0; }
     }
     /* Desktop: ang Check ay naka-freeze din (maikling cell); ang buong listahan ay lumalabas sa hover o pindot. */
     @media (min-width: 1024px) {
         #cb-table .stick-3 { box-shadow: none; }
-        #cb-table .stick-4 { position: sticky; left: 28rem; z-index: 11; width: 14rem; max-width: 14rem; box-shadow: 1px 0 0 #e2e8f0; }
+        #cb-table .stick-4 { position: sticky; left: calc(var(--cb-w1) + var(--cb-w2) + var(--cb-w3)); z-index: 11; box-shadow: 1px 0 0 #e2e8f0; }
         #cb-table .cb-chk-pop { display: none; position: absolute; left: 0.5rem; top: 100%; z-index: 40; width: 20rem; max-width: calc(100vw - 2rem); }
         #cb-table td.stick-4:hover .cb-chk-pop, #cb-table .cb-chk.cb-chk-open .cb-chk-pop, #cb-table .cb-chk:focus-within .cb-chk-pop { display: block; }
         /* Ang bukas na cell ay nasa ibabaw ng mga sticky na cell ng susunod na row. */
@@ -59,6 +68,11 @@
        sa kaliwa at kasing-lapad ng kahon (--cbw), kaya nababasa kahit naka-scroll pakanan o sa phone. */
     #cb-table tr.ag-sub > td { background: #f8fafc; }
     #cb-table .ag-pin { position: sticky; left: 0; width: calc(var(--cbw, 100vw) - 2px); max-width: 64rem; box-sizing: border-box; }
+    /* Ang pagpapangkat: makapal na guhit sa pagitan ng mga page, manipis at mas maputla sa pagitan ng mga ad group ng
+       isang page, at ang mga sub-row ay nakausog na may guhit sa kaliwa, kaya kita kung kaninong page sila. */
+    #cb-table tbody tr:not(.ag-sub):not(:first-child) > td { border-top: 2px solid #94a3b8; }
+    #cb-table tr.ag-sub[data-ag-group] > td { border-top: 1px solid #cbd5e1; }
+    #cb-table tr.ag-sub > td.stick-1, #cb-table tr.ag-sub .ag-pin { padding-left: 1.75rem; box-shadow: inset 3px 0 0 #cbd5e1; }
 </style>
 @endpush
 
@@ -600,10 +614,10 @@
         if (key === headKey && table.tHead) return;
         headKey = key;
         const head = el('tr', {}, [
-            el('th', {class: 'stick-1 w-32 min-w-[8rem] sm:w-48 sm:min-w-[12rem] border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500'}, [el('input', {type: 'checkbox', id: 'sel-all', class: 'mr-1 align-middle', 'aria-label': 'Select every page in the list', title: 'Select all in the list'}), 'Page', filterButton('page')]),
-            el('th', {class: 'stick-2 min-w-[6rem] w-24 border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500'}, ['Active', filterButton('active'), ' Bot', filterButton('bot')]),
-            el('th', {class: 'stick-3 min-w-[10rem] w-40 border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500'}, ['Flow', filterButton('flow')]),
-            el('th', {class: 'stick-4 min-w-[12rem] border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500', title: 'Values the flow uses, image links, Seq pairs and unknown variables'}, ['Check', filterButton('check')]),
+            el('th', {class: 'stick-1 border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500'}, [el('input', {type: 'checkbox', id: 'sel-all', class: 'mr-1 align-middle', 'aria-label': 'Select every page in the list', title: 'Select all in the list'}), 'Page', filterButton('page')]),
+            el('th', {class: 'stick-2 border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500'}, ['Active', filterButton('active'), ' Bot', filterButton('bot')]),
+            el('th', {class: 'stick-3 border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500'}, ['Flow', filterButton('flow')]),
+            el('th', {class: 'stick-4 border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500', title: 'Values the flow uses, image links, Seq pairs and unknown variables'}, ['Check', filterButton('check')]),
             el('th', {class: 'min-w-[7rem] border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500', title: 'Bots that are fully connected'}, ['Connected', filterButton('connected')]),
             el('th', {class: 'min-w-[5rem] border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500', text: 'Chats today'}),
             el('th', {class: 'min-w-[8rem] border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500', text: 'Last chat'}),
