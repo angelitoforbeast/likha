@@ -135,7 +135,7 @@ class StockWarmTest extends ItemTestCase
     public function test_stock_warm_is_scheduled_every_10_minutes_and_does_nothing_without_nexus(): void
     {
         Artisan::call('schedule:list');
-        $event = collect(app(Schedule::class)->events())->first(fn ($e) => str_contains((string) $e->command, 'stock:warm'));
+        $event = collect(app(Schedule::class)->events())->first(fn ($e) => str_contains((string) $e->command, 'stock:warm') && !str_contains((string) $e->command, '--closed-days'));
 
         $this->assertNotNull($event);
         $this->assertSame('5-59/10 * * * *', $event->expression, 'kada 10 minuto mula :05, wala sa :10 ng hourly sync');
@@ -146,5 +146,18 @@ class StockWarmTest extends ItemTestCase
         $this->assertSame(0, Artisan::call('stock:warm'));
         $this->assertStringContainsString('Nexus not configured', Artisan::output());
         $this->assertSame([], Cache::get('item_stock:stockin:v2:localhost:20261103091000:2026-11-03') ?? []);
+    }
+
+    public function test_the_closed_day_refresh_has_its_own_daily_schedule_at_0255_separate_from_the_nexus_pass(): void
+    {
+        $events = collect(app(Schedule::class)->events());
+        $nightly = $events->first(fn ($e) => str_contains((string) $e->command, 'stock:warm --closed-days=7'));
+
+        $this->assertNotNull($nightly);
+        $this->assertSame('55 2 * * *', $nightly->expression);
+        $this->assertSame('Asia/Manila', $nightly->timezone);
+        $this->assertTrue($nightly->withoutOverlapping);
+        $pass = $events->first(fn ($e) => str_contains((string) $e->command, 'nexus:sync-stock --days=7'));
+        $this->assertSame('40 2 * * *', $pass->expression, 'ang Nexus daily pass ay hindi nagbago');
     }
 }

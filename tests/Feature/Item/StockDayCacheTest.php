@@ -11,7 +11,8 @@ use Illuminate\Support\Facades\Http;
 
 /**
  * Shipped at returned kada araw: ang saradong araw (bago ang kahapon, Manila) ay naka-cache nang 26 oras kada araw;
- * kahapon at ngayon lang ang live. Gabi-gabi (ang daily pass) ay kinukuwenta ulit ang huling 7 saradong araw.
+ * kahapon at ngayon lang ang live. Gabi-gabi (stock:warm --closed-days=7, 02:55) ay kinukuwenta ulit ang huling 7
+ * saradong araw, hiwalay sa Nexus daily pass.
  */
 class StockDayCacheTest extends ItemTestCase
 {
@@ -82,20 +83,37 @@ class StockDayCacheTest extends ItemTestCase
         $this->assertSame(3, $it['shipped'], 'pagkalipas ng 26 oras ang saradong araw ay kinuwenta ulit');
     }
 
-    public function test_the_nightly_daily_pass_refreshes_the_last_7_closed_days_and_older_days_wait_for_their_ttl(): void
+    public function test_the_nightly_closed_day_warm_refreshes_the_last_7_closed_days_even_when_nexus_fails(): void
     {
         $this->page();
         $this->ship('2026-10-30 10:00:00');                        // nasa huling 7 saradong araw (10-26..11-01)
         $this->ship('2026-10-15 10:00:00');                        // mas luma
+        Http::fake(['nexus.test/*' => fn (Request $r) => Http::response(['message' => 'down'], 500)]);
+
+        Carbon::setTestNow(Carbon::parse('2026-11-03 10:20:00', 'Asia/Manila'));
+        $this->assertSame(1, Artisan::call('nexus:sync-stock', ['--days' => '7']), 'bumagsak ang Nexus daily pass');
+        $this->assertSame(0, Artisan::call('stock:warm', ['--closed-days' => '7']));
+
+        [$it, $q] = $this->page();
+        $this->assertSame(2, $it['shipped'], 'ang 10-30 ay nakuha ng nightly refresh kahit bumagsak ang Nexus; ang 10-15 ay hindi pa');
+        $this->assertSame([], array_values(array_filter($q, fn ($e) => str_contains($e[0], 'from_jnts') && !str_contains($e[0], 'left join'))),
+            'naipainit: walang stock query sa page');
+    }
+
+    public function test_the_nexus_daily_pass_no_longer_refreshes_closed_days_but_still_warms_after_success(): void
+    {
+        $this->page();
+        $this->ship('2026-10-30 10:00:00');
         Http::fake(['nexus.test/*' => fn (Request $r) => Http::response(['as_of' => '2026-11-03T10:20:00+08:00', 'items' => []], 200)]);
 
         Carbon::setTestNow(Carbon::parse('2026-11-03 10:20:00', 'Asia/Manila'));
         $this->assertSame(0, Artisan::call('nexus:sync-stock', ['--days' => '7']));
+        $this->assertStringContainsString('Warmed the /item stock inputs', Artisan::output());
 
         [$it, $q] = $this->page();
-        $this->assertSame(2, $it['shipped'], 'ang 10-30 ay nakuha ng nightly refresh; ang 10-15 ay hindi pa');
+        $this->assertSame(1, $it['shipped'], 'ang 10-30 ay galing pa sa cache: ang closed-day refresh ay nasa sariling schedule');
         $this->assertSame([], array_values(array_filter($q, fn ($e) => str_contains($e[0], 'from_jnts') && !str_contains($e[0], 'left join'))),
-            'naipainit ng sync: walang stock query sa page');
+            'naipainit pa rin ng sync');
     }
 
     public function test_a_regular_warm_only_runs_the_live_queries_once_the_closed_days_are_cached(): void

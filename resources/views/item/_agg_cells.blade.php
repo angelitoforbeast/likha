@@ -235,7 +235,7 @@
   <span :title="ilNoStock(row.item_name) ? ilNoStockTip(row.item_name) : stockTip('ilang araw pa tatagal ang stock + paparating, bawas ang HOLD. Pula: mauubos bago dumating ang order. Dilaw: malapit na. Berde: ok pa. Abo: walang benta, o mas mababa sa 0.5 kada araw.', stockFor(row.item_name))">
     <span x-show="stockPending()" style="color:#94a3b8;">…</span>
     <span x-show="!stockPending()">
-      <span :class="ilNoStock(row.item_name) ? 'il-muted' : ''" :style="'font-weight:700;color:' + doiColour(stockSet(row.item_name))" x-text="doiText(stockSet(row.item_name))"></span>
+      <span :class="ilNoStock(row.item_name) ? 'il-muted' : ''" :style="'font-weight:700;color:' + (ilNoStock(row.item_name) ? '#94a3b8' : doiColour(stockSet(row.item_name)))" x-text="ilNoStock(row.item_name) ? '—' : doiText(stockSet(row.item_name))"></span>
       <template x-if="stockFor(row.item_name)">
         @if(!empty($canSupplierWork))
         <div @if(!empty($rdtOneLine))class="spl-lead" @endif@click.stop>

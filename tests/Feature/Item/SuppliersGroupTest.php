@@ -25,10 +25,10 @@ class SuppliersGroupTest extends ItemTestCase
         'default.ceo_as_marketing' => 'b99fb7c2e8c63ee8d5053c3f6190d307be2f5bd7',
         'default.marketing'        => '424010526511e52673ab05752274afbfb15d2e95',
         'default.marketing_oic'    => '27b90478bc6bf9bf343bfbe7c3770a74ed04a6d8', // muling na-pin: may supplier work na ang Marketing - OIC
-        'old.ceo'                  => 'efad9d63b59988c0e20ccf99f7f7e56a1dba95b8', // ikinukumpara pagkatapos tanggalin ang link sa toolbar at ang salita sa address
-        'old.ceo_as_marketing'     => '3604eace843c584ac371ecc38d7fbf17f5c172da',
-        'old.marketing'            => '716d1c8bf4af478cb283e2814daa84b13361f889',
-        'old.marketing_oic'        => '99e71a0cc6043e99df22148395d180f90f9129be', // muling na-pin: table na may suppliers para sa Marketing - OIC
+        'old.ceo'                  => '7b1340d34c9b9130990f325eb4066ddd0d193e66', // ikinukumpara pagkatapos tanggalin ang link sa toolbar at ang salita sa address
+        'old.ceo_as_marketing'     => '5d13375c65536c9dd467230be2d41367fb303d28',
+        'old.marketing'            => '156f3254c0191e32b9011b3818f7de2303693008',
+        'old.marketing_oic'        => '770c745d40f638aef8dab3d8baada1e641a8a69f', // muling na-pin: table na may suppliers para sa Marketing - OIC
     ];
 
     protected function setUp(): void

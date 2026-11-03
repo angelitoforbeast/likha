@@ -8,7 +8,8 @@ use Illuminate\Console\Command;
 
 /**
  * Pinapainit ang stock inputs ng /item (Nexus mode) para halos hindi tamaan ng page ang cold na kuwenta: kada 10 minuto
- * (bago lumipas ang 15-minutong TTL) at pagkatapos ng bawat matagumpay na nexus:sync-stock. Walang Nexus = walang gawa.
+ * (bago lumipas ang 15-minutong TTL) at pagkatapos ng bawat matagumpay na nexus:sync-stock. Araw-araw 02:55 na may
+ * --closed-days=7: ang huling 7 saradong araw ay kinukuwenta ulit, kahit bumagsak ang Nexus. Walang Nexus = walang gawa.
  */
 class StockWarm extends Command
 {

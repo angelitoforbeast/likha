@@ -296,3 +296,10 @@ Schedule::command('stock:warm')
     ->cron('5-59/10 * * * *')   // :05, :15, … — wala sa :10 ng hourly sync
     ->withoutOverlapping(10)
     ->runInBackground();
+// Araw-araw 02:55 Manila: kinukuwenta ulit ang huling 7 saradong araw ng shipped at returned (J&T). Hiwalay sa Nexus
+// daily pass ng 02:40, para hindi ito malaktawan kapag bumagsak ang Nexus.
+Schedule::command('stock:warm --closed-days=7')
+    ->timezone('Asia/Manila')
+    ->dailyAt('02:55')
+    ->withoutOverlapping(30)
+    ->runInBackground();

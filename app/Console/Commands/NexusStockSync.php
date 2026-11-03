@@ -41,11 +41,10 @@ class NexusStockSync extends Command
 
         $daysN = $days !== null && $days !== '' ? (int) $days : null;
 
-        // Ang daily pass (--days) ay nire-refresh din ang huling N saradong araw ng /item stock cache.
-        return $this->report($sync->run(is_string($from) && $from !== '' ? $from : null, $daysN), $daysN ?? 0);
+        return $this->report($sync->run(is_string($from) && $from !== '' ? $from : null, $daysN));
     }
 
-    private function report(array $res, int $refreshClosedDays = 0): int
+    private function report(array $res): int
     {
         foreach ($res['lines'] as $line) {
             $res['status'] === 'failed' || $res['status'] === 'bad_from' ? $this->warn($line) : $this->line($line);
@@ -53,7 +52,7 @@ class NexusStockSync extends Command
         // Matagumpay na takbo (bago ang huling sync, o bagong history / tinanggap na araw): painitin agad ang /item.
         // Ang pagbagsak ng warm ay hindi pagbagsak ng sync (ang page ang kukuwenta).
         if ($res['status'] === 'ok' && StockInSync::configured()) {
-            StockWarm::report($this, app(\App\Services\ItemStockService::class)->warmInputs($refreshClosedDays));
+            StockWarm::report($this, app(\App\Services\ItemStockService::class)->warmInputs());
         }
 
         return in_array($res['status'], ['failed', 'bad_from', 'no_table'], true) ? self::FAILURE : self::SUCCESS;

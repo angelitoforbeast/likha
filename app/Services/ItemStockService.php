@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Services\Nexus\StockInSync;
 use App\Services\Stock\ItemNameBridge;
+use App\Services\Stock\JntReturnedSource;
 use App\Services\Stock\ReturnedResult;
 use App\Services\Stock\ReturnedSource;
 use App\Services\Stock\ReturnedSources;
@@ -616,7 +617,9 @@ class ItemStockService
                     foreach ($byDay as $d => $rows) { $put[$sKey($d)] = $rows; $hits[$sKey($d)] = $rows; }
                 }
                 if ($missR) {
-                    $res = $source->returned(min($missR), max($missR) . ' 23:59:59');
+                    $res = $source instanceof JntReturnedSource
+                        ? $source->returnedClosed(min($missR), max($missR) . ' 23:59:59')
+                        : $source->returned(min($missR), max($missR) . ' 23:59:59');
                     if (!$res->available) {
                         $unavailable = true;                     // hindi itinatabi; ang shipped ay tuloy pa rin
                     } else {

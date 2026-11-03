@@ -189,6 +189,17 @@ class ReturnedQueryPerfTest extends TestCase
         $src = app(JntReturnedSource::class);
         $out['returned query (per item and day, from 09-13) median ms (5 runs)'] = $this->median(fn () => $src->rows($lower, $until));
         $out['returned pieces total'] = array_sum($src->returned($lower, $until)->pieces);
+        // Saradong range na may FORCE INDEX (signingtime, status): parehong resulta, ibang plan.
+        $closedUntil = '2026-11-01 23:59:59';
+        $out['index check says'] = $src->useIndexHint() ? 'present' : 'missing';
+        $out['returned closed range 09-13..11-01, no hint, median ms (5 runs)'] = $this->median(fn () => $src->rows($lower, $closedUntil));
+        $out['returned closed range 09-13..11-01, FORCE INDEX, median ms (5 runs)'] = $this->median(fn () => $src->rows($lower, $closedUntil, true));
+        $sortRows = function (array $r) { sort($r); return $r; };
+        $plainRows = $sortRows($src->rows($lower, $closedUntil));
+        $out['closed range rows (item x day)'] = count($plainRows);
+        $out['FORCE INDEX rows identical'] = $plainRows === $sortRows($src->rows($lower, $closedUntil, true));
+        $this->assertTrue($out['FORCE INDEX rows identical']);
+        $this->assertSame('present', $out['index check says']);
         $out['shipped query (per item and first-submission day, from 09-13) median ms (5 runs)'] = $this->median(
             fn () => DB::select(ItemStockService::shippedSql(), ItemStockService::shippedBindings($lower))
         );
@@ -238,6 +249,7 @@ class ReturnedQueryPerfTest extends TestCase
         $fmt = fn ($r) => sprintf('%s %s type=%s key=%s rows=%s filtered=%s %s',
             $r->id, $r->table, $r->type, $r->key ?? '-', $r->rows, $r->filtered, $r->Extra ?? '');
         $out['explain returned'] = array_map($fmt, DB::select('EXPLAIN ' . JntReturnedSource::sql(), JntReturnedSource::bindings($lower, $until)));
+        $out['explain returned closed, FORCE INDEX'] = array_map($fmt, DB::select('EXPLAIN ' . JntReturnedSource::sql(true), JntReturnedSource::bindings($lower, $closedUntil)));
         $out['explain shipped']  = array_map($fmt, DB::select('EXPLAIN ' . ItemStockService::shippedSql(), ItemStockService::shippedBindings($lower)));
         $c = \App\Services\HoldService::CANCELLED_STATUSES;
         $out['explain flags']    = array_map($fmt, DB::select('EXPLAIN ' . JntReturnedSource::flagsSql(),

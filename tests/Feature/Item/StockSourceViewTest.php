@@ -151,6 +151,7 @@ class StockSourceViewTest extends ItemTestCase
         $this->assertStringContainsString(':title="ilNoStock(row.item_name) ? ilNoStockTip(row.item_name) :', $stock);
         $this->assertStringContainsString(":class=\"ilNoStock(row.item_name) ? 'il-muted' : ''\"", $doi, 'DOI naka-mute');
         $this->assertStringContainsString(':title="ilNoStock(row.item_name) ? ilNoStockTip(row.item_name) :', $doi);
+        $this->assertStringContainsString("x-text=\"ilNoStock(row.item_name) ? '—' : doiText(stockSet(row.item_name))\"", $doi, 'gitling, hindi "kulang N araw"');
         $this->assertStringContainsString(":class=\"ilNoStock(row.item_name) ? 'il-muted' : ''\"", $qty, 'qty at order-by naka-mute');
         $this->assertStringContainsString(":title=\"ilNoStock(row.item_name) ? ilNoStockTip(row.item_name) : 'Huling araw", $qty, 'order-by tooltip');
         $this->assertStringContainsString("x-text=\"ilNoStock(row.item_name) + ': stock 0 ang gamit'\"", $qty);
