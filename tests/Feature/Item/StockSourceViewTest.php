@@ -91,13 +91,41 @@ class StockSourceViewTest extends ItemTestCase
 
         $this->assertStringContainsString('x-text="stockBreakdown(G.item_name)"', $html);
         $this->assertStringContainsString('x-text="nexusCrossText(G.item_name)"', $html);
-        foreach (["'stock-in '", "' + returned '", "' − shipped '", "'Nexus on shelf '", "' (as of '", "', difference '",
-                  "'Nexus also counts the stock from before the start, so a difference is expected'", "' (old)'",
+        foreach (["'from ' + S.stock_start + ': stock-in '", "' + returned '", "' − shipped '", "' (as of '", "' (old)'",
                   "' (an older Nexus name left out)'", 'S.nexus_remaining_as_of', 'S.nexus_remaining_stale'] as $text) {
             $this->assertStringContainsString($text, $html, $text);
         }
         // Malalaking numero: lahat ng numero ay dumadaan sa num() (toLocaleString).
         $this->assertMatchesRegularExpression('/stockBreakdown\(name\)\{[^}]*this\.num\(/s', $html);
+    }
+
+    public function test_S_222_6_1_the_nexus_count_is_labelled_boxes_not_yet_released_with_no_difference(): void
+    {
+        $html = $this->render(true);
+
+        $this->assertStringContainsString("'Nexus boxes not yet released: '", $html);
+        $this->assertStringContainsString("'Whole lots (boxes) still on the shelf in Nexus, not yet released to the floor: not all pieces on hand'", $html);
+        $this->assertStringContainsString(':title="nexusCrossTip()" x-text="nexusCrossText(G.item_name)"', $html);
+        foreach (['Nexus on shelf', ', difference ', 'nexus_diff', 'so a difference is expected'] as $gone) {
+            $this->assertStringNotContainsString($gone, $html, $gone);
+        }
+    }
+
+    public function test_S_222_3_not_in_nexus_shows_instead_of_a_number_and_the_quantity_is_muted_with_its_tooltip(): void
+    {
+        foreach ([true, false] as $ceo) {
+            $html = $this->render($ceo);
+
+            $this->assertStringContainsString("(ilNotInNexus(G.item_name) ? 'Not in Nexus' :", $html, 'Stock / Incoming');
+            $this->assertStringContainsString("st('nonexus', 4, '⚪ Not in Nexus', 'grey', this.ilNotInNexusTip())", $html, 'Next step');
+            $qty = $this->between($html, "<span class=\"il-m-label\">Qty to order</span>", '</td>');
+            $this->assertStringContainsString('Not in Nexus: counted with stock 0', $qty);
+            $this->assertMatchesRegularExpression('/:class="ilNotInNexus\(G\.item_name\) \? \'il-muted\' : \'\'"\s+:title="ilNotInNexus\(G\.item_name\) \? ilNotInNexusTip\(\)/', $html);
+            $this->assertMatchesRegularExpression('/\.il-muted\{[^}]*opacity:/', $html);
+            $list = $this->between($html, '<details class="il-unmatched il-not-in-nexus"', '</details>');
+            $this->assertStringContainsString("x-text=\"num(stock.meta.nexus.not_in_nexus_count) + ' items Not in Nexus'\"", $list);
+            $this->assertStringContainsString('<li x-text="name"></li>', $list);
+        }
     }
 
     public function test_S_220_6_9_the_new_lines_wrap_at_phone_width(): void
