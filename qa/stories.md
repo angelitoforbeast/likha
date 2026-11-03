@@ -4273,3 +4273,18 @@ Tests (`tests/Feature/Item/`): `StockFromFirstStockInTest`, `NexusStockHistoryTe
 | S-224.3.1 | happy | The Inbox thread shows "via Incepxion" for a reply whose recorded address is incepxion; the default address, Botcake and old rows keep today's label and data (no `via_label`) | `test_S_224_3_1_the_inbox_says_via_incepxion_only_for_a_reply_that_went_there` | pass |
 | S-224.3.2 | happy | A manual Inbox reply through incepxion comes back labelled "Incepxion" | `test_S_224_3_2_a_manual_inbox_reply_through_incepxion_comes_back_labelled` | pass |
 | S-224.3.3 | happy | The Replies screen (list and detail) shows "Incepxion" for that reply; the via filter is unchanged | `test_S_224_3_3_the_replies_screen_labels_the_address_too` | pass |
+
+## Spec 226: the Incepxion app's echoes are the bot's own replies
+
+### S-226.1 An echo from a gateway address's app is the bot's (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-226.1.1 | happy | Given `GATEWAY_APP_IDS="incepxion=2067128400607287"`, an echo from that app folds into the matching reply (sender "Bot (Incepxion)", stored `sender=forbeast`, `route=incepxion`); an echo from 1115162827653315 still folds as "Bot (Forbeast)"; no "Other app" bubble | `test_S_226_1_1_an_incepxion_echo_folds_into_the_bot_reply_and_a_forbeast_echo_is_unchanged` | pass |
+| S-226.1.2 | negative | Given `GATEWAY_APP_IDS` unset, the same echo is today's: stored `other`, its own "Other app" bubble | `test_S_226_1_2_without_gateway_app_ids_the_same_echo_is_todays_other_app` | pass |
+| S-226.1.3 | edge | An unmatched echo from that app (typed in a tool) shows as "Bot (Incepxion)"; so does one stored before the setting (read from its app id), and `ChatEchoes::latest` says forbeast / "Bot (Incepxion)" | `test_S_226_1_3_an_unmatched_echo_from_that_app_is_bot_incepxion_and_so_is_one_stored_before_the_setting` | pass |
+| S-226.1.4 | edge | `GATEWAY_APP_IDS` reads like `GATEWAY_URLS`: space or comma separated, `forbeast=` and malformed entries skipped, unset = none | `test_S_226_1_4_gateway_app_ids_reads_like_gateway_urls` | pass |
+
+### S-226.2 Bot Health counts these echoes as the bot's (P2)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-226.2.1 | happy | A Forbeast-app echo and an Incepxion-app echo to one customer within 60 s are not a double; an Incepxion-app echo and a Botcake echo are, labelled "Bot (Incepxion) + Botcake" | `test_S_226_2_1_bot_health_counts_an_incepxion_echo_as_the_bot_not_another_app` | pass |

@@ -61,13 +61,35 @@ class ChatEchoes
     {
         $ixb = Gateways::config(Gateways::INCEPXIONBOT)['app_id'];
         if ($ixb !== '' && (string) $appId === $ixb) return Gateways::INCEPXIONBOT;
+        if (self::route($appId) !== null) return Gateways::FORBEAST;
 
         return self::APPS[(string) $appId] ?? 'other';
     }
 
-    public static function label(?string $sender): string
+    /** Ang address ng forbeast gateway na ang Meta app ay $appId (Gateways::appIds), o null. */
+    public static function route(?string $appId): ?string
     {
+        return Gateways::appIds()[(string) $appId] ?? null;
+    }
+
+    /** Ang label; ang padala ng forbeast gateway sa ibang address ay ang pangalan ng address ("Bot (Incepxion)"). */
+    public static function label(?string $sender, ?string $route = null): string
+    {
+        if ($sender === Gateways::FORBEAST && $route !== null && $route !== Gateways::FORBEAST) return 'Bot (' . Gateways::routeLabel($route) . ')';
+
         return self::LABELS[(string) $sender] ?? self::LABELS['other'];
+    }
+
+    /**
+     * Ang nagpadala at label ng naimbak na echo (ang detail nito). Ang app ng isang address ng forbeast gateway ay ang bot
+     * kahit naimbak ito bago pa ang GATEWAY_APP_IDS (sender other). @return array{0: string, 1: string}
+     */
+    public static function who(array $detail): array
+    {
+        $route = self::route(isset($detail['app_id']) ? (string) $detail['app_id'] : null);
+        $sender = $route !== null ? Gateways::FORBEAST : (string) ($detail['sender'] ?? 'other');
+
+        return [$sender, self::label($sender, $route)];
     }
 
     /** Ang maikling hash ng text (walang pagkakaiba sa laki ng titik at espasyo), para sa paghahambing sa sagot ng Likha. */
@@ -97,9 +119,11 @@ class ChatEchoes
             $text = (string) $e['text'];
             if ($text === '' && ($e['attachments'][0]['type'] ?? null)) $text = '[' . ucfirst((string) $e['attachments'][0]['type']) . ']';
             $appId = $e['app_id'] ?? null;
+            // route: ang address ng forbeast gateway kapag ang app ay isa sa mga address nito.
+            $route = self::route($appId);
             DB::table('chatbot_events')->insert(['page_id' => (int) $pageId, 'psid' => (int) $psid, 'chat_id' => null, 'flow_id' => null, 'node_id' => null,
-                'type' => self::TYPE, 'detail' => json_encode(['mid' => $mid, 'app_id' => $appId, 'sender' => self::sender($appId), 'hash' => self::hash($text),
-                    'text' => mb_substr($text, 0, self::TEXT)], JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE),
+                'type' => self::TYPE, 'detail' => json_encode(['mid' => $mid, 'app_id' => $appId, 'sender' => self::sender($appId)] + ($route !== null ? ['route' => $route] : [])
+                    + ['hash' => self::hash($text), 'text' => mb_substr($text, 0, self::TEXT)], JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE),
                 'created_at' => self::at($e['timestamp'] ?? null)->format('Y-m-d H:i:s')]);
         } catch (\Throwable $ex) {
             Cache::forget($seen); // hindi naimbak: ang ulit ay tatanggapin
@@ -129,9 +153,9 @@ class ChatEchoes
         $row = DB::table('chatbot_events')->where('page_id', (int) $pageId)->where('psid', (int) $psid)->where('type', self::TYPE)
             ->orderByDesc('created_at')->orderByDesc('id')->first(['detail', 'created_at']);
         if ($row === null) return null;
-        $sender = (string) (json_decode((string) $row->detail, true)['sender'] ?? 'other');
+        [$sender, $label] = self::who(json_decode((string) $row->detail, true) ?: []);
 
-        return ['sender' => $sender, 'label' => self::label($sender), 'at' => (string) $row->created_at];
+        return ['sender' => $sender, 'label' => $label, 'at' => (string) $row->created_at];
     }
 
     /**
@@ -163,8 +187,16 @@ class ChatEchoes
         $echoes = DB::table('chatbot_events')->where('type', self::TYPE)->whereIn('page_id', array_map('intval', $pages))
             ->where('created_at', '>=', $since->copy()->subSeconds(self::EARLY_SECONDS)->format('Y-m-d H:i:s'))->orderBy('created_at')->orderBy('id')
             ->get(['page_id', 'psid', 'detail', 'created_at'])
-            ->map(fn ($r) => ['page' => (string) $r->page_id, 'psid' => (string) $r->psid, 'at' => Carbon::parse($r->created_at)->getTimestamp(),
-                'app' => json_decode((string) $r->detail, true)['app_id'] ?? null, 'sender' => json_decode((string) $r->detail, true)['sender'] ?? 'other'])
+            ->map(function ($r) {
+                $d = json_decode((string) $r->detail, true) ?: [];
+                [$sender, $label] = self::who($d);
+                // app: ang sumagot para sa doble, ang kilalang nagpadala (ang mga address ng forbeast gateway ay iisang bot),
+                // o ang app_id kapag hindi kilala; null kapag walang app_id.
+                $app = isset($d['app_id']) ? ($sender === 'other' ? (string) $d['app_id'] : $sender) : null;
+
+                return ['page' => (string) $r->page_id, 'psid' => (string) $r->psid, 'at' => Carbon::parse($r->created_at)->getTimestamp(),
+                    'app' => $app, 'sender' => $sender, 'label' => $label];
+            })
             ->groupBy(fn ($x) => $x['page'] . '|' . $x['psid']);
 
         $out = [];
@@ -217,7 +249,7 @@ class ChatEchoes
             for ($i = 0; $i + 1 < $list->count(); $i++) {
                 [$a, $b] = [$list[$i], $list[$i + 1]];
                 if ($a['app'] === null || $b['app'] === null || $a['app'] === $b['app'] || $b['at'] - $a['at'] > $gap) continue;
-                $pairs[$a['page']][$a['psid']][] = ['at' => $at($b['at']), 'senders' => self::label($a['sender']) . ' + ' . self::label($b['sender']),
+                $pairs[$a['page']][$a['psid']][] = ['at' => $at($b['at']), 'senders' => $a['label'] . ' + ' . $b['label'],
                     'inbox' => $inbox($a['page'], $a['psid'])];
                 $i++; // ang pangalawa ay hindi na kapares ng susunod
             }

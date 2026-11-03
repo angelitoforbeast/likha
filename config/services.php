@@ -262,6 +262,9 @@ return [
         // Ang iba pang address ng parehong gateway (parehong key at token ng page, ibang Meta app), pinipili kada page
         // (chatbot.gateway_app): "key=url key2=url2". Walang laman = ang url lang (forbeast), gaya ng dati.
         'urls' => (string) env('GATEWAY_URLS', ''),
+        // Ang Meta app ng mga address na iyon (ChatEchoes: ang echo nito ay sagot ng Likha bot, hindi "Other app"):
+        // "key=app_id key2=app_id2", parehong key ng GATEWAY_URLS. Walang laman = gaya ng dati.
+        'app_ids' => (string) env('GATEWAY_APP_IDS', ''),
         // IPv4 lang sa mga tawag sa gateway (CURLOPT_IPRESOLVE), para masubok kung IPv6 lang ang nawawalang sagot.
         'force_ipv4' => (bool) env('GATEWAY_FORCE_IPV4', false),
         'key' => env('GATEWAY_KEY'),
