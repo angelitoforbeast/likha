@@ -327,7 +327,7 @@ class ForbeastWatch
     {
         $gw = $gateway ?? Gateways::active($page);
         $own = $gw === Gateways::active($page);
-        $url = Gateways::url($gw);
+        $url = Gateways::url($gw) !== '' ? Gateways::pageUrl($gw, $page) : ''; // ang address ng page
         $pageId = trim((string) $this->settings->get($page, 'botcake', 'page_id'));
         // Sariling token lang ng page: ang system key (GATEWAY_KEY, fbs_) ay 404 sa /v1/pages/{id}, kaya hindi ito sukatan.
         $key = app(ForbeastPageSetup::class)->on($gw)->token($page);
@@ -335,7 +335,7 @@ class ForbeastWatch
         $l = Gateways::label($gw);
 
         try {
-            $res = Http::withToken($key)->acceptJson()->connectTimeout(3)->timeout(5)->get($url . '/v1/pages/' . rawurlencode($pageId));
+            $res = Http::withToken($key)->acceptJson()->withOptions(Gateways::httpOptions())->connectTimeout(3)->timeout(5)->get($url . '/v1/pages/' . rawurlencode($pageId));
         } catch (ConnectionException) {
             $res = null;
         } catch (Throwable $e) {

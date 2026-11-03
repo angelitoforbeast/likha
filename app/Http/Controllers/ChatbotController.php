@@ -157,6 +157,8 @@ class ChatbotController extends Controller
                 'auto_switched' => ForbeastWatch::note($autoSwitch, $providerRow, $provider, $gatewayRow),
                 // Aling gateway ang sumasagot kapag gateway ang provider, at ang mapipili (naka-set up at gumagana ang token ng page).
                 'gateway' => Gateways::active($page), 'gateways' => Gateways::readyFor($page),
+                // Ang address ng forbeast gateway ng page (chatbot.gateway_app).
+                'gateway_app' => Gateways::route($page),
                 'flow_text' => $linked === null && $text !== null && $text !== '' ? $text : null,
                 'flow_code' => $linked !== null ? ($flowCodes[$flowId] ?? null) : null,
                 // Ang mga value na huling isinulat mula sa Forbeast (ang "via Forbeast" ng cell).
@@ -186,6 +188,8 @@ class ChatbotController extends Controller
 
         return response()->json(['columns' => $columns, 'rows' => $rows, 'flows' => $this->flowNames(), 'gateway_ready' => ChatbotProvider::gatewayReady(),
             'gateway_labels' => Gateways::LABELS,
+            // Ang mga address ng forbeast gateway na mapipili (key => pangalan); walang laman kapag isa lang.
+            'gateway_apps' => count($routes = Gateways::routes()) > 1 ? array_combine(array_keys($routes), array_map(fn ($k) => Gateways::routeLabel($k), array_keys($routes))) : [],
             'bots' => \App\Services\Chatbot\ChatbotConnections::bots(), 'ai_site' => $ai->site()]);
     }
 
@@ -378,6 +382,33 @@ class ChatbotController extends Controller
         $status = DB::transaction(fn () => array_map(fn ($page) => $this->settings->set($page, ChatbotFields::PROVIDER, Gateways::KEY, $gateway, false, Auth::id(), true)['status'], $pages));
 
         return response()->json(['status' => reset($status), 'gateway' => $gateway, 'pages' => array_values($pages)]);
+    }
+
+    /**
+     * Aling address ng forbeast gateway ang tinatawag para sa page (chatbot.gateway_app): isa sa GATEWAY_URL at GATEWAY_URLS,
+     * kapag higit sa isa ang naka-configure. Lahat o wala, may history (ang user).
+     */
+    public function gatewayApp(Request $request)
+    {
+        $this->checkAccess();
+        $names = $request->input('page_names');
+        $names = is_array($names) ? array_values($names) : [$request->input('page_name')];
+        $route = strtolower($this->str($request, 'gateway_app', 30));
+        if (count($names) < 1 || count($names) > self::MAX_BULK_PAGES) return response()->json(['error' => 'Pick 1 to ' . self::MAX_BULK_PAGES . ' pages.'], 422);
+        $pages = [];
+        foreach ($names as $name) {
+            $page = is_scalar($name) ? $this->listedPage(mb_substr(trim((string) $name), 0, 255)) : null;
+            if ($page === null) return response()->json(['error' => 'This page is not on the chatbot list.'], 422);
+            $pages[$page] = $page;
+        }
+        $routes = Gateways::routes();
+        if (count($routes) < 2) return response()->json(['error' => 'Only one gateway address is set up.'], 422);
+        if (!array_key_exists($route, $routes)) {
+            return response()->json(['error' => 'Pick ' . implode(' or ', array_map(fn ($k) => Gateways::routeLabel($k), array_keys($routes))) . '.'], 422);
+        }
+        $status = DB::transaction(fn () => array_map(fn ($page) => $this->settings->set($page, ChatbotFields::PROVIDER, Gateways::ROUTE_KEY, $route, false, Auth::id(), true)['status'], $pages));
+
+        return response()->json(['status' => reset($status), 'gateway_app' => $route, 'pages' => array_values($pages)]);
     }
 
     /**

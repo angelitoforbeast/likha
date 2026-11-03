@@ -4200,3 +4200,47 @@ Tests (`tests/Feature/Item/`): `StockFromFirstStockInTest`, `NexusStockHistoryTe
 | S-222.10.9 | negative | The nightly closed-day refresh is its own entry, `stock:warm --closed-days=7` daily at 02:55 Manila (withoutOverlapping); a failed Nexus daily pass does not skip it, and `nexus:sync-stock --days=7` no longer refreshes closed days (it still warms after success) | `test_the_closed_day_refresh_has_its_own_daily_schedule_at_0255_separate_from_the_nexus_pass`, `test_the_nightly_closed_day_warm_refreshes_the_last_7_closed_days_even_when_nexus_fails`, `test_the_nexus_daily_pass_no_longer_refreshes_closed_days_but_still_warms_after_success` | 2026-11-03 passed |
 | S-222.10.10 | negative | On the Suppliers tab a Not in Nexus item's DOI shows "—" with the tooltip, never "kulang N araw" | `test_B1_the_suppliers_tab_shows_not_in_nexus_and_mutes_doi_order_by_and_qty` | 2026-11-03 passed |
 | S-222.10.11 | edge | The closed-range returned query has `FORCE INDEX (idx_from_jnts_signing_status)` only on MySQL with the index present (information_schema checked once, cached 24 h); no hint when the check says no, when information_schema cannot be read, or on sqlite; results are identical either way | `StockIndexHintTest`, `ReturnedQueryPerfTest` (opt-in, MySQL: identical rows) | 2026-11-03 passed |
+
+## Spec 223: gateway address per page, and why a send got no answer
+
+### S-223.1 Gateway addresses are config (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-223.1.1 | happy | Given `GATEWAY_URLS="incepxion=https://…/api"`, the addresses are `forbeast` = `GATEWAY_URL` and `incepxion`, with the path prefix kept and the trailing `/` dropped | `test_S_223_1_the_addresses_come_from_config_and_without_a_list_nothing_changes` | pass |
+| S-223.1.2 | negative | Bad entries (upper case key, non-http URL, no `=`) are skipped; a `forbeast=` entry never replaces `GATEWAY_URL` | same | pass |
+| S-223.1.3 | edge | Given no `GATEWAY_URLS`, a page set to `incepxion` still sends to `GATEWAY_URL` (today's behaviour) | same | pass |
+
+### S-223.2 A page's route (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-223.2.1 | happy | A page without `chatbot.gateway_app` sends to the default URL | `test_S_223_2_a_page_on_incepxion_makes_every_page_call_there_and_a_page_without_the_setting_uses_the_default` | pass |
+| S-223.2.2 | happy | A page set to `incepxion` sends, types, replies to comments (public and private), is health-checked and retested on the incepxion URL, with the same page token; site calls and the gateway choice keep the default | same | pass |
+| S-223.2.3 | negative | An unknown key uses the default URL and logs one warning | `test_S_223_2b_an_unknown_key_uses_the_default_and_warns_once` | pass |
+| S-223.2.4 | edge | Changing or clearing the setting takes effect on the next call | `test_S_223_2c_changing_the_setting_takes_effect_on_the_next_call` | pass |
+| S-223.2.5 | happy | A sequence send (sequence pool) of a page set to `incepxion` goes to the incepxion URL | `test_S_223_2d_and_6c_a_sequence_send_uses_the_page_address_ipv4_only_and_records_why_it_got_no_answer` | pass |
+
+### S-223.3 409 app_not_connected (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-223.3.1 | negative | A 409 `app_not_connected` is a failed send "This page is not connected to the incepxion Meta app on the gateway (HTTP 409)", one call, no other address | `test_S_223_3_a_409_app_not_connected_is_an_answer_with_a_clear_reason_and_no_retry` | pass |
+| S-223.3.2 | edge | Three of them do not trip the watcher's "no answer" (the page stays on the gateway, no auto-switch row); other 409s read as before | same | pass |
+
+### S-223.4 Choose it on the page (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-223.4.1 | happy | With two addresses the Pages data lists them by name and the row's address; saving one records the user | `test_S_223_4_the_pages_screen_shows_and_sets_the_address_only_with_more_than_one` | pass |
+| S-223.4.2 | negative | An unknown key or an unlisted page is 422 and changes nothing | same | pass |
+| S-223.4.3 | edge | With one address nothing is listed and saving is 422 | same | pass |
+
+### S-223.5 The watcher and the move back (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-223.5.1 | happy | A page on `incepxion` whose sends get no answer moves to Botcake, comes back after 30 healthy minutes with `chatbot.gateway_app` unchanged, and its next send goes to the incepxion URL | `test_S_223_5_the_move_to_botcake_and_back_keeps_the_address` | pass |
+
+### S-223.6 Why a send got no answer (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-223.6.1 | happy | A ConnectionException records "Gateway did not answer (HTTP 0) · cURL error 28: … · connect 0.01 s, total 10.00 s" and one log line with errno, host, route and times, never the token or the message text | `test_S_223_6_a_send_without_an_answer_records_the_curl_error_and_times_never_the_token_or_text` | pass |
+| S-223.6.2 | edge | Without handler context the cURL part of the message is used, without the URL | same | pass |
+| S-223.6.3 | happy | `GATEWAY_FORCE_IPV4` on: sends, typing, comment replies and health checks are IPv4 only; off by default | `test_S_223_6b_force_ipv4_makes_the_gateway_calls_ipv4_only` | pass |
+| S-223.6.4 | happy | The sequence pool records the same detail and is IPv4 only with the switch | `test_S_223_2d_and_6c_a_sequence_send_uses_the_page_address_ipv4_only_and_records_why_it_got_no_answer` | pass |

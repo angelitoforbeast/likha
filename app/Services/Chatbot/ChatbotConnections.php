@@ -358,7 +358,7 @@ class ChatbotConnections
         $token = $token !== '' ? $token : $setup->token($page);
         if ($token === '') return $this->fail(422, 'error', 'Paste the ' . $l . ' token.');
 
-        $probe = $setup->probe($pageId, $token);
+        $probe = $setup->probe($pageId, $token, $page);
         if ($probe['status'] !== 'ok') return $this->fail($probe['status'] === 'invalid' ? 422 : 502, $probe['status'], $probe['error'] . '. Nothing was saved.');
         $sameName = $probe['name'] === null || $this->settings->pageKey($this->squash($probe['name'])) === $this->settings->pageKey($this->squash($page));
         if (!$sameName || ($probe['id'] !== null && $probe['id'] !== $pageId)) {

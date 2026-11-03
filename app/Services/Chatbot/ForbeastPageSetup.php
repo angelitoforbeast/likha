@@ -52,7 +52,7 @@ class ForbeastPageSetup
      */
     public function connect(string $page, ?int $userId = null): array
     {
-        $url = $this->baseUrl();
+        $url = $this->baseUrl($page);
         $pageId = trim((string) $this->settings->get($page, 'botcake', 'page_id'));
         $token = $this->token($page);
         if ($url === '' || $pageId === '' || $token === '') return ['status' => 'skipped', 'name' => null, 'error' => null, 'written' => []];
@@ -85,9 +85,9 @@ class ForbeastPageSetup
      * @return array{status: string, name: ?string, id: ?string, webhook: ?string, error: ?string, permissions?: ?array} status = ok | invalid | error | skipped;
      *   permissions (ok lang): ang scopes ng token, null kapag walang field
      */
-    public function probe(string $pageId, string $token): array
+    public function probe(string $pageId, string $token, ?string $page = null): array
     {
-        $url = $this->baseUrl();
+        $url = $this->baseUrl($page);
         if ($url === '' || $pageId === '' || $token === '') return ['status' => 'skipped', 'name' => null, 'id' => null, 'webhook' => null, 'error' => Gateways::label($this->gateway) . ' is not set up yet.'];
 
         $res = $this->call(fn () => $this->http($token)->get($url . '/v1/pages/' . rawurlencode($pageId)));
@@ -109,7 +109,7 @@ class ForbeastPageSetup
     public function retest(string $page, ?int $userId = null): string
     {
         $pageId = trim((string) $this->settings->get($page, 'botcake', 'page_id'));
-        $p = $this->probe($pageId, $this->token($page));
+        $p = $this->probe($pageId, $this->token($page), $page);
         if ($p['status'] === 'skipped') return 'skipped';
         if ($p['status'] === 'ok') $this->keepScopes($page, $p['permissions']);
         // Nabasa ang page (kahit nasa ibang site ang webhook): ang pangalan nito sa Facebook, kapag ito ring page ID.
@@ -126,7 +126,7 @@ class ForbeastPageSetup
     /** DELETE ng webhook (subok lang: ang pagkabigo ay hindi humaharang), saka tinatanggal ang token, secret at status. */
     public function disconnect(string $page, ?int $userId = null): void
     {
-        $url = $this->baseUrl();
+        $url = $this->baseUrl($page);
         $pageId = trim((string) $this->settings->get($page, 'botcake', 'page_id'));
         $token = $this->token($page);
         if ($url !== '' && $pageId !== '' && $token !== '') {
@@ -171,14 +171,17 @@ class ForbeastPageSetup
         return str_starts_with((string) $this->settings->get($page, $this->gateway, 'token_status'), 'ok');
     }
 
-    private function baseUrl(): string
+    /** Ang URL ng gateway; may $page: ang address ng page (chatbot.gateway_app), gaya ng padala. */
+    private function baseUrl(?string $page = null): string
     {
-        return Gateways::url($this->gateway);
+        if ($page === null || Gateways::url($this->gateway) === '') return Gateways::url($this->gateway);
+
+        return Gateways::pageUrl($this->gateway, $page);
     }
 
     private function http(string $token)
     {
-        return Http::withToken($token)->acceptJson()->connectTimeout(5)->timeout(self::TIMEOUT);
+        return Http::withToken($token)->acceptJson()->withOptions(Gateways::httpOptions())->connectTimeout(5)->timeout(self::TIMEOUT);
     }
 
     /** null = walang sagot. */

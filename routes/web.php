@@ -366,6 +366,8 @@ Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('chatbot')->name('chatb
     Route::post('/provider', [\App\Http\Controllers\ChatbotController::class, 'provider'])->middleware('throttle:30,1,chatbot-provider')->name('provider');
     // Aling gateway (forbeast / incepxionbot) ang sumasagot kapag gateway ang provider ng page.
     Route::post('/gateway', [\App\Http\Controllers\ChatbotController::class, 'gateway'])->middleware('throttle:30,1,chatbot-gateway')->name('gateway');
+    // Aling address ng forbeast gateway (GATEWAY_URL o isa sa GATEWAY_URLS) ang tinatawag para sa page.
+    Route::post('/gateway-app', [\App\Http\Controllers\ChatbotController::class, 'gatewayApp'])->middleware('throttle:30,1,chatbot-gateway-app')->name('gateway-app');
     // Aling AI ang sumasagot kada page at ang site default, at ang paghahambing ng mga AI ng isang page.
     Route::post('/ai', [\App\Http\Controllers\ChatbotAiController::class, 'save'])->middleware('throttle:30,1,chatbot-ai')->name('ai');
     Route::post('/ai/site', [\App\Http\Controllers\ChatbotAiController::class, 'site'])->middleware('throttle:30,1,chatbot-ai-site')->name('ai.site');

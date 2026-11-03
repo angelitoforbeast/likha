@@ -78,6 +78,7 @@
      data-changes-url="{{ route('chatbot.changes') }}"
      data-provider-url="{{ route('chatbot.provider') }}"
      data-gateway-url="{{ route('chatbot.gateway') }}"
+     data-gateway-app-url="{{ route('chatbot.gateway-app') }}"
      data-ag-url="{{ route('chatbot.ad-groups') }}" data-ag-add-url="{{ route('chatbot.ad-groups.add') }}" data-ag-delete-url="{{ route('chatbot.ad-groups.delete') }}"
      data-ag-history-url="{{ route('chatbot.ad-groups.history') }}" data-ag-restore-url="{{ route('chatbot.ad-groups.restore') }}"
      data-ag-mode-url="{{ route('chatbot.ad-groups.mode') }}" data-ag-value-url="{{ route('chatbot.ad-groups.value') }}" data-ag-remove-ad-url="{{ route('chatbot.ad-groups.remove-ad') }}" data-ag-ad-url="{{ route('chatbot.ad-groups.ad') }}"
@@ -370,7 +371,7 @@
     const box = document.getElementById('cbot'), url = box.dataset, $ = id => document.getElementById(id);
     const csrf = document.querySelector('meta[name="csrf-token"]').content;
     const PAUSE_MS = 800, table = $('cb-table');
-    let columns = [], rows = [], flows = [], editing = null, gatewayReady = false, bots = [], aiSite = null;
+    let columns = [], rows = [], flows = [], editing = null, gatewayReady = false, bots = [], aiSite = null, gatewayApps = {};
     const NEEDS_TOKEN = url.needsToken; // ang dahilan kapag hindi mapipili ang Forbeast
     const picked = new Set(); // mga page na may check (bulk "Replies via")
     const marks = new Map(), seqs = new Map(), errors = new Map();
@@ -467,7 +468,7 @@
         const res = await fetch(url.dataUrl, {headers: {'Accept': 'application/json'}});
         if (!res.ok) { notice('Could not load the pages (' + res.status + ').', 'text-red-600'); return; }
         const data = await res.json();
-        columns = data.columns; rows = RowCache.merge(rows, data.rows); flows = data.flows || []; gatewayReady = !!data.gateway_ready; bots = data.bots || []; aiSite = data.ai_site || null;
+        columns = data.columns; rows = RowCache.merge(rows, data.rows); flows = data.flows || []; gatewayReady = !!data.gateway_ready; gatewayApps = data.gateway_apps || {}; bots = data.bots || []; aiSite = data.ai_site || null;
         // Ang naka-cache na Check ay kasama sa data; ang wala pa ay kinukuha pagkatapos ng render (checkQueue).
         checks.clear();
         for (const r of rows) if (r.check) checks.set(r.page, r.check);
@@ -1231,7 +1232,7 @@
         ]);
         paintSwitch(b, r.active);
         if (url.activeUrl) b.addEventListener('click', () => toggle(r, b)); else b.disabled = true; // CEO lang ang makakapag-switch
-        td.append(b, providerSelect(r), gatewaySelect(r), aiButton(r));
+        td.append(b, providerSelect(r), gatewaySelect(r), gatewayAppSelect(r), aiButton(r));
         if (r.ai_load) td.append(aiLoadNote(r.ai_load));
         if (r.auto_switched) td.append(autoSwitchNote(r.auto_switched));
         const err = errors.get(r.page);
@@ -1465,6 +1466,28 @@
             try {
                 const {ok, data} = await post(url.gatewayUrl, {page_name: r.page, gateway: want});
                 if (ok) { r.gateway = data.gateway; r.auto_switched = null; errors.delete(r.page); } else errors.set(r.page, data.error || data.message || 'Not changed.');
+            } catch (e) { errors.set(r.page, 'No connection: not changed.'); }
+            redraw(r.page);
+        });
+        return sel;
+    }
+
+    // Aling address ng Forbeast gateway ang tinatawag para sa page (ang Meta app ng address na iyon): kapag higit sa isa
+    // ang naka-configure (GATEWAY_URLS) at Forbeast ang gateway ng page.
+    function gatewayAppSelect(r) {
+        const keys = Object.keys(gatewayApps || {});
+        if (keys.length < 2 || (r.gateway || 'forbeast') !== 'forbeast' || !url.gatewayAppUrl) return document.createTextNode('');
+        const current = keys.includes(r.gateway_app) ? r.gateway_app : 'forbeast';
+        const sel = el('select', {class: 'mt-1 block w-full max-w-[9rem] rounded border border-slate-300 px-1 py-0.5 text-xs', 'aria-label': 'Gateway address of ' + r.page, title: 'Gateway address (Meta app)'},
+            keys.map(k => el('option', {value: k, text: 'App: ' + gatewayApps[k]})));
+        sel.value = current;
+        sel.addEventListener('change', async () => {
+            const want = sel.value;
+            if (!confirm('Send the replies of ' + r.page + ' through the ' + gatewayApps[want] + ' address instead of ' + gatewayApps[current] + '?')) { sel.value = current; return; }
+            sel.disabled = true;
+            try {
+                const {ok, data} = await post(url.gatewayAppUrl, {page_name: r.page, gateway_app: want});
+                if (ok) { r.gateway_app = data.gateway_app; errors.delete(r.page); } else errors.set(r.page, data.error || data.message || 'Not changed.');
             } catch (e) { errors.set(r.page, 'No connection: not changed.'); }
             redraw(r.page);
         });

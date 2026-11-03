@@ -259,6 +259,11 @@ return [
     // /api/gateway/events ng page na walang sariling secret; walang laman = 503 (walang tinatanggap).
     'gateway' => [
         'url' => rtrim((string) env('GATEWAY_URL', ''), '/'),
+        // Ang iba pang address ng parehong gateway (parehong key at token ng page, ibang Meta app), pinipili kada page
+        // (chatbot.gateway_app): "key=url key2=url2". Walang laman = ang url lang (forbeast), gaya ng dati.
+        'urls' => (string) env('GATEWAY_URLS', ''),
+        // IPv4 lang sa mga tawag sa gateway (CURLOPT_IPRESOLVE), para masubok kung IPv6 lang ang nawawalang sagot.
+        'force_ipv4' => (bool) env('GATEWAY_FORCE_IPV4', false),
         'key' => env('GATEWAY_KEY'),
         'webhook_secret' => env('GATEWAY_WEBHOOK_SECRET'),
         'timeout' => (int) env('GATEWAY_TIMEOUT', 10),

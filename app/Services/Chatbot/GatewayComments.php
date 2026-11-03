@@ -40,14 +40,14 @@ class GatewayComments
         // Ang aktibong gateway ng page lang (hindi kailanman ang dalawa), gamit ang token ng page doon o ang global key nito.
         $gw = Gateways::active($pageName);
         $c = Gateways::config($gw);
-        $url = $c['url'];
+        $url = $c['url'] !== '' ? Gateways::pageUrl($gw, $pageName) : ''; // ang address ng page
         $key = app(ForbeastPageSetup::class)->on($gw)->token($pageName);
         if ($key === '') $key = $c['key'];
         if ($url === '' || $key === '') return ['status' => 'failed', 'error' => GatewayProvider::notSetUp($gw), 'http' => null, 'comment_id' => null, 'code' => 'not_set_up'];
 
         $timeout = max(1, $c['timeout']);
         try {
-            $res = Http::withToken($key)->acceptJson()->connectTimeout(min(5, $timeout))->timeout($timeout)
+            $res = Http::withToken($key)->acceptJson()->withOptions(Gateways::httpOptions())->connectTimeout(min(5, $timeout))->timeout($timeout)
                 ->post($url . '/v1/pages/' . rawurlencode($pageId) . '/comments/' . rawurlencode($commentId) . '/' . $what, $body);
             [$http, $json] = [$res->status(), $res->json()];
         } catch (ConnectionException) {
