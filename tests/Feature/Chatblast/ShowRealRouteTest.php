@@ -151,6 +151,49 @@ class ShowRealRouteTest extends ChatblastTestCase
         $this->assertSame(1, ChatbotReply::where('via', 'forbeast')->count(), 'via values and queries on them are unchanged');
     }
 
+    /** Isang sagot kada daan: incepxion, ang default, Botcake, at ang lumang row na walang address. */
+    private function threeReplies(): void
+    {
+        BotcakeOutbox::record(1001, 7001, null, 1, 'inc', 'send', [['type' => 'text', 'text' => 'A']], 'sent', via: 'forbeast', route: 'incepxion');
+        BotcakeOutbox::record(1001, 7001, null, 1, 'def', 'send', [['type' => 'text', 'text' => 'B']], 'sent', via: 'forbeast', route: 'forbeast');
+        BotcakeOutbox::record(1001, 7001, null, 1, 'bot', 'send', [['type' => 'text', 'text' => 'C']], 'sent', via: 'botcake');
+        BotcakeOutbox::record(1001, 7001, null, 1, 'old', 'send', [['type' => 'text', 'text' => 'D']], 'sent', via: 'forbeast');
+    }
+
+    public function test_S_224_3_1_the_inbox_says_via_incepxion_only_for_a_reply_that_went_there(): void
+    {
+        $this->threeReplies();
+        $this->actingAs($this->user());
+        $out = collect($this->getJson('/chatbot/inbox/thread?page_id=1001&psid=7001')->assertOk()->json('items'))->where('side', 'out')->values();
+        $this->assertSame([['forbeast', 'Incepxion'], ['forbeast', null], ['botcake', null], ['forbeast', null]], $out->map(fn ($x) => [$x['via'], $x['via_label'] ?? null])->all());
+        $this->assertArrayNotHasKey('via_label', $out[1], 'the default keeps today\'s data');
+
+        $html = $this->get('/chatbot/inbox')->assertOk()->getContent();
+        $this->assertStringContainsString("const viaText = x => x.via_label ? 'via ' + x.via_label : (x.via && VIA[x.via] ? 'via ' + VIA[x.via] : '');", $html);
+    }
+
+    public function test_S_224_3_2_a_manual_inbox_reply_through_incepxion_comes_back_labelled(): void
+    {
+        $this->gateway('incepxion');
+        $this->chat(['source' => 'gateway']);
+        $this->actingAs($this->user());
+        $item = $this->postJson('/chatbot/inbox/send', ['page_id' => '1001', 'psid' => '7001', 'text' => 'Manual po'])->assertOk()->json('item');
+        $this->assertSame(['forbeast', 'Incepxion'], [$item['via'], $item['via_label'] ?? null]);
+    }
+
+    public function test_S_224_3_3_the_replies_screen_labels_the_address_too(): void
+    {
+        $this->threeReplies();
+        $this->actingAs($this->user());
+        $rows = $this->getJson('/chatbot/replies/data?date=' . now('Asia/Manila')->toDateString())->assertOk()->json('rows');
+        $this->assertSame([['forbeast', null], ['botcake', null], ['forbeast', null], ['forbeast', 'Incepxion']], array_map(fn ($r) => [$r['via'], $r['via_label'] ?? null], $rows));
+        $this->assertCount(3, $this->getJson('/chatbot/replies/data?date=' . now('Asia/Manila')->toDateString() . '&via=forbeast')->json('rows'), 'the via filter is unchanged');
+        $id = ChatbotReply::where('node_id', 'inc')->value('id');
+        $this->assertSame('Incepxion', $this->getJson('/chatbot/replies/' . $id)->assertOk()->json('via_label'));
+        $html = $this->get('/chatbot/replies')->assertOk()->getContent();
+        $this->assertStringContainsString("text: r.via_label || ({botcake: 'Botcake'", $html);
+    }
+
     public function test_S_224_2_7_the_migration_adds_a_nullable_column_instantly_and_has_a_down(): void
     {
         $file = base_path('database/migrations/2026_11_17_100000_add_route_to_chatbot_replies.php');

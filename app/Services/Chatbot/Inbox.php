@@ -340,7 +340,9 @@ class Inbox
             $items[] = $base + ['side' => 'out', 'messages' => $messages, 'manual' => $r->kind === 'manual',
                 'by' => $r->kind === 'manual' ? ($users[$r->user_id] ?? 'You') : 'Bot',
                 // Ang bot na nagdala (via); ang lumang row na wala nito: ang via ng Results (tags), kung mayroon.
-                'via' => $r->via ?? (is_array($r->tags) ? ($r->tags['via'] ?? null) : null)];
+                'via' => $r->via ?? (is_array($r->tags) ? ($r->tags['via'] ?? null) : null)]
+                // Ang address na dinaanan (hal. "Incepxion") kapag hindi ang default.
+                + ChatbotProvider::viaLabelColumn($r->via, $r->route);
         }
         $flows = $ev->isEmpty() ? [] : ChatbotFlow::whereIn('id', $ev->pluck('flow_id')->filter()->unique()->values())->pluck('name', 'id')->all();
         foreach ($ev as $e) {

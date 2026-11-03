@@ -70,6 +70,21 @@ class ChatbotProvider
         return self::viaLabel($via);
     }
 
+    /**
+     * Ang pangalan sa screen ng address ng isang padala (chatbot_replies.route, hal. "Incepxion") kapag forbeast ang nagdala
+     * at hindi default ang address; null = gamitin ang pangalan ng via (gaya ng dati).
+     */
+    public static function routeLabelOf(?string $via, ?string $route): ?string
+    {
+        return $via === self::FORBEAST && $route !== null && $route !== '' && $route !== Gateways::FORBEAST ? Gateways::routeLabel($route) : null;
+    }
+
+    /** Ang via_label ng isang padala para sa JSON ng screen: kasama lang kapag may address na hindi default. */
+    public static function viaLabelColumn(?string $via, ?string $route): array
+    {
+        return ($l = self::routeLabelOf($via, $route)) !== null ? ['via_label' => $l] : [];
+    }
+
     /** $once: isang subok lang sa Botcake (web request, hal. ang Inbox). Ang gateway ay pinipili sa bawat padala (ang aktibo). */
     public static function for(string $pageName, bool $once = false): MessagingProvider
     {

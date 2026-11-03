@@ -180,7 +180,8 @@ class ChatbotInboxController extends Controller
         ChatbotTags::storeRows($reply, $tags);
 
         return response()->json(['item' => ['key' => 'out-' . $reply->id, 'id' => $reply->id, 'side' => 'out', 'at' => Inbox::iso($reply->sent_at),
-            'status' => $status, 'error' => $error, 'messages' => $messages, 'manual' => true, 'by' => Auth::user()?->name ?: 'You', 'via' => ChatbotProvider::viaOf($provider)]]);
+            'status' => $status, 'error' => $error, 'messages' => $messages, 'manual' => true, 'by' => Auth::user()?->name ?: 'You', 'via' => ChatbotProvider::viaOf($provider)]
+            + ChatbotProvider::viaLabelColumn(ChatbotProvider::viaOf($provider), ChatbotProvider::routeOf($provider))]);
     }
 
     /** Subscribe o unsubscribe ang customer sa isang sequence (ang mga puwedeng sumagot). */

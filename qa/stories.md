@@ -4266,3 +4266,10 @@ Tests (`tests/Feature/Item/`): `StockFromFirstStockInTest`, `NexusStockHistoryTe
 | S-224.2.5 | edge | The address is saved on the ticket before the call, so a send finished by the sweep after a crash still stores it | `test_S_224_2_5_a_sequence_send_finished_after_a_crash_keeps_the_address_from_the_call` | pass |
 | S-224.2.6 | edge | A sequence send on the default address stores `forbeast`; a Botcake sequence send stores null and its ticket result has no `route` key | `test_S_224_2_6_a_sequence_send_on_the_default_address_records_forbeast_and_a_botcake_one_records_nothing` | pass |
 | S-224.2.7 | happy | The migration adds `route` VARCHAR(30) NULL with `ALGORITHM=INSTANT` on MySQL (fails rather than copying the table), is idempotent and has a down | `test_S_224_2_7_the_migration_adds_a_nullable_column_instantly_and_has_a_down` | pass |
+
+### S-224.3 The Inbox and other "via" labels (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-224.3.1 | happy | The Inbox thread shows "via Incepxion" for a reply whose recorded address is incepxion; the default address, Botcake and old rows keep today's label and data (no `via_label`) | `test_S_224_3_1_the_inbox_says_via_incepxion_only_for_a_reply_that_went_there` | pass |
+| S-224.3.2 | happy | A manual Inbox reply through incepxion comes back labelled "Incepxion" | `test_S_224_3_2_a_manual_inbox_reply_through_incepxion_comes_back_labelled` | pass |
+| S-224.3.3 | happy | The Replies screen (list and detail) shows "Incepxion" for that reply; the via filter is unchanged | `test_S_224_3_3_the_replies_screen_labels_the_address_too` | pass |

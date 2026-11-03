@@ -110,7 +110,7 @@ class ChatbotTabsController extends Controller
                 'id' => $r->id, 'time' => $r->sent_at?->timezone('Asia/Manila')->format('H:i:s'), 'page' => $names[(string) $r->page_id] ?? ('Page ' . $r->page_id),
                 'psid' => (string) $r->psid, 'kind' => $r->kind, 'status' => $r->status, 'error' => $r->error, 'summary' => $this->summary($r),
                 'via' => $r->via ?? (is_array($r->tags) ? ($r->tags['via'] ?? null) : null),
-            ])->values(),
+            ] + ChatbotProvider::viaLabelColumn($r->via, $r->route))->values(),
             'next' => $more ? $rows->take(self::PER_PAGE)->last()->id : null,
         ]);
     }
@@ -163,7 +163,7 @@ class ChatbotTabsController extends Controller
             'chat_id' => $r->chat_id, 'flow' => $r->flow_id ? ChatbotFlow::whereKey($r->flow_id)->value('name') : null, 'node' => $r->node_id,
             'kind' => $r->kind, 'status' => $r->status, 'error' => $r->error, 'raw' => $r->raw, 'http' => $r->http, 'content' => $r->content, 'via' => $r->via,
             'link' => $r->kind === 'sheet' ? \App\Services\Chatbot\ChatbotSheet::rowLink((array) $r->content) : null,
-        ]);
+        ] + ChatbotProvider::viaLabelColumn($r->via, $r->route));
     }
 
     /** @var array<int, string> pangalan ng user kada id, isang basa lang kada request */
