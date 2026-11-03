@@ -512,9 +512,9 @@ class ItemStockService
             fn () => [
                 'shipped'  => $this->shippedRows($liveFrom, $today),
                 'returned' => $source->returned($liveFrom, $until)->toArray(),
-                'flags'    => method_exists($source, 'flags') ? $source->flags($until) : [],
             ]
         );
+        $flags = $this->returnedFlags($source, $host, $now);
 
         $liveRet = ReturnedResult::fromArray($live['returned']);
         $byDay   = [];
@@ -542,7 +542,26 @@ class ItemStockService
             foreach ($rows as [$name, $cnt]) $shipped[] = [$name, $day, $cnt];
         }
 
-        return ['shipped' => $shipped, 'returned' => $returned->toArray(), 'flags' => $live['flags'] ?? []];
+        return ['shipped' => $shipped, 'returned' => $returned->toArray(), 'flags' => $flags];
+    }
+
+    /**
+     * Ang flags ng returned (walang signingtime / signingtime sa hinaharap; para sa lahat ng item): diagnostic lang, kaya
+     * naka-cache nang 1 oras sa sariling key. Ang warm ay kinukuwenta ulit lang kapag 45 minuto na ang edad nito, kaya
+     * ang page ay halos hindi nagbabayad nito, at ang warm kada 10 minuto ay hindi rin.
+     */
+    private function returnedFlags(ReturnedSource $source, string $host, Carbon $now): array
+    {
+        if (!method_exists($source, 'flags')) return [];
+        $key = "item_stock:flags:v1:$host:" . $source->key() . ':' . $now->toDateString();
+        $hit = Cache::get($key);
+        $old = !is_array($hit) || ($this->warming !== null && (int) ($hit['at'] ?? 0) < $now->getTimestamp() - 2700);
+        if (!$old) return (array) $hit['flags'];
+
+        $flags = $source->flags($now->format('Y-m-d H:i:s'));
+        Cache::put($key, ['at' => $now->getTimestamp(), 'flags' => $flags], 3600);
+
+        return $flags;
     }
 
     /** Ilang segundo ang cache ng isang saradong araw (26 oras). */

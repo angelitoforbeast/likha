@@ -126,4 +126,21 @@ class StockDayCacheTest extends ItemTestCase
         $this->assertSame(['unsigned' => 2, 'future' => 1], $json['stock_meta']['returned']['flags']);
         $this->assertSame('all items, any date (not per item start)', $json['stock_meta']['returned']['flags_scope']);
     }
+
+    public function test_the_flags_count_is_cached_for_an_hour_and_the_warm_refreshes_it_only_after_45_minutes(): void
+    {
+        $this->page();
+        $flagQueries = function (): int {
+            $n = 0;
+            DB::listen(function ($e) use (&$n) { if (str_contains(strtolower($e->sql), 'select (select count(*)')) $n++; });
+            Artisan::call('stock:warm');
+
+            return $n;
+        };
+
+        Carbon::setTestNow(Carbon::parse('2026-11-03 10:50:00', 'Asia/Manila'));
+        $this->assertSame(0, $flagQueries(), '40 minuto: ang naka-cache pa');
+        Carbon::setTestNow(Carbon::parse('2026-11-03 10:56:00', 'Asia/Manila'));
+        $this->assertSame(1, $flagQueries(), '46 minuto: kinuwenta ulit ng warm');
+    }
 }

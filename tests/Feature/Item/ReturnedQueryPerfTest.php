@@ -215,12 +215,22 @@ class ReturnedQueryPerfTest extends TestCase
              GROUP BY mo.`ITEM_NAME`";
         $out['spec 220 shipped query, same data, median ms (5 runs)'] = $this->median(fn () => DB::select($q220s));
 
+        $out['flags query (two COUNTs, global) median ms (5 runs)'] = $this->median(fn () => $src->flags($until));
+        $out['returned query, live part only (11-02..now) median ms (5 runs)'] = $this->median(fn () => $src->rows('2026-11-02', $until));
+        $out['shipped query, live part only (11-02..11-03) median ms (5 runs)'] = $this->median(
+            fn () => DB::select(ItemStockService::shippedSql(), ItemStockService::shippedBindings('2026-11-02', '2026-11-03'))
+        );
+
         $svc = app(ItemStockService::class);
+        config(['app.url' => 'http://localhost']);
         $out['cold /item/stock build median ms (5 runs, cache flushed)'] = $this->median(function () use ($svc) {
             Cache::flush();
             $svc->build('2026-10-01', '2026-11-03', false);
         });
         $out['warm /item/stock build median ms (5 runs)'] = $this->median(fn () => $svc->build('2026-10-01', '2026-11-03', false));
+        // stock:warm kapag naka-cache na ang saradong araw: ang live part lang ang kinukuwenta ulit.
+        $out['stock:warm with closed days cached median ms (5 runs)'] = $this->median(fn () => $svc->warmInputs());
+        $out['nightly warm (last 7 closed days recomputed) median ms (3 runs)'] = $this->median(fn () => $svc->warmInputs(7), 3);
 
         config(['services.nexus.token' => '']);
         $out['old path (PO received, no cache) build median ms'] = $this->median(fn () => $svc->build('2026-10-01', '2026-11-03', false));
@@ -229,6 +239,9 @@ class ReturnedQueryPerfTest extends TestCase
             $r->id, $r->table, $r->type, $r->key ?? '-', $r->rows, $r->filtered, $r->Extra ?? '');
         $out['explain returned'] = array_map($fmt, DB::select('EXPLAIN ' . JntReturnedSource::sql(), JntReturnedSource::bindings($lower, $until)));
         $out['explain shipped']  = array_map($fmt, DB::select('EXPLAIN ' . ItemStockService::shippedSql(), ItemStockService::shippedBindings($lower)));
+        $c = \App\Services\HoldService::CANCELLED_STATUSES;
+        $out['explain flags']    = array_map($fmt, DB::select('EXPLAIN ' . JntReturnedSource::flagsSql(),
+            array_merge([JntReturnedSource::STATUS], $c, [$until, JntReturnedSource::STATUS], $c)));
 
         fwrite(STDERR, "\nPERF_220 " . json_encode($out, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
         $this->assertGreaterThan(0, $out['returned pieces total']);
