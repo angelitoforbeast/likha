@@ -19,8 +19,13 @@ class SendStatus
     /** Ang may naipadala sa customer (ang partial ay may naipadala rin). */
     public const DELIVERED = ['sent', 'partial'];
     private const NEAR_SECONDS = 600;
+    /**
+     * May client_ref pero wala pang reply: ang 202 ng gateway ay maaaring hindi pa nababasa ng nagpadala (ang row ay
+     * isinusulat pagkatapos ng sagot), kaya HandleGatewayEvent ang susubok ulit. Hindi ito binibilang.
+     */
+    public const NOT_YET = 'send_status_not_yet';
 
-    /** @return string ang bibilangin: send_status, send_status_repeat, send_status_unknown o send_status_bad */
+    /** @return string ang bibilangin: send_status, send_status_repeat, send_status_unknown o send_status_bad; o NOT_YET */
     public function receive(array $e): string
     {
         $s = $e['send'];
@@ -28,7 +33,7 @@ class SendStatus
         if (!in_array($s['status'], self::STATUSES, true)) return 'send_status_bad';
 
         $reply = $this->match($e);
-        if ($reply === null) return 'send_status_unknown';
+        if ($reply === null) return $s['client_ref'] !== null && $s['client_ref'] !== '' ? self::NOT_YET : 'send_status_unknown';
         if ($reply->confirmed_status !== null) return 'send_status_repeat';
 
         $status = $s['status'];

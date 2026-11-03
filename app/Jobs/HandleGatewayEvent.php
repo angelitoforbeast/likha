@@ -37,6 +37,8 @@ class HandleGatewayEvent implements ShouldQueue
 
     public const CHATS = ['message', 'postback', 'referral'];
     private const DEDUPE_SECONDS = 86400;
+    /** Ang hintay bago ang bawat ulit ng send_status na wala pang reply (segundo). */
+    public const SEND_STATUS_RETRIES = [5, 15, 40, 60];
 
     public function __construct(public array $event)
     {
@@ -85,6 +87,23 @@ class HandleGatewayEvent implements ShouldQueue
             'error_code' => $int($d['error_code'] ?? null), 'error_subcode' => $int($d['error_subcode'] ?? null), 'error' => $s($d['error'] ?? null, 500)];
     }
 
+    /**
+     * Ang send_status na nauna sa talaan ng padala (SendStatus::NOT_YET): ipinapasa ulit ang parehong event pagkalipas ng
+     * SEND_STATUS_RETRIES[subok] segundo (mga 2 minuto lahat). Ang bilang ng subok ay nasa event (send_try; wala = 0, gaya
+     * ng event na naka-queue bago ito), at walang queued_at para hindi mabasang lag ng queue ang paghihintay.
+     * false = tapos na ang mga subok.
+     */
+    private static function later(array $e): bool
+    {
+        $try = is_int($e['send_try'] ?? null) ? $e['send_try'] : 0;
+        if (!isset(self::SEND_STATUS_RETRIES[$try])) return false;
+        unset($e['queued_at']);
+        self::dispatch(['send_try' => $try + 1] + $e)->delay(self::SEND_STATUS_RETRIES[$try]);
+        self::count('send_status_retry');
+
+        return true;
+    }
+
     /** Bilang kada araw (Manila), 3 araw: ang type ng event, 'echo', 'botcake_page', 'duplicate', … */
     public static function count(string $what): void
     {
@@ -99,7 +118,9 @@ class HandleGatewayEvent implements ShouldQueue
         if (isset($e['queued_at'])) ForbeastWatch::ingested((int) $e['queued_at']);
         // Ang totoong oras ng padala (para sa Bot Health): walang takbo ng bot.
         if ($e['kind'] === 'event' && $e['type'] === 'send_status' && isset($e['send'])) {
-            self::count(app(SendStatus::class)->receive($e));
+            $result = app(SendStatus::class)->receive($e);
+            if ($result === SendStatus::NOT_YET) $result = self::later($e) ? null : 'send_status_unknown';
+            if ($result !== null) self::count($result);
             return;
         }
         if ($e['kind'] === 'event' && $e['type'] === 'comment' && array_key_exists('comment_id', $e)) {
