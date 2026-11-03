@@ -428,29 +428,33 @@ class ItemStockService
         );
     }
 
-    /** Ang SQL ng shipped kada item at araw (para rin sa EXPLAIN); bindings: shippedBindings(). */
+    /**
+     * Ang SQL ng shipped kada item at araw (para rin sa EXPLAIN); bindings: shippedBindings().
+     * Ang unang J&T row ng waybill = ang row na walang mas naunang row ng parehong waybill (mas maagang submission_time,
+     * o parehong oras at mas mababang id). Kapag ito ay ≥ $lower, wala ring row bago ang $lower. Isang subquery sa index ng
+     * waybill kada row (walang GROUP BY sa buong from_jnts), at ang range ng submission_time ay dumadaan sa index nito.
+     */
     public static function shippedSql(): string
     {
         $item = self::col('ITEM_NAME');
 
-        return "SELECT $item AS item_name, DATE(s.first_at) AS day, COUNT(*) AS cnt
+        return "SELECT $item AS item_name, DATE(f.submission_time) AS day, COUNT(*) AS cnt
              FROM macro_output mo
-             JOIN (SELECT fj.waybill_number, MIN(fj.submission_time) AS first_at FROM from_jnts fj
+             JOIN (SELECT fj.waybill_number, fj.submission_time FROM from_jnts fj
                    WHERE fj.submission_time >= ?
                      AND NOT EXISTS (SELECT 1 FROM from_jnts b
-                                     WHERE b.waybill_number = fj.waybill_number AND b.submission_time < ?)
-                   GROUP BY fj.waybill_number) s
-               ON s.waybill_number = mo.waybill
+                                     WHERE b.waybill_number = fj.waybill_number
+                                       AND (b.submission_time < fj.submission_time
+                                            OR (b.submission_time = fj.submission_time AND b.id < fj.id)))) f
+               ON f.waybill_number = mo.waybill
              WHERE " . self::notCancelledSql() . "
-             GROUP BY $item, DATE(s.first_at)";
+             GROUP BY $item, DATE(f.submission_time)";
     }
 
     /** @return array<int,mixed> */
     public static function shippedBindings(string $lower): array
     {
-        $from = $lower . ' 00:00:00';
-
-        return array_merge([$from, $from], HoldService::CANCELLED_STATUSES);
+        return array_merge([$lower . ' 00:00:00'], HoldService::CANCELLED_STATUSES);
     }
 
     /**
