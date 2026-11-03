@@ -155,8 +155,15 @@ class CPPController extends Controller
 
         // 4) Merge + compute per (date,page). Ang Ad-based na page: hinahati rin ang ads at orders kada ad group.
         $groupInfo = [];
+        $orderAdsBy = [];
+        if ($orderAdCol) {
+            foreach ($ordersByKey as $key => $list) {
+                $normPage = substr((string) $key, strpos((string) $key, '__') + 2);
+                if (isset($adBased[$normPage])) foreach ($list as $o) if (($ad = trim((string) $o->botcake_ad_id)) !== '') $orderAdsBy[$normPage][$ad] = true;
+            }
+        }
         foreach ($adBased as $normPage => $settingsPage) {
-            $orderAds = $orderAdCol ? $orderRows->filter(fn ($o) => $normalize($o->PAGE) === $normPage)->pluck('botcake_ad_id')->filter()->unique()->values()->all() : [];
+            $orderAds = array_map('strval', array_keys($orderAdsBy[$normPage] ?? []));
             $groupInfo[$normPage] = [
                 'groups' => app(AdGroups::class)->groups($settingsPage),
                 'index'  => app(AdGroups::class)->index($settingsPage),
