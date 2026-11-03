@@ -146,3 +146,11 @@ Order T1 → T2 → T3 → T4 → T5.
 `php artisan test` on 943a2d6c (plus the docs-only first commit), 1,396 s: **4,308 tests, 3 failed** (ExampleTest,
 ItemTableFitScriptTest, Astra S-26.18 — all on the known base list), 206 passed plainly and 4,099 with the printer
 warning of this worktree.
+
+## Review outcome (before the build)
+
+- S-222.1.7: the in / start / ship / ret numbers come from the read-only live comparison of 2026-11-03 (in the result).
+- `history_from` stays 2026-01-01 (a Jan–Nov scan found the earliest stock-ins on 09-13 and 09-29).
+- The shipped and returned queries are bounded by the earliest **matched** first stock-in day, not `history_from`.
+- Not in Nexus items keep an order quantity computed with stock 0, shown muted with the Not in Nexus tooltip.
+- The proposed story changes were accepted.
