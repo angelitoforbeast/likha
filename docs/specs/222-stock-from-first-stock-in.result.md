@@ -60,11 +60,11 @@ cold queries are bounded by the earliest **matched** first stock-in day, and Not
 | Run | Tests | Failed | Skipped |
 |---|---|---|---|
 | Full suite, base 943a2d6c | 4,308 | 3 (ExampleTest, ItemTableFitScriptTest, Astra S-26.18) | 0 |
-| Full suite, head | HEAD222_TOTAL | HEAD222_FAILED | 1 (perf, opt-in) |
+| Full suite, head (code at 0a325cfb) | 4,328 | 3 (ExampleTest, ItemTableFitScriptTest, Astra S-26.18) | 1 (perf, opt-in) |
 | `tests/Feature/Item`, head | 355 | 1 (ItemTableFitScriptTest, base) | 1 |
 | 222 and stock files | 69 | 0 | 1 |
 
-HEAD222_NOTE
+No new failure: the three failures are the base list. Head = base + 20 tests. Most tests show the `artisan test` printer warning of a worktree, as in spec 220.
 
 ## Story changes (accepted with the plan)
 
