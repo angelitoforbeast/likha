@@ -107,7 +107,10 @@ reads. Not measured on a copy of the live database.
 
 ## Full suite
 
-Before (`af110811`): TOTALS_BEFORE. After: TOTALS_AFTER. Known failures in both: `ExampleTest`, `ItemTableFitScriptTest`.
+`php artisan test` (Herd PHP 8.4, SQLite in memory). Before (`af110811`): 4,363 tests, 2 failed, 4,155 with warnings,
+206 clean passes (76,720 assertions). After: 4,378 tests (+15), 2 failed, 4,170 with warnings, 206 clean passes (76,797
+assertions). The 2 failures are the known ones in both runs: `ExampleTest` (302 vs 200) and `ItemTableFitScriptTest`
+(57 vs 45). The warnings are the existing `file_get_contents` notices, the same kind before and after.
 
 ## Story changes
 
