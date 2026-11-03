@@ -95,7 +95,7 @@ class NexusStockReadTest extends ItemTestCase
     public function test_S_220_6_1_stock_in_100_plus_returned_4_minus_shipped_30_is_74(): void
     {
         $this->parcels('1 x GLOW TAPE', 30, 'G', 4);
-        $this->nexusStockIn('GLOW TAPE', 100, '2026-10-01');
+        $this->nexusStockIn('GLOW TAPE', 100, '2026-09-26');
 
         $it = $this->item('glow tape');
 
@@ -126,29 +126,32 @@ class NexusStockReadTest extends ItemTestCase
     {
         $this->glowTapeOrders(false);                                             // B: walang umalis, walang stock-in
         $b = $this->item('glow tape');
-        $this->assertSame([0, 0, 0, 0], [$b['stock_in'], $b['shipped'], $b['stock_raw'], $b['stock']]);
+        // Walang Nexus stock-in = Not in Nexus (walang numero); ang i-order ay sa stock 0, may marka.
+        $this->assertSame([true, true, null, null, null, false], [$b['not_in_nexus'], $b['stock_assumed_zero'], $b['stock_in'], $b['stock_raw'], $b['stock'], $b['stock_needs_count']]);
         $this->assertSame(150, $b['normal']['order_qty']);
         $this->assertSame('red', $b['normal']['colour']);
     }
 
     public function test_example_d_in_nexus_mode(): void
     {
-        $this->parcels('1 x ROPE', 25, 'RP');                                     // D: −25
+        $this->parcels('1 x ROPE', 25, 'RP');                                     // D: 1 − 25 = −24
+        $this->nexusStockIn('ROPE', 1, '2026-09-26');
         $d = $this->item('rope');
-        $this->assertSame([0, 25, -25, 0, true], [$d['stock_in'], $d['shipped'], $d['stock_raw'], $d['stock'], $d['stock_needs_count']]);
+        $this->assertSame([1, 25, -24, 0, true], [$d['stock_in'], $d['shipped'], $d['stock_raw'], $d['stock'], $d['stock_needs_count']]);
     }
 
     public function test_S_220_4_1_a_returned_parcel_nets_to_0_on_the_item(): void
     {
         $this->order('2 x GLOW TAPE', 'Page A', 'W1', '2026-09-26');
         $this->shipped('W1', '2026-09-26 10:00:00', 'Returned', '2026-10-05 12:00:00');
+        $this->nexusStockIn('GLOW TAPE', 1, '2026-09-26');
 
         $it = $this->item('glow tape');
 
-        $this->assertSame([2, 2, 0, false], [$it['shipped'], $it['returned'], $it['stock_raw'], $it['stock_needs_count']]);
+        $this->assertSame([2, 2, 1, false], [$it['shipped'], $it['returned'], $it['stock_raw'], $it['stock_needs_count']]);
     }
 
-    public function test_S_220_6_2_the_start_day_and_today_count_but_not_the_day_before_or_a_future_day(): void
+    public function test_S_220_6_2_per_item_every_stock_in_from_the_items_first_day_through_today_counts_but_not_a_future_day(): void
     {
         $this->parcels('1 x GLOW TAPE', 1, 'G');
         $this->nexusStockIn('GLOW TAPE', 1, '2026-09-24');
@@ -156,17 +159,19 @@ class NexusStockReadTest extends ItemTestCase
         $this->nexusStockIn('GLOW TAPE', 100, '2026-11-03');
         $this->nexusStockIn('GLOW TAPE', 1000, '2026-11-04');
 
-        $this->assertSame(110, $this->item('glow tape')['stock_in']);
+        // Ang simula ay ang unang stock-in ng item (09-24), kahit bago ang item_stock_start (09-25).
+        $it = $this->item('glow tape');
+        $this->assertSame([111, '2026-09-24'], [$it['stock_in'], $it['stock_start']]);
     }
 
-    public function test_S_220_6_3_and_6_5_negative_raw_shows_0_and_needs_count_even_with_no_nexus_rows_at_all(): void
+    public function test_S_220_6_5_an_item_with_shipments_but_no_nexus_rows_is_not_in_nexus_not_a_negative(): void
     {
         $this->appSetting('nexus_stock_last_synced_at', null);
         $this->parcels('1 x ROPE', 3, 'RP');
 
         $json = $this->stock()->assertOk()->json();
 
-        $this->assertSame([-3, 0, true], [$json['items']['rope']['stock_raw'], $json['items']['rope']['stock'], $json['items']['rope']['stock_needs_count']]);
+        $this->assertSame([null, null, false, true], [$json['items']['rope']['stock_raw'], $json['items']['rope']['stock'], $json['items']['rope']['stock_needs_count'], $json['items']['rope']['not_in_nexus']]);
         $this->assertFalse($json['stock_meta']['nexus']['synced']);
     }
 
@@ -178,7 +183,7 @@ class NexusStockReadTest extends ItemTestCase
         $json = $this->stock()->assertOk()->json();
 
         $this->assertFalse($json['stock_ready']);
-        foreach (['stock', 'stock_raw', 'stock_needs_count', 'stock_in', 'returned', 'shipped', 'returned_over_shipped', 'nexus_diff'] as $f) {
+        foreach (['stock', 'stock_raw', 'stock_needs_count', 'stock_in', 'returned', 'shipped', 'returned_over_shipped', 'stock_start', 'not_in_nexus'] as $f) {
             $this->assertNull($json['items']['rope'][$f], $f);
         }
     }
@@ -194,7 +199,7 @@ class NexusStockReadTest extends ItemTestCase
         $json = $this->stock()->assertOk()->json('items');
 
         $this->assertSame(50, $json['tape']['stock']);
-        $this->assertSame(0, $json['pot']['stock']);
+        $this->assertSame([null, true], [$json['pot']['stock'], $json['pot']['not_in_nexus']], 'counted PO lang, walang Nexus stock-in');
     }
 
     public function test_S_220_6_7_incoming_and_discount_lines_are_as_before(): void
@@ -209,15 +214,15 @@ class NexusStockReadTest extends ItemTestCase
         $items = $this->stock()->assertOk()->json('items');
 
         $this->assertSame(10, $items['tape']['incoming']);
-        $this->assertSame(0, $items['tape']['stock']);
+        $this->assertNull($items['tape']['stock'], 'walang Nexus stock-in: Not in Nexus');
         $this->assertSame(20, $items['pot']['incoming']);
     }
 
     public function test_S_220_6_8_ceo_and_marketing_see_the_same_numbers_no_price_and_unknown_role_404(): void
     {
         $this->parcels('1 x GLOW TAPE', 30, 'G', 4);
-        $this->nexusStockIn('GLOW TAPE', 100, '2026-10-01', 2, 80, '2026-11-03 10:09:00');
-        $this->nexusStockIn('MYSTERY BOX', 9, '2026-10-01');
+        $this->nexusStockIn('GLOW TAPE', 100, '2026-09-26', 2, 80, '2026-11-03 10:09:00');
+        $this->nexusStockIn('MYSTERY BOX', 9, '2026-09-26');
 
         $ceo = $this->stock('CEO')->assertOk()->json();
         $mkt = $this->stock('Marketing')->assertOk()->json();
@@ -260,13 +265,13 @@ class NexusStockReadTest extends ItemTestCase
         $this->assertSame(['mode' => 'po_received', 'nexus' => ['configured' => false, 'previously_synced' => true]], $off['stock_meta']);
         $this->assertSame(50, $off['items']['tape']['stock']);                 // PO received, gaya ng dati
         $this->assertSame(-2, $off['items']['rope']['stock_raw']);             // walang returned sa lumang paraan
-        foreach (['stock_in', 'returned', 'shipped', 'returned_over_shipped', 'nexus_remaining', 'nexus_diff'] as $f) {
+        foreach (['stock_in', 'returned', 'shipped', 'returned_over_shipped', 'nexus_remaining', 'stock_start', 'not_in_nexus'] as $f) {
             $this->assertArrayNotHasKey($f, $off['items']['tape'], $f);
         }
 
         $this->assertSame('nexus', $on['stock_meta']['mode']);
         $this->assertSame(7, $on['items']['tape']['stock']);
-        $this->assertSame(-1, $on['items']['rope']['stock_raw']);
+        $this->assertTrue($on['items']['rope']['not_in_nexus'], 'walang Nexus stock-in ang rope');
     }
 
     // ── S-220.2 sync status on /item/stock ───────────────────────────────────
@@ -284,7 +289,7 @@ class NexusStockReadTest extends ItemTestCase
     {
         $this->appSetting('nexus_stock_last_error', json_encode(['at' => '2026-11-03 10:10:00', 'kind' => 'unauthorized', 'message' => 'Nexus refused the token (HTTP 401)']));
         $this->parcels('1 x GLOW TAPE', 1, 'G');
-        $this->nexusStockIn('GLOW TAPE', 5, '2026-10-01');
+        $this->nexusStockIn('GLOW TAPE', 5, '2026-09-26');
 
         $res  = $this->stock()->assertOk();
         $json = $res->json();
@@ -298,7 +303,7 @@ class NexusStockReadTest extends ItemTestCase
     public function test_S_220_2_6_more_than_3_hours_since_the_last_success_is_stale_but_the_numbers_still_show(): void
     {
         $this->parcels('1 x GLOW TAPE', 1, 'G');
-        $this->nexusStockIn('GLOW TAPE', 5, '2026-10-01');
+        $this->nexusStockIn('GLOW TAPE', 5, '2026-09-26');
         foreach (['2026-11-03 07:09:00' => true, '2026-11-03 07:10:00' => false, '2026-11-03 07:11:00' => false] as $last => $stale) {
             $this->appSetting('nexus_stock_last_synced_at', $last);
             $json = $this->stock()->assertOk()->json();
@@ -310,7 +315,7 @@ class NexusStockReadTest extends ItemTestCase
     public function test_unconfirmed_empty_days_and_a_skipped_daily_pass_are_in_the_stock_meta_and_the_numbers_stay(): void
     {
         $this->parcels('1 x GLOW TAPE', 1, 'G');
-        $this->nexusStockIn('GLOW TAPE', 5, '2026-11-02');
+        $this->nexusStockIn('GLOW TAPE', 5, '2026-09-26');
         $this->appSetting('nexus_stock_unconfirmed_empty', json_encode(['2026-11-02', 'not a day', '2026-10-30']));
         $this->appSetting('nexus_stock_daily_pass', json_encode(['at' => '2026-11-03 02:40:00', 'status' => 'skipped_locked']));
 
@@ -353,8 +358,7 @@ class NexusStockReadTest extends ItemTestCase
 
         $json = $this->stock()->assertOk()->json();
 
-        $this->assertSame(0, $json['items']['rope']['stock_in']);
-        $this->assertSame(-2, $json['items']['rope']['stock_raw']);
+        $this->assertSame([true, null, null], [$json['items']['rope']['not_in_nexus'], $json['items']['rope']['stock_in'], $json['items']['rope']['stock_raw']]);
     }
 
     // ── S-220.3 name matching ────────────────────────────────────────────────
@@ -363,17 +367,18 @@ class NexusStockReadTest extends ItemTestCase
     {
         $this->parcels('1 x GLOW TAPE', 1, 'G');
         $this->parcels('1 x ROPE', 1, 'R');
-        $this->nexusStockIn('glow   TAPE', 10, '2026-10-01');        // case at spacing
+        $this->nexusStockIn('glow   TAPE', 10, '2026-09-26');        // case at spacing
         $this->nexusStockIn('Glow-Tape', 5, '2026-10-02');           // ibang pangalan, parehong item: idinadagdag
         $this->nexusStockIn('2 x GLOW TAPE', 40, '2026-10-03');      // "N x" tinatanggal; pieces = stock_in_pieces
-        $this->nexusStockIn('MYSTERY BOX', 9, '2026-10-01');
+        $this->nexusStockIn('MYSTERY BOX', 9, '2026-09-26');
         $this->nexusStockIn('mystery  box', 3, '2026-10-02');
         $this->nexusStockIn('<b>Odd</b>', 1, '2026-10-02');
 
         $json = $this->stock()->assertOk()->json();
 
         $this->assertSame(55, $json['items']['glow tape']['stock_in']);
-        $this->assertSame(0, $json['items']['rope']['stock_in']);       // walang Nexus name: 0, hindi unmatched
+        $this->assertTrue($json['items']['rope']['not_in_nexus']);      // walang Nexus name: Not in Nexus, hindi unmatched
+        $this->assertSame(['rope'], array_map('strtolower', $json['stock_meta']['nexus']['not_in_nexus']));
         $this->assertArrayNotHasKey('mystery box', $json['items']);
         $meta = $json['stock_meta']['nexus'];
         $this->assertSame(2, $meta['unmatched_count']);
@@ -390,10 +395,10 @@ class NexusStockReadTest extends ItemTestCase
         }
         $this->parcels('1 x ALAGANG PAMILYA II', 1, 'A');
         $this->parcels('1 x ALAGANG PAMILYA VII', 1, 'B');
-        $this->nexusStockIn('Alagang Pamilya II', 5, '2026-10-01');         // eksaktong pangalan
-        $this->nexusStockIn('ALAGANG  PAMILYA VII', 3, '2026-10-01');       // eksakto (case, spacing)
+        $this->nexusStockIn('Alagang Pamilya II', 5, '2026-09-26');         // eksaktong pangalan
+        $this->nexusStockIn('ALAGANG  PAMILYA VII', 3, '2026-09-26');       // eksakto (case, spacing)
         $this->nexusStockIn('Alagang-Pamilya VII', 2, '2026-10-02');        // walang mapping na kailangan (gitling lang)
-        $this->nexusStockIn('Alagang Pamilya', 9, '2026-10-01');            // ang pamilya lang: dalawa ang puwede
+        $this->nexusStockIn('Alagang Pamilya', 9, '2026-09-26');            // ang pamilya lang: dalawa ang puwede
 
         $json = $this->stock()->assertOk()->json();
 
@@ -407,9 +412,9 @@ class NexusStockReadTest extends ItemTestCase
     {
         Artisan::call('migrate', ['--path' => 'database/migrations/2026_04_13_000001_create_item_type_mappings_table.php', '--force' => true]);
         $this->parcels('1 x ALAGANG PAMILYA VII', 1, 'A');
-        $this->nexusStockIn('Alagang Pamilya II', 6, '2026-10-01');
+        $this->nexusStockIn('Alagang Pamilya II', 6, '2026-09-26');
 
-        $this->assertSame(0, $this->item('alagang pamilya vii')['stock_in']);
+        $this->assertTrue($this->item('alagang pamilya vii')['not_in_nexus'], 'wala pang mapping: walang tugmang stock-in');
 
         DB::table('item_type_mappings')->insert(['item_name' => 'Alagang Pamilya II', 'item_type' => 'Alagang Pamilya VII', 'created_at' => now(), 'updated_at' => now()]);
 
@@ -421,7 +426,7 @@ class NexusStockReadTest extends ItemTestCase
     public function test_S_220_3_9_non_ascii_names_match_in_either_unicode_form(): void
     {
         $this->parcels('1 x Niño Lamp', 1, 'N');
-        $this->nexusStockIn("NIN\u{0303}O  LAMP", 4, '2026-10-01');
+        $this->nexusStockIn("NIN\u{0303}O  LAMP", 4, '2026-09-26');
 
         $this->assertSame(4, $this->item('niño lamp')['stock_in']);
     }
@@ -444,18 +449,20 @@ class NexusStockReadTest extends ItemTestCase
     public function test_S_220_5_2_and_4_11_the_nexus_source_is_used_for_everything_and_more_returned_than_shipped_is_flagged(): void
     {
         $this->parcels('1 x GLOW TAPE', 2, 'G', 1);   // J&T: 1 Returned — hindi ginagamit
+        $this->nexusStockIn('GLOW TAPE', 1, '2026-09-26');
         $this->fakeNexusReturns(['Glow Tape' => 5]);
 
         $json = $this->stock()->assertOk()->json();
         $it = $json['items']['glow tape'];
 
-        $this->assertSame([5, 2, 3, true], [$it['returned'], $it['shipped'], $it['stock_raw'], $it['returned_over_shipped']]);
+        $this->assertSame([5, 2, 4, true], [$it['returned'], $it['shipped'], $it['stock_raw'], $it['returned_over_shipped']]);
         $this->assertSame('nexus', $json['stock_meta']['returned']['source']);
     }
 
     public function test_S_220_5_3_an_unknown_setting_uses_jnt_with_a_warning(): void
     {
         $this->parcels('1 x GLOW TAPE', 2, 'G', 1);
+        $this->nexusStockIn('GLOW TAPE', 1, '2026-09-26');
         $this->appSetting('stock_returned_source', 'both');
 
         $json = $this->stock()->assertOk()->json();
@@ -468,7 +475,7 @@ class NexusStockReadTest extends ItemTestCase
     public function test_S_220_5_4_nexus_unavailable_shows_returned_as_unavailable_without_jnt_and_without_zeroing(): void
     {
         $this->parcels('1 x GLOW TAPE', 2, 'G', 1);
-        $this->nexusStockIn('GLOW TAPE', 10, '2026-10-01');
+        $this->nexusStockIn('GLOW TAPE', 10, '2026-09-26');
         $this->appSetting('stock_returned_source', 'nexus');   // ang totoong stub
 
         $json = $this->stock()->assertOk()->json();
@@ -483,6 +490,7 @@ class NexusStockReadTest extends ItemTestCase
     public function test_S_220_5_6_and_5_7_flipping_the_source_re_keys_the_cache_and_changes_no_data(): void
     {
         $this->parcels('1 x GLOW TAPE', 2, 'G', 1);
+        $this->nexusStockIn('GLOW TAPE', 1, '2026-09-26');
         $count = fn () => json_encode([DB::table('from_jnts')->get()->all(), DB::table('nexus_stock_ins')->count()]);
         $before = $count();
 
@@ -511,7 +519,7 @@ class NexusStockReadTest extends ItemTestCase
         $this->assertTrue($this->stock()->assertOk()->json('stock_meta.nexus.previously_synced'), 'may last_synced_at');
 
         $this->appSetting('nexus_stock_last_synced_at', null);
-        $this->nexusStockIn('TAPE', 1, '2026-10-01');
+        $this->nexusStockIn('TAPE', 1, '2026-09-26');
         $this->assertTrue($this->stock()->assertOk()->json('stock_meta.nexus.previously_synced'), 'may Nexus row');
     }
 
@@ -531,18 +539,18 @@ class NexusStockReadTest extends ItemTestCase
         $this->assertSame([9, '2026-11-03 10:08', false], [$items['rope']['nexus_remaining'], $items['rope']['nexus_remaining_as_of'], $items['rope']['nexus_remaining_mixed']]);
     }
 
-    public function test_S_220_7_1_to_7_4_remaining_and_the_difference_with_its_as_of_and_a_dash_when_missing(): void
+    public function test_S_220_7_1_to_7_4_nexus_boxes_with_their_as_of_and_a_dash_when_missing_and_no_difference(): void
     {
         $this->parcels('1 x GLOW TAPE', 30, 'G', 4);
         $this->parcels('1 x ROPE', 1, 'R');
-        $this->nexusStockIn('GLOW TAPE', 100, '2026-10-01', 1, 70, '2026-10-01 18:00:00');   // luma
+        $this->nexusStockIn('GLOW TAPE', 100, '2026-09-26', 1, 70, '2026-10-01 18:00:00');   // luma
         $this->nexusStockIn('GLOW TAPE', 0, '2026-11-03', 0, 80, '2026-11-03 10:09:00');      // pinakabago
 
         $json = $this->stock()->assertOk()->json();
 
-        $this->assertSame([74, 80, -6], [$json['items']['glow tape']['stock'], $json['items']['glow tape']['nexus_remaining'], $json['items']['glow tape']['nexus_diff']]);
+        $this->assertSame([74, 80], [$json['items']['glow tape']['stock'], $json['items']['glow tape']['nexus_remaining']]);
+        $this->assertArrayNotHasKey('nexus_diff', $json['items']['glow tape'], 'ibang sukat ito: walang "difference"');
         $this->assertNull($json['items']['rope']['nexus_remaining']);
-        $this->assertNull($json['items']['rope']['nexus_diff']);
         $this->assertSame('2026-11-03 10:09', $json['stock_meta']['nexus']['remaining_as_of']);
         $this->assertFalse($json['stock_meta']['nexus']['remaining_stale']);
 
@@ -562,12 +570,13 @@ class NexusStockReadTest extends ItemTestCase
         // Ang negative raw ay 0 sa formula: 25 umalis, HOLD 5, walang benta sa 14 araw → order 5, hindi 30.
         for ($i = 1; $i <= 25; $i++) { $this->order('1 x ROPE', 'Page A', 'RP' . $i, '2026-09-10'); $this->shipped('RP' . $i, '2026-09-26 10:00:00'); }
         for ($i = 1; $i <= 5; $i++) $this->order('1 x ROPE', 'Page A', 'RH' . $i, '2026-09-10');
+        $this->nexusStockIn('ROPE', 1, '2026-09-26');
 
         $items = $this->stock()->assertOk()->json('items');
 
         $this->assertEquals(16.7, $items['doix']['normal']['doi']);
         $this->assertSame('amber', $items['doix']['normal']['colour']);
-        $this->assertSame(-25, $items['rope']['stock_raw']);
+        $this->assertSame(-24, $items['rope']['stock_raw']);
         $this->assertSame(5, $items['rope']['normal']['order_qty']);
     }
 
@@ -601,6 +610,6 @@ class NexusStockReadTest extends ItemTestCase
 
         $it = $this->item('tape');
 
-        $this->assertSame([0, 0, 0], [$it['incoming'], $it['stock_in'], $it['stock']]);
+        $this->assertSame([0, null, null, true], [$it['incoming'], $it['stock_in'], $it['stock'], $it['not_in_nexus']]);
     }
 }

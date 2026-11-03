@@ -26,7 +26,7 @@ class StockCacheTest extends ItemTestCase
             $this->order('1 x GLOW TAPE', 'Page A', 'G' . $i, '2026-09-26');
             $this->shipped('G' . $i, '2026-09-26 10:00:00', $i === 1 ? 'Returned' : 'Delivered', $i === 1 ? '2026-10-05 12:00:00' : null);
         }
-        $this->nexusStockIn('GLOW TAPE', 10, '2026-10-01');
+        $this->nexusStockIn('GLOW TAPE', 10, '2026-09-26');
     }
 
     protected function tearDown(): void
@@ -110,7 +110,7 @@ class StockCacheTest extends ItemTestCase
     public function test_S_220_9_4_a_cold_request_waits_for_another_computing_request_and_the_lock_is_freed_after(): void
     {
         config(['services.nexus.cold_wait' => 1]);
-        $key   = 'item_stock:inputs:v1:localhost:2026-09-25:jnt:20261103101000:2026-11-03';
+        $key   = 'item_stock:stockin:v2:localhost:20261103101000:2026-11-03';
         $other = Cache::lock($key . ':lock', 60);
         $this->assertTrue($other->get(), 'ibang request ang kumukuwenta');
 

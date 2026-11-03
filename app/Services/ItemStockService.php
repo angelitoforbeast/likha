@@ -86,6 +86,7 @@ class ItemStockService
         $life      = $this->lifecycleInputs($end);
         $palugit   = $this->palugitDefaults();
         $items     = [];
+        $notInNexus = [];
         foreach ($keys as $k) {
             $holdUnits = (int) ($hold[$k]['units'] ?? 0);
             $inc       = (int) ($incoming[$k] ?? 0);
@@ -111,7 +112,12 @@ class ItemStockService
                 'stock' => null,
             ];
             $stock = null;
-            if ($ready) {
+            $raw   = null;
+            if ($ready && $nexus && !isset($src['start'][$k])) {
+                // Walang Nexus stock-in kailanman: walang numero ng stock; ang i-order ay kinukuwenta sa 0 at may marka.
+                $ctx['stock'] = 0;
+                $notInNexus[$k] = true;
+            } elseif ($ready) {
                 $raw   = (int) ($received[$k] ?? 0) + (int) ($src['returned'][$k] ?? 0) - (int) ($left['units'][$k] ?? 0);
                 $stock = max(0, $raw);
                 $ctx['stock'] = $stock;
@@ -126,13 +132,13 @@ class ItemStockService
             sort($variants);
 
             $items[$k] = [
-                'name'             => $hold[$k]['name'] ?? $demand[$k]['name'] ?? $left['names'][$k] ?? $k,
+                'name'             => $hold[$k]['name'] ?? $demand[$k]['name'] ?? $left['names'][$k] ?? $src['names'][$k] ?? $k,
                 'variants'         => $variants,
                 'hold_units'       => $holdUnits,
                 'incoming'         => $inc,
                 'stock_raw'        => $ready ? $raw : null,
                 'stock'            => $stock,
-                'stock_needs_count' => $ready ? $raw < 0 : null,
+                'stock_needs_count' => $ready ? $raw !== null && $raw < 0 : null,
                 'lead'             => $lead,
                 'palugit_override' => $override,
                 'category_id'      => $category[$k]['id'] ?? null,
@@ -144,7 +150,13 @@ class ItemStockService
                 'normal'           => $normal,
                 'lugi'             => $lugi,
             ];
-            if ($nexus) $items[$k] += $this->nexusItemFields($k, $ready, $stock, $src, $left);
+            if ($nexus) $items[$k] += $this->nexusItemFields($k, $ready, $src, $left);
+        }
+        if ($nexus && $notInNexus) {
+            $names = array_map(fn ($k) => $items[$k]['name'], array_keys($notInNexus));
+            sort($names, SORT_NATURAL | SORT_FLAG_CASE);
+            $src['meta']['nexus']['not_in_nexus']       = $names;
+            $src['meta']['nexus']['not_in_nexus_count'] = count($names);
         }
 
         return [
@@ -160,25 +172,31 @@ class ItemStockService
         ];
     }
 
-    /** Dagdag na fields ng isang item kapag Nexus ang stock: ang breakdown at ang cross-check sa Nexus remaining. */
-    private function nexusItemFields(string $k, bool $ready, ?int $stock, array $src, array $left): array
+    /**
+     * Dagdag na fields ng isang item kapag Nexus ang stock: ang simula (unang Nexus stock-in), ang breakdown mula roon,
+     * "Not in Nexus" kapag walang stock-in kailanman, at ang Nexus boxes na hindi pa nailalabas (display lang).
+     */
+    private function nexusItemFields(string $k, bool $ready, array $src, array $left): array
     {
         $returnedOk = $src['meta']['returned']['available'] === true;
+        $start      = $src['start'][$k] ?? null;
+        $inNexus    = $ready && $start !== null;
         $shipped    = (int) ($left['units'][$k] ?? 0);
         $returned   = (int) ($src['returned'][$k] ?? 0);
         $rem        = $src['remaining'][$k] ?? null;
-        $remaining  = $rem['n'] ?? null;
 
         return [
-            'stock_in'              => $ready ? (int) ($src['stock_in'][$k] ?? 0) : null,
-            'returned'              => $ready && $returnedOk ? $returned : null,
-            'shipped'               => $ready ? $shipped : null,
-            'returned_over_shipped' => $ready && $returnedOk ? $returned > $shipped : null,
-            'nexus_remaining'       => $remaining,
+            'stock_start'           => $inNexus ? $start : null,
+            'not_in_nexus'          => $ready ? !$inNexus : null,
+            'stock_assumed_zero'    => $ready && !$inNexus,
+            'stock_in'              => $inNexus ? (int) ($src['stock_in'][$k] ?? 0) : null,
+            'returned'              => $inNexus && $returnedOk ? $returned : null,
+            'shipped'               => $inNexus ? $shipped : null,
+            'returned_over_shipped' => $inNexus && $returnedOk ? $returned > $shipped : null,
+            'nexus_remaining'       => $rem['n'] ?? null,
             'nexus_remaining_as_of' => $rem['as_of'] ?? null,
             'nexus_remaining_stale' => $rem['stale'] ?? null,
             'nexus_remaining_mixed' => $rem['mixed'] ?? null,
-            'nexus_diff'            => $remaining !== null && $stock !== null ? $stock - $remaining : null,
         ];
     }
 
@@ -194,11 +212,14 @@ class ItemStockService
     }
 
     /**
-     * Stock inputs kapag Nexus: stock-in (nexus_stock_ins, START..ngayon), returned (ang napiling source) at shipped
-     * (parehong query ng dati). Ang raw na aggregates ay naka-cache (host, START, source, huling sync, araw; 15 min);
-     * ang pagtutugma ng pangalan ay sa bawat request, kaya ang bagong item_type_mappings ay agad na nabibilang.
+     * Stock inputs kapag Nexus, kada item mula sa sarili nitong simula = ang unang araw na may Nexus stock-in (pinakamaaga
+     * sa lahat ng pangalang tumutugma rito):
+     *   stock_in  = lahat ng Nexus stock-in pieces ng item (lahat ay mula sa simula),
+     *   returned  = J&T Returned na signingtime mula sa simula, kahit kailan na-ship,
+     *   shipped   = waybill na ang unang J&T submission ay mula sa simula.
+     * Ang raw na aggregates ay naka-cache (15 min); ang pagtutugma at ang pagsala kada simula ay sa bawat request.
      *
-     * @return array{left: array, stock_in: array<string,int>, returned: array<string,int>, remaining: array<string,int>, meta: array}
+     * @return array{left: array, stock_in: array<string,int>, start: array<string,string>, returned: array<string,int>, remaining: array, meta: array}
      */
     private function nexusStock(?string $stockStart, array $likhaKeys): array
     {
@@ -226,21 +247,26 @@ class ItemStockService
             ? ['at' => substr((string) ($dailyPass['at'] ?? ''), 0, 16), 'status' => (string) $dailyPass['status']]
             : null;
 
-        $out = ['left' => [], 'stock_in' => [], 'returned' => [], 'remaining' => [], 'meta' => []];
+        $out = ['left' => ['units' => [], 'names' => []], 'stock_in' => [], 'start' => [], 'returned' => [], 'remaining' => [], 'meta' => []];
         $returnedMeta = ['setting' => $src['setting'], 'source' => $src['source']->key(), 'available' => null,
                          'warning' => $src['warning'], 'flags' => new \stdClass(), 'note' => null];
         $unmatched = [];
         $remainingAsOf = null;
+        $syncKey = $synced?->format('YmdHis') ?? 'never';
+        $host    = strtolower(request()->getHost());
+        $today   = $now->toDateString();
 
         if ($stockStart !== null) {
-            $in     = $this->nexusInputs($stockStart, $src['source'], $synced?->format('YmdHis'), $now);
-            $left   = $this->leftFromRows($in['shipped']);
-            $bridge = new ItemNameBridge(array_merge($likhaKeys, array_keys($left['units'])), new ItemAliasResolver());
+            $in     = $this->cachedInputs("item_stock:stockin:v2:$host:$syncKey:$today", fn () => $this->stockInRows($today));
+            $bridge = new ItemNameBridge($likhaKeys, new ItemAliasResolver());
 
-            foreach ($in['stock_in'] as [$name, $pieces]) {
+            foreach ($in['stock_in'] as [$name, $firstDay, $pieces]) {
                 $hit = $bridge->resolve($name);
                 if ($hit['key'] !== null) {
-                    $out['stock_in'][$hit['key']] = ($out['stock_in'][$hit['key']] ?? 0) + $pieces;
+                    $k = $hit['key'];
+                    $out['stock_in'][$k] = ($out['stock_in'][$k] ?? 0) + $pieces;
+                    $out['names'][$k] ??= $name;
+                    if ($firstDay !== null && (!isset($out['start'][$k]) || $firstDay < $out['start'][$k])) $out['start'][$k] = $firstDay;
                     continue;
                 }
                 $nk = StockInSync::normalizeName($name);
@@ -249,16 +275,38 @@ class ItemStockService
                 $unmatched[$nk]['ambiguous'] = $unmatched[$nk]['ambiguous'] || $hit['ambiguous'];
             }
 
-            $ret = ReturnedResult::fromArray($in['returned']);
-            $returnedMeta['available'] = $ret->available;
-            $returnedMeta['flags']     = $ret->flags ?: new \stdClass();
-            $returnedMeta['note']      = $ret->note;
-            if (!$ret->available) {
-                $returnedMeta['warning'] ??= 'unavailable';
-            }
-            foreach ($ret->pieces as $name => $pieces) {
-                $k = $ret->likhaKeys ? (string) $name : $bridge->likhaKey((string) $name);
-                if ($k !== null && $k !== '') $out['returned'][$k] = ($out['returned'][$k] ?? 0) + (int) $pieces;
+            // Ang pinakamaagang simula ng isang TUMUTUGMANG item ang hangganan ng shipped at returned query.
+            $lower = $out['start'] ? min($out['start']) : null;
+            if ($lower !== null) {
+                $moves = $this->cachedInputs(
+                    "item_stock:moves:v2:$host:$lower:" . $src['source']->key() . ":$syncKey:$today",
+                    fn () => ['shipped' => $this->shippedRows($lower),
+                              'returned' => $src['source']->returned($lower, $now->format('Y-m-d H:i:s'))->toArray()]
+                );
+                foreach ($moves['shipped'] as [$name, $day, $cnt]) {
+                    $raw = trim($name);
+                    if ($raw === '' || $day === null) continue;
+                    $p = ItemBaseKey::parse($raw);
+                    if ($p['key'] === '' || !isset($out['start'][$p['key']]) || $day < $out['start'][$p['key']]) continue;
+                    $out['left']['units'][$p['key']] = ($out['left']['units'][$p['key']] ?? 0) + $cnt * $p['qty'];
+                    $out['left']['names'][$p['key']] ??= $p['base'];
+                }
+
+                $ret = ReturnedResult::fromArray($moves['returned']);
+                $returnedMeta['available'] = $ret->available;
+                $returnedMeta['flags']     = $ret->flags ?: new \stdClass();
+                $returnedMeta['note']      = $ret->note;
+                if (!$ret->available) {
+                    $returnedMeta['warning'] ??= 'unavailable';
+                }
+                foreach (array_keys($ret->pieces) as $name) {
+                    $k = $ret->likhaKeys ? (string) $name : $bridge->likhaKey((string) $name);
+                    if ($k === null || $k === '' || !isset($out['start'][$k])) continue;
+                    $n = $ret->since((string) $name, $out['start'][$k]);
+                    if ($n > 0) $out['returned'][$k] = ($out['returned'][$k] ?? 0) + $n;
+                }
+            } else {
+                $returnedMeta['available'] = true;
             }
 
             // Kada Likha key: ang pinakabagong remaining ng bawat pangalan; ang pangalang mas luma nang higit sa isang
@@ -281,7 +329,6 @@ class ItemStockService
                     'mixed' => count($cur) < count($list),
                 ];
             }
-            $out['left'] = $left;
         }
 
         usort($unmatched, fn ($a, $b) => [$b['pieces'], $a['name']] <=> [$a['pieces'], $b['name']]);
@@ -301,6 +348,9 @@ class ItemStockService
                     && Carbon::parse($remainingAsOf, 'Asia/Manila')->diffInSeconds($now, true) > self::STALE_SECONDS,
                 'unmatched'       => array_values($unmatched),
                 'unmatched_count' => count($unmatched),
+                // Pinupunan sa build(): ang mga item na walang Nexus stock-in kailanman.
+                'not_in_nexus'    => [],
+                'not_in_nexus_count' => 0,
             ],
             'returned' => $returnedMeta,
         ];
@@ -308,20 +358,15 @@ class ItemStockService
         return $out;
     }
 
-    /** Raw aggregates ng stock (walang pagtutugma), naka-cache. */
-    private function nexusInputs(string $stockStart, ReturnedSource $source, ?string $syncedAt, Carbon $now): array
+    /**
+     * Isang naka-cache na input (15 min). Isang kuwenta lang kahit sabay-sabay ang cold request: ang iba ay naghihintay sa
+     * lock at kinukuha ang naitabi; lampas sa paghihintay, kinukuwenta na rin. Ang orasan ng paghihintay ay microtime.
+     */
+    private function cachedInputs(string $key, callable $compute): array
     {
-        $today = $now->toDateString();
-        $key   = 'item_stock:inputs:v1:' . strtolower(request()->getHost()) . ':' . $stockStart . ':' . $source->key()
-               . ':' . ($syncedAt ?? 'never') . ':' . $today;
-
         $hit = Cache::get($key);
         if (is_array($hit)) return $hit;
 
-        // Isang kuwenta lang kahit sabay-sabay ang cold request: ang iba ay naghihintay sa lock at kinukuha ang naitabi.
-        // Kapag lumampas ang paghihintay, kinukuwenta na rin (tama pa rin ang sagot, mas mabagal lang). Ang orasan ng
-        // paghihintay ay microtime, hindi Carbon, kaya hindi ito nakadepende sa oras ng app.
-        $compute  = fn () => $this->nexusInputsFresh($stockStart, $source, $now, $today);
         $lock     = Cache::lock($key . ':lock', 120);
         $deadline = microtime(true) + max(0, (int) config('services.nexus.cold_wait', 15));
         while (!$lock->get()) {
@@ -337,40 +382,75 @@ class ItemStockService
         }
     }
 
-    private function nexusInputsFresh(string $stockStart, ReturnedSource $source, Carbon $now, string $today): array
+    /**
+     * Nexus stock-in kada pangalan: ang unang araw na may pieces at ang kabuuang pieces (hanggang ngayon), at ang
+     * pinakabagong "remaining" kada pangalan (boxes na hindi pa nailalabas; display lang).
+     *
+     * @return array{stock_in: array<int,array{0:string,1:?string,2:int}>, remaining: array<int,array{0:string,1:int,2:string}>}
+     */
+    private function stockInRows(string $today): array
     {
-        return (function () use ($stockStart, $source, $now, $today) {
-            $hasTable = Schema::hasTable(StockInSync::TABLE);
-            $stockIn  = [];
-            $remain   = [];
-            if ($hasTable) {
-                foreach (DB::table(StockInSync::TABLE)
-                    ->whereBetween('stock_date', [$stockStart, $today])
-                    ->selectRaw('item_name, SUM(stock_in_pieces) as pieces')
-                    ->groupBy('item_name')->get() as $r) {
-                    $stockIn[] = [(string) $r->item_name, (int) $r->pieces];
-                }
-                // Ang pinakabagong "remaining" kada pangalan (hawak ng Nexus ngayon; display lang).
-                $seen = [];
-                foreach (DB::table(StockInSync::TABLE . ' as n')
-                    ->whereNotNull('n.as_of')->whereNotNull('n.remaining')
-                    ->whereNotExists(fn ($q) => $q->from(StockInSync::TABLE . ' as m')
-                        ->whereColumn('m.name_key', 'n.name_key')->whereColumn('m.as_of', '>', 'n.as_of'))
-                    ->orderByDesc('n.stock_date')
-                    ->get(['n.name_key', 'n.item_name', 'n.remaining', 'n.as_of']) as $r) {
-                    if (isset($seen[$r->name_key])) continue;
-                    $seen[$r->name_key] = true;
-                    $remain[] = [(string) $r->item_name, (int) $r->remaining, substr((string) $r->as_of, 0, 19)];
-                }
-            }
+        $stockIn = [];
+        $remain  = [];
+        if (!Schema::hasTable(StockInSync::TABLE)) return ['stock_in' => [], 'remaining' => []];
 
-            return [
-                'shipped'   => $this->leftRows($stockStart),
-                'returned'  => $source->returned($stockStart, $now->format('Y-m-d H:i:s'))->toArray(),
-                'stock_in'  => $stockIn,
-                'remaining' => $remain,
-            ];
-        })();
+        foreach (DB::table(StockInSync::TABLE)
+            ->where('stock_date', '<=', $today)
+            ->selectRaw('item_name, MIN(CASE WHEN stock_in_pieces > 0 THEN stock_date END) as first_day, SUM(stock_in_pieces) as pieces')
+            ->groupBy('item_name')->get() as $r) {
+            $stockIn[] = [(string) $r->item_name, $r->first_day === null ? null : substr((string) $r->first_day, 0, 10), (int) $r->pieces];
+        }
+        $seen = [];
+        foreach (DB::table(StockInSync::TABLE . ' as n')
+            ->whereNotNull('n.as_of')->whereNotNull('n.remaining')
+            ->whereNotExists(fn ($q) => $q->from(StockInSync::TABLE . ' as m')
+                ->whereColumn('m.name_key', 'n.name_key')->whereColumn('m.as_of', '>', 'n.as_of'))
+            ->orderByDesc('n.stock_date')
+            ->get(['n.name_key', 'n.item_name', 'n.remaining', 'n.as_of']) as $r) {
+            if (isset($seen[$r->name_key])) continue;
+            $seen[$r->name_key] = true;
+            $remain[] = [(string) $r->item_name, (int) $r->remaining, substr((string) $r->as_of, 0, 19)];
+        }
+
+        return ['stock_in' => $stockIn, 'remaining' => $remain];
+    }
+
+    /**
+     * Shipped kada item at araw (Manila) ng UNANG J&T submission ng waybill, mula $lower (ang pinakamaagang simula ng
+     * tumutugmang item). Ang waybill na unang na-submit bago ang $lower ay bago ang simula ng lahat ng item.
+     * @return array<int,array{0:string,1:?string,2:int}>
+     */
+    private function shippedRows(string $lower): array
+    {
+        return array_map(
+            fn ($r) => [(string) ($r->item_name ?? ''), $r->day === null ? null : substr((string) $r->day, 0, 10), (int) $r->cnt],
+            DB::select(self::shippedSql(), self::shippedBindings($lower))
+        );
+    }
+
+    /** Ang SQL ng shipped kada item at araw (para rin sa EXPLAIN); bindings: shippedBindings(). */
+    public static function shippedSql(): string
+    {
+        $item = self::col('ITEM_NAME');
+
+        return "SELECT $item AS item_name, DATE(s.first_at) AS day, COUNT(*) AS cnt
+             FROM macro_output mo
+             JOIN (SELECT fj.waybill_number, MIN(fj.submission_time) AS first_at FROM from_jnts fj
+                   WHERE fj.submission_time >= ?
+                     AND NOT EXISTS (SELECT 1 FROM from_jnts b
+                                     WHERE b.waybill_number = fj.waybill_number AND b.submission_time < ?)
+                   GROUP BY fj.waybill_number) s
+               ON s.waybill_number = mo.waybill
+             WHERE " . self::notCancelledSql() . "
+             GROUP BY $item, DATE(s.first_at)";
+    }
+
+    /** @return array<int,mixed> */
+    public static function shippedBindings(string $lower): array
+    {
+        $from = $lower . ' 00:00:00';
+
+        return array_merge([$from, $from], HoldService::CANCELLED_STATUSES);
     }
 
     /**

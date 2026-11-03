@@ -74,15 +74,20 @@ class ReturnedStockTest extends ItemTestCase
         $this->assertSame(0, $r->flags['unsigned'], "'For Return' ay hindi rin binibilang bilang walang signingtime");
     }
 
-    public function test_S_220_4_4_a_parcel_shipped_before_the_start_is_not_counted(): void
+    public function test_S_222_2_1_and_2_2_a_late_return_counts_whatever_the_ship_date_and_one_signed_before_the_start_does_not(): void
     {
-        $this->parcel('1 x GLOW TAPE', 'W1', shippedAt: '2026-10-01 23:59:59', signedAt: '2026-10-08 10:00:00');
-        // Unang J&T record bago START kahit may mas bagong row: hindi rin.
+        // Na-ship bago ang START, bumalik pagkatapos: bilang (kahit kailan na-ship).
+        $this->parcel('1 x GLOW TAPE', 'W1', shippedAt: '2026-09-20 23:59:59', signedAt: '2026-10-08 10:00:00');
         $this->parcel('1 x GLOW TAPE', 'W2', shippedAt: '2026-10-05 09:00:00');
         DB::table('from_jnts')->insert(['waybill_number' => 'W2', 'submission_time' => '2026-09-30 08:00:00', 'status' => 'In Transit']);
         DB::table('from_jnts')->insert(['waybill_number' => 'W2', 'submission_time' => '2026-10-05 09:00:00', 'status' => 'Returned', 'signingtime' => '2026-10-12 14:00:00']);
+        // Bumalik bago ang START: hindi bilang.
+        $this->parcel('1 x ROPE', 'W3', shippedAt: '2026-09-20 09:00:00', signedAt: '2026-10-01 23:59:59');
 
-        $this->assertSame([], $this->returned()->pieces);
+        $r = $this->returned();
+
+        $this->assertSame(['glow tape' => 2], $r->pieces);
+        $this->assertSame(['glow tape' => ['2026-10-08' => 1, '2026-10-12' => 1]], $r->byDay);
     }
 
     public function test_S_220_4_5_a_cancelled_order_is_not_counted(): void
