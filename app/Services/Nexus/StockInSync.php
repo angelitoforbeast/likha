@@ -44,6 +44,10 @@ class StockInSync
     public const UNCONFIRMED_EMPTY = 'nexus_stock_unconfirmed_empty';
     /** JSON {at, status: ok | skipped_locked} ng huling araw-araw na 7-day pass. */
     public const DAILY_PASS     = 'nexus_stock_daily_pass';
+    /** Ang pinakaunang araw na natapos na ng --history (pinakabago muna ang tinatanong; dito ito nagpapatuloy). */
+    public const HISTORY_DONE_FROM = 'nexus_stock_history_done_from';
+    /** Pinakamahabang range na isang tawag sa Nexus (31 araw). */
+    private const HISTORY_WINDOW = 31;
     private const MAX_COUNT     = 2147483647;
     private const TZ            = 'Asia/Manila';
 
@@ -152,6 +156,132 @@ class StockInSync
         sort($days);
 
         return $days;
+    }
+
+    /** services.nexus.history_from kapag totoong petsa; kung hindi, 2026-01-01. */
+    public static function historyFrom(): string
+    {
+        $v = trim((string) config('services.nexus.history_from'));
+
+        return self::validDate($v) ? $v : '2026-01-01';
+    }
+
+    /**
+     * --history: ang stock-in bago ang item_stock_start, mula history_from, sa mga range na ≤ 31 araw (pinakabago muna).
+     * Ang stock_in ng range ay listahan ng {date, lots, pieces} kada araw: bawat isa ay isang row ng araw na iyon, walang
+     * remaining at as_of (ang "ngayon" lang ang may saysay doon). Hindi kailanman ginagawang 0 ang naka-store. Humihinto sa
+     * unang bigong range (429, 401, sira); ang susunod na --history ay nagpapatuloy mula sa nexus_stock_history_done_from.
+     *
+     * @return array{status:string, lines:array<int,string>}
+     */
+    public function history(): array
+    {
+        $guard = $this->guard(null);
+        if ($guard !== null) return $guard;
+        $start = (string) ItemStockService::startSetting();
+        $from  = self::historyFrom();
+
+        $lock = Cache::lock(self::LOCK, 1800);
+        if (!$lock->get()) {
+            return ['status' => 'locked', 'lines' => ['Another nexus:sync-stock is already running: nothing asked.']];
+        }
+        try {
+            $done = $this->setting(self::HISTORY_DONE_FROM);
+            $done = self::validDate((string) $done) ? (string) $done : null;
+            // Hanggang sa araw bago ang karaniwang sync (item_stock_start), o bago ang huling natapos na range.
+            $to = Carbon::parse(min($done ?? $start, $start), self::TZ)->subDay()->toDateString();
+            if ($to < $from) {
+                return ['status' => 'ok', 'lines' => ["Nexus history complete: $from to the stock start ($start) is stored."]];
+            }
+
+            $lines = [];
+            $rows  = 0;
+            while ($to >= $from) {
+                $winFrom = max($from, Carbon::parse($to, self::TZ)->subDays(self::HISTORY_WINDOW - 1)->toDateString());
+                $res = $this->historyWindow($winFrom, $to);
+                if (!$res['ok']) {
+                    $lines[] = "$winFrom to $to: {$res['message']}";
+                    $lines[] = "Not complete: the next --history continues from $to.";
+                    Log::warning('nexus:sync-stock history not complete', ['kind' => $res['kind'], 'from' => $winFrom, 'to' => $to]);
+                    return ['status' => 'failed', 'lines' => $lines];
+                }
+                $rows += $res['rows'];
+                $this->put(self::HISTORY_DONE_FROM, $winFrom);
+                $lines[] = "$winFrom to $to: {$res['rows']} day rows" . ($res['skipped'] ? ", {$res['skipped']} skipped" : '');
+                $to = Carbon::parse($winFrom, self::TZ)->subDay()->toDateString();
+            }
+            $lines[] = "Nexus history stored from $from ($rows day rows).";
+
+            return ['status' => 'ok', 'lines' => $lines];
+        } finally {
+            $lock->release();
+        }
+    }
+
+    /** Isang range ng --history: tanong, suri, at store kada araw (walang pag-0). */
+    private function historyWindow(string $from, string $to): array
+    {
+        $fail = fn (string $kind, string $message) => ['ok' => false, 'kind' => $kind, 'message' => $message];
+
+        try {
+            $resp = Http::withToken((string) config('services.nexus.token'))
+                ->acceptJson()
+                ->connectTimeout(5)
+                ->timeout(max(1, (int) config('services.nexus.timeout', 20)))
+                ->get(rtrim((string) config('services.nexus.url'), '/') . '/api/item-stock', ['from' => $from, 'to' => $to]);
+        } catch (ConnectionException $e) {
+            return $fail('timeout', 'Nexus did not answer (timeout or no connection)');
+        }
+        $status = $resp->status();
+        if ($status === 401 || $status === 403) return $fail('unauthorized', "Nexus refused the token (HTTP $status)");
+        if ($status === 429) return $fail('rate_limited', 'Nexus says too many calls (HTTP 429)');
+        if ($status !== 200) return $fail('http_error', "Nexus answered HTTP $status");
+
+        $json = json_decode($resp->body(), true);
+        if (!is_array($json) || !isset($json['items']) || !is_array($json['items']) || !array_is_list($json['items'])) {
+            return $fail('malformed', 'Nexus answer is not the expected JSON');
+        }
+        if ((isset($json['from']) && substr((string) $json['from'], 0, 10) !== $from) || (isset($json['to']) && substr((string) $json['to'], 0, 10) !== $to)) {
+            return $fail('malformed', 'Nexus answered for another range');
+        }
+
+        $byDay   = [];      // "araw|name_key" => row
+        $skipped = 0;
+        foreach ($json['items'] as $i => $it) {
+            $name    = is_array($it) && is_string($it['item'] ?? null) ? self::trimName($it['item']) : '';
+            $entries = is_array($it) ? ($it['stock_in'] ?? null) : null;
+            if ($name === '' || mb_strlen($name) > 255 || !is_array($entries) || !array_is_list($entries)) {
+                $skipped++;
+                Log::warning('nexus:sync-stock history entry skipped', ['from' => $from, 'index' => $i, 'item' => mb_substr($name, 0, 80), 'reason' => $name === '' ? 'name' : 'stock_in']);
+                continue;
+            }
+            $key = self::nameKey($name);
+            foreach ($entries as $e) {
+                $day    = is_array($e) ? self::manilaDate($e['date'] ?? null) : null;
+                $lots   = is_array($e) ? self::count($e['lots'] ?? null) : null;
+                $pieces = is_array($e) ? self::count($e['pieces'] ?? null) : null;
+                if ($day === null || $day < $from || $day > $to || $lots === null || $pieces === null) {
+                    $skipped++;
+                    Log::warning('nexus:sync-stock history entry skipped', ['from' => $from, 'item' => mb_substr($name, 0, 80), 'reason' => $day === null || $day < $from || $day > $to ? 'date' : 'count']);
+                    continue;
+                }
+                $r = &$byDay[$day . '|' . $key];
+                $r ??= ['stock_date' => $day, 'name_key' => $key, 'item_name' => $name, 'stock_in_lots' => 0, 'stock_in_pieces' => 0];
+                $r['stock_in_lots']   = min(self::MAX_COUNT, $r['stock_in_lots'] + $lots);
+                $r['stock_in_pieces'] = min(self::MAX_COUNT, $r['stock_in_pieces'] + $pieces);
+                unset($r);
+            }
+        }
+
+        if ($byDay) {
+            $now  = Carbon::now(self::TZ);
+            $rows = array_map(fn ($r) => $r + ['remaining' => null, 'as_of' => null, 'created_at' => $now, 'updated_at' => $now], array_values($byDay));
+            DB::transaction(fn () => DB::table(self::TABLE)->upsert(
+                $rows, ['stock_date', 'name_key'], ['item_name', 'stock_in_lots', 'stock_in_pieces', 'updated_at']
+            ));
+        }
+
+        return ['ok' => true, 'rows' => count($byDay), 'skipped' => $skipped];
     }
 
     private function guard(?string $from): ?array
