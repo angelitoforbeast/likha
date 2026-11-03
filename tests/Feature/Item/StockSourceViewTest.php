@@ -116,16 +116,45 @@ class StockSourceViewTest extends ItemTestCase
         foreach ([true, false] as $ceo) {
             $html = $this->render($ceo);
 
-            $this->assertStringContainsString("(ilNotInNexus(G.item_name) ? 'Not in Nexus' :", $html, 'Stock / Incoming');
-            $this->assertStringContainsString("st('nonexus', 4, '⚪ Not in Nexus', 'grey', this.ilNotInNexusTip())", $html, 'Next step');
+            $this->assertStringContainsString("(ilNoStock(G.item_name) || ((stock.ready && stockFor(G.item_name))", $html, 'Stock / Incoming');
+            $this->assertStringContainsString("st('nonexus', 4, '⚪ ' + this.ilNoStock(name), 'grey', this.ilNoStockTip(name))", $html, 'Next step');
             $qty = $this->between($html, "<span class=\"il-m-label\">Qty to order</span>", '</td>');
-            $this->assertStringContainsString('Not in Nexus: counted with stock 0', $qty);
-            $this->assertMatchesRegularExpression('/:class="ilNotInNexus\(G\.item_name\) \? \'il-muted\' : \'\'"\s+:title="ilNotInNexus\(G\.item_name\) \? ilNotInNexusTip\(\)/', $html);
+            $this->assertStringContainsString("x-text=\"ilNoStock(G.item_name) + ': counted with stock 0'\"", $qty);
+            $this->assertMatchesRegularExpression('/:class="ilNoStock\(G\.item_name\) \? \'il-muted\' : \'\'"\s+:title="ilNoStock\(G\.item_name\) \? ilNoStockTip\(G\.item_name\)/', $html);
             $this->assertMatchesRegularExpression('/\.il-muted\{[^}]*opacity:/', $html);
             $list = $this->between($html, '<details class="il-unmatched il-not-in-nexus"', '</details>');
             $this->assertStringContainsString("x-text=\"num(stock.meta.nexus.not_in_nexus_count) + ' items Not in Nexus'\"", $list);
             $this->assertStringContainsString('<li x-text="name"></li>', $list);
         }
+    }
+
+    public function test_no_matches_at_all_says_not_synced_or_no_matches_and_the_not_in_nexus_tooltip_explains_nexus_boxes(): void
+    {
+        $html = $this->render(true);
+
+        foreach (["if (S.not_in_nexus) return 'Not in Nexus';", "if (S.stock_unknown === 'not_synced') return 'Nexus not synced yet';",
+                  "if (S.stock_unknown === 'no_matches') return 'No Nexus name matches';",
+                  "' Nexus still shows boxes of it: they were stocked in before the history start, or a lot was never scanned at Stock In.'",
+                  '(S && S.nexus_remaining != null)'] as $text) {
+            $this->assertStringContainsString($text, $html, $text);
+        }
+    }
+
+    public function test_B1_the_suppliers_tab_shows_not_in_nexus_and_mutes_doi_order_by_and_qty(): void
+    {
+        $html = $this->render(true, true);   // ang table na may suppliers (_table_suppliers → _agg_cells)
+        $stock = $this->between($html, "<template x-if=\"col.id==='stock'\">", '</template>');
+        $doi   = $this->between($html, "<template x-if=\"col.id==='doi'\">", "<template x-if=\"stockFor(row.item_name)\">");
+        $qty   = $this->between($html, "<template x-if=\"col.id==='order_qty'\">", "<template x-if=\"col.id==='lifecycle'\">");
+
+        $this->assertStringContainsString("x-text=\"ilNoStock(row.item_name) || ((stock.ready && stockFor(row.item_name)) ? num(stockFor(row.item_name).stock) : '—')\"", $stock, 'hindi "0" galing sa num(null)');
+        $this->assertStringContainsString(':title="ilNoStock(row.item_name) ? ilNoStockTip(row.item_name) :', $stock);
+        $this->assertStringContainsString(":class=\"ilNoStock(row.item_name) ? 'il-muted' : ''\"", $doi, 'DOI naka-mute');
+        $this->assertStringContainsString(':title="ilNoStock(row.item_name) ? ilNoStockTip(row.item_name) :', $doi);
+        $this->assertStringContainsString(":class=\"ilNoStock(row.item_name) ? 'il-muted' : ''\"", $qty, 'qty at order-by naka-mute');
+        $this->assertStringContainsString(":title=\"ilNoStock(row.item_name) ? ilNoStockTip(row.item_name) : 'Huling araw", $qty, 'order-by tooltip');
+        $this->assertStringContainsString("x-text=\"ilNoStock(row.item_name) + ': stock 0 ang gamit'\"", $qty);
+        $this->assertMatchesRegularExpression('/\.il-muted\{[^}]*opacity:/', $html, 'ang CSS ay nasa layout na ito rin');
     }
 
     public function test_S_220_6_9_the_new_lines_wrap_at_phone_width(): void

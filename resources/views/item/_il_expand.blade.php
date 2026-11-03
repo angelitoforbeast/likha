@@ -22,9 +22,9 @@
         <span x-show="stockPending()" class="il-grey">…</span>
         <span x-show="!stockPending()"
               x-text="(stock.ready && stockFor(G.item_name) && stockFor(G.item_name).stock_needs_count) ? 'Count the stock first'
-                      : (ilNotInNexus(G.item_name) ? 'Not in Nexus' : ((stock.ready && stockFor(G.item_name)) ? num(stockFor(G.item_name).stock) : '—'))
+                      : (ilNoStock(G.item_name) || ((stock.ready && stockFor(G.item_name)) ? num(stockFor(G.item_name).stock) : '—'))
                         + ' / ' + (stockFor(G.item_name) ? num(stockFor(G.item_name).incoming) : '—')"
-              :title="ilNotInNexus(G.item_name) ? ilNotInNexusTip() : null"></span>
+              :title="ilNoStock(G.item_name) ? ilNoStockTip(G.item_name) : null"></span>
       </div>
       {{-- Nexus lang: saan galing ang stock, at ang hawak ng Nexus ngayon (cross-check, display lang). --}}
       <template x-if="!stockPending() && stockNexus() && stockFor(G.item_name)">

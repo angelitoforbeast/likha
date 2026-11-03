@@ -3399,9 +3399,26 @@
           + ' = ' + (S.stock_raw < 0 ? '−' + this.num(-S.stock_raw) : this.num(S.stock_raw))
           + (S.returned_over_shipped ? ' (returned is more than shipped: check)' : '');
       },
-      // Walang Nexus stock-in kailanman: walang numero ng stock; ang i-order ay kinuwenta sa 0 (naka-mute sa page).
-      ilNotInNexus(name){ const S = this.stockFor(name); return !!(this.stockNexus() && S && S.not_in_nexus); },
-      ilNotInNexusTip(){ return 'Not in Nexus: no stock-in recorded in Nexus for this item, so its stock is unknown; the quantity is counted with stock 0'; },
+      // Walang numero ng stock (Nexus mode): "Not in Nexus" (walang stock-in ang item), o, kapag walang kahit isang
+      // tumutugmang Nexus name, "Nexus not synced yet" / "No Nexus name matches". '' = may stock. Ang i-order ay sa stock 0.
+      ilNoStock(name){
+        const S = this.stockFor(name);
+        if (!this.stockNexus() || !S) return '';
+        if (S.not_in_nexus) return 'Not in Nexus';
+        if (S.stock_unknown === 'not_synced') return 'Nexus not synced yet';
+        if (S.stock_unknown === 'no_matches') return 'No Nexus name matches';
+        return '';
+      },
+      ilNoStockTip(name){
+        const S = this.stockFor(name), what = this.ilNoStock(name);
+        if (what === 'Not in Nexus') {
+          return 'Not in Nexus: no stock-in recorded in Nexus for this item, so its stock is unknown; the quantity is counted with stock 0.'
+            + ((S && S.nexus_remaining != null) ? ' Nexus still shows boxes of it: they were stocked in before the history start, or a lot was never scanned at Stock In.' : '');
+        }
+        if (what === 'Nexus not synced yet') return 'Nexus has not been synced yet, so no item has a stock number; the quantity is counted with stock 0';
+        if (what === 'No Nexus name matches') return 'No Nexus name matches a Likha item yet, so no item has a stock number; the quantity is counted with stock 0';
+        return '';
+      },
       // Nexus "remaining": buong lots (boxes) na nasa shelf pa at hindi pa nailalabas; ibang sukat ito, kaya walang "difference".
       nexusCrossText(name){
         const n = this.stockNexus(), S = this.stockFor(name);
@@ -3625,8 +3642,8 @@
         if (!this.stock.loaded || !this.stock.ready || !S || !P || P.order_qty == null) {
           return st('nodata', 5, '—', 'grey', 'No stock data yet');
         }
-        if (this.ilNotInNexus(name)) {
-          return st('nonexus', 4, '⚪ Not in Nexus', 'grey', this.ilNotInNexusTip());
+        if (this.ilNoStock(name)) {
+          return st('nonexus', 4, '⚪ ' + this.ilNoStock(name), 'grey', this.ilNoStockTip(name));
         }
         if (S.stock_needs_count) {
           return st('count', 1, '🟠 Count the stock first', 'orange',

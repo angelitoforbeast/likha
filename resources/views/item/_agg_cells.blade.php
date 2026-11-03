@@ -208,9 +208,11 @@
   </span>
 </template>
 <template x-if="col.id==='stock'">
-  <span :title="stockTip('ilang piraso ang natitira (natanggap na PO bawas ang nai-ship) mula ' + (stock.start || 'START'), stockFor(row.item_name))">
+  <span :title="ilNoStock(row.item_name) ? ilNoStockTip(row.item_name) : stockTip('ilang piraso ang natitira (natanggap na PO bawas ang nai-ship) mula ' + (stock.start || 'START'), stockFor(row.item_name))">
     <span x-show="stockPending()" style="color:#94a3b8;">…</span>
-    <span x-show="!stockPending()" x-text="(stock.ready && stockFor(row.item_name)) ? num(stockFor(row.item_name).stock) : '—'"></span>
+    {{-- Nexus mode, walang numero ng stock: "Not in Nexus" (o "Nexus not synced yet"), hindi "0" galing sa num(null). --}}
+    <span x-show="!stockPending()" :class="ilNoStock(row.item_name) ? 'il-muted' : ''"
+          x-text="ilNoStock(row.item_name) || ((stock.ready && stockFor(row.item_name)) ? num(stockFor(row.item_name).stock) : '—')"></span>
     <template x-if="stock.ready && stockFor(row.item_name)?.stock_needs_count">
       <div style="font-size:9px;color:#b45309;font-weight:600;"
            :title="'may stock na hindi nabilang bago ang ' + stock.start">bilangin</div>
@@ -230,10 +232,10 @@
   </span>
 </template>
 <template x-if="col.id==='doi'">
-  <span :title="stockTip('ilang araw pa tatagal ang stock + paparating, bawas ang HOLD. Pula: mauubos bago dumating ang order. Dilaw: malapit na. Berde: ok pa. Abo: walang benta, o mas mababa sa 0.5 kada araw.', stockFor(row.item_name))">
+  <span :title="ilNoStock(row.item_name) ? ilNoStockTip(row.item_name) : stockTip('ilang araw pa tatagal ang stock + paparating, bawas ang HOLD. Pula: mauubos bago dumating ang order. Dilaw: malapit na. Berde: ok pa. Abo: walang benta, o mas mababa sa 0.5 kada araw.', stockFor(row.item_name))">
     <span x-show="stockPending()" style="color:#94a3b8;">…</span>
     <span x-show="!stockPending()">
-      <span :style="'font-weight:700;color:' + doiColour(stockSet(row.item_name))" x-text="doiText(stockSet(row.item_name))"></span>
+      <span :class="ilNoStock(row.item_name) ? 'il-muted' : ''" :style="'font-weight:700;color:' + doiColour(stockSet(row.item_name))" x-text="doiText(stockSet(row.item_name))"></span>
       <template x-if="stockFor(row.item_name)">
         @if(!empty($canSupplierWork))
         <div @if(!empty($rdtOneLine))class="spl-lead" @endif@click.stop>
@@ -268,12 +270,15 @@
   </span>
 </template>
 <template x-if="col.id==='order_qty'">
-  <span :title="stockTip(orderTip(row.item_name), stockFor(row.item_name))">
+  <span :title="ilNoStock(row.item_name) ? ilNoStockTip(row.item_name) : stockTip(orderTip(row.item_name), stockFor(row.item_name))">
     <span x-show="stockPending()" style="color:#94a3b8;">…</span>
-    <span x-show="!stockPending()">
+    <span x-show="!stockPending()" :class="ilNoStock(row.item_name) ? 'il-muted' : ''">
       <span style="font-weight:800;" x-text="stockSet(row.item_name) && stockSet(row.item_name).order_qty != null ? num(stockSet(row.item_name).order_qty) : '—'"></span>
       <template x-if="stockSet(row.item_name)">
-        <div style="font-size:9px;color:#64748b;font-weight:400;" title="Huling araw na pwedeng umorder para hindi maubusan, base sa lead time" x-text="orderByText(stockSet(row.item_name))"></div>
+        <div style="font-size:9px;color:#64748b;font-weight:400;" :title="ilNoStock(row.item_name) ? ilNoStockTip(row.item_name) : 'Huling araw na pwedeng umorder para hindi maubusan, base sa lead time'" x-text="orderByText(stockSet(row.item_name))"></div>
+      </template>
+      <template x-if="ilNoStock(row.item_name)">
+        <div style="font-size:9px;color:#64748b;font-weight:600;" x-text="ilNoStock(row.item_name) + ': stock 0 ang gamit'"></div>
       </template>
     </span>
   </span>
