@@ -23,6 +23,9 @@ class GatewayProvider implements MessagingProvider
     /** Ang gateway na huling ginamit (para sa via ng padala). */
     private ?string $last = null;
 
+    /** Ang address na tinawag sa huling padala (Gateways::route sa forbeast); null = walang tawag. */
+    private ?string $lastRoute = null;
+
     public function __construct(private ?string $gateway = null)
     {
     }
@@ -31,6 +34,12 @@ class GatewayProvider implements MessagingProvider
     public function gateway(): ?string
     {
         return $this->gateway ?? $this->last;
+    }
+
+    /** Ang address ng huling padala (para sa chatbot_replies.route); null = walang tawag. */
+    public function route(): ?string
+    {
+        return $this->lastRoute;
     }
 
     /** Ang error kapag hindi naka-set up ang gateway (walang tawag). */
@@ -51,6 +60,7 @@ class GatewayProvider implements MessagingProvider
     {
         $gw = $this->gateway ?? Gateways::active($pageName);
         $this->last = $gw;
+        $this->lastRoute = null;
         $c = Gateways::config($gw);
         if ($c['url'] === '') return null;
         // Ang address ng page (chatbot.gateway_app) sa forbeast; may path prefix (hal. https://host/api).
@@ -60,6 +70,7 @@ class GatewayProvider implements MessagingProvider
         $key = app(ForbeastPageSetup::class)->on($gw)->token($pageName);
         if ($key === '') $key = $c['key'];
         if ($url === '' || $key === '') return null;
+        $this->lastRoute = $route;
 
         return ['gateway' => $gw, 'route' => $route, 'url' => $url . '/v1/pages/' . rawurlencode($pageId) . '/messages', 'key' => $key, 'timeout' => max(1, $c['timeout']),
             'body' => ['psid' => $psid, 'messages' => BotcakeOutbox::wire($messages), 'messaging_type' => $messagingType === self::UPDATE ? self::UPDATE : self::RESPONSE, 'client_ref' => $clientRef]];

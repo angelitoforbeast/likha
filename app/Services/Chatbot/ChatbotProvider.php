@@ -41,6 +41,12 @@ class ChatbotProvider
         return $provider instanceof GatewayProvider ? ($provider->gateway() ?? self::FORBEAST) : self::BOTCAKE;
     }
 
+    /** Ang address na dinaanan ng padala (GatewayProvider::route); null = Botcake o walang tawag. */
+    public static function routeOf(MessagingProvider $provider): ?string
+    {
+        return $provider instanceof GatewayProvider ? $provider->route() : null;
+    }
+
     /** Ang via ay isa sa mga gateway (hindi Botcake)? */
     public static function isGateway(?string $via): bool
     {

@@ -4255,3 +4255,14 @@ Tests (`tests/Feature/Item/`): `StockFromFirstStockInTest`, `NexusStockHistoryTe
 | S-224.1.3 | negative | Given a page on Botcake (or a chat Botcake delivered), it stays "Botcake" even with an address set | `test_S_224_1_3_botcake_stays_botcake_even_with_an_address` | pass |
 | S-224.1.4 | edge | Given no `GATEWAY_URLS`, a page set to `incepxion` is still "Forbeast"; the incepxionbot gateway keeps "Incepxionbot" | `test_S_224_1_4_without_gateway_urls_the_label_is_todays` | pass |
 | S-224.1.5 | happy | The variable's help text names the address ("Incepxion") | `test_S_224_1_5_the_variable_help_names_the_address` | pass |
+
+### S-224.2 Each reply records its address (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-224.2.1 | happy | A flow send through the Forbeast gateway stores `route` = the address called (`forbeast` by default, `incepxion` when set); a Botcake send and a sheet row store null; `via` is unchanged | `test_S_224_2_1_a_flow_send_records_the_address_it_went_through` | pass |
+| S-224.2.2 | happy | A manual Inbox reply on a page set to `incepxion` stores `via=forbeast`, `route=incepxion` | `test_S_224_2_2_an_inbox_reply_records_the_address` | pass |
+| S-224.2.3 | negative | Only a `forbeast` send stores an address (Botcake and the incepxionbot gateway store null); a row written without one stays null = default | `test_S_224_2_3_only_a_forbeast_send_stores_an_address_and_old_rows_stay_null` | pass |
+| S-224.2.4 | happy | A sequence send (sequence pool) of a page set to `incepxion` stores `route=incepxion` | `test_S_224_2_4_a_sequence_send_records_the_address_it_went_through` | pass |
+| S-224.2.5 | edge | The address is saved on the ticket before the call, so a send finished by the sweep after a crash still stores it | `test_S_224_2_5_a_sequence_send_finished_after_a_crash_keeps_the_address_from_the_call` | pass |
+| S-224.2.6 | edge | A sequence send on the default address stores `forbeast`; a Botcake sequence send stores null and its ticket result has no `route` key | `test_S_224_2_6_a_sequence_send_on_the_default_address_records_forbeast_and_a_botcake_one_records_nothing` | pass |
+| S-224.2.7 | happy | The migration adds `route` VARCHAR(30) NULL with `ALGORITHM=INSTANT` on MySQL (fails rather than copying the table), is idempotent and has a down | `test_S_224_2_7_the_migration_adds_a_nullable_column_instantly_and_has_a_down` | pass |

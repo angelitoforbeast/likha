@@ -319,16 +319,17 @@ class SequenceSendPool extends TicketPool
                     return null;
                 }
                 $via = $job['provider'] === ChatbotProvider::GATEWAY ? (string) $job['gateway'] : ChatbotProvider::BOTCAKE;
+                $route = $job['provider'] === ChatbotProvider::GATEWAY ? ($job['req']['route'] ?? null) : null;
                 if (($check = app(ChatbotSequences::class)->sendCheck($row)) !== null) {
                     $this->forget($id);
                     // Naka-off ang mga sagot: itinatala bilang skipped gaya ng padalang naghintay, at tuloy ang step.
                     $o = $check['code'] === 'switched_off' ? ['status' => 'skipped', 'error' => $check['reason'], 'http' => null]
                         : ['status' => 'skipped', 'error' => $check['reason'], 'http' => null, 'check' => $check['code']];
-                    BotcakeSendQueue::finishSequence($row, $this->owner, $o + ['via' => $via, 'ref' => $job['ref']]);
+                    BotcakeSendQueue::finishSequence($row, $this->owner, $o + ['via' => $via, 'ref' => $job['ref']] + ($route !== null ? ['route' => $route] : []));
                     return null;
                 }
                 // Itinatala bago tumawag: hindi na inuulit pagkatapos ng crash.
-                if (!BotcakeSendQueue::calledSequence($row, $this->owner, $via, $job['ref'])) {
+                if (!BotcakeSendQueue::calledSequence($row, $this->owner, $via, $job['ref'], $route)) {
                     $this->forget($id);
                     // Hawak pa ng pool pero wala nang may hawak na subscription (hal. sumagot ang customer): walang padala.
                     if (BotcakeSendQueue::owns($row, $this->owner)) {
@@ -396,7 +397,7 @@ class SequenceSendPool extends TicketPool
                 $o = GatewayProvider::outcome($r, $job['secret'], $job['req']['route'] ?? null) + ['via' => (string) $job['gateway']];
             }
             $this->forget($id);
-            BotcakeSendQueue::finishSequence($row, $this->owner, $o + ['ref' => $job['ref']]);
+            BotcakeSendQueue::finishSequence($row, $this->owner, $o + ['ref' => $job['ref']] + ($job['provider'] === ChatbotProvider::GATEWAY && isset($job['req']['route']) ? ['route' => $job['req']['route']] : []));
             $this->progressAt = now()->getTimestamp();
             // Pagkatapos maitala ang resulta: ang pumalyang dispatch ay hindi nagiging failed na padala.
             if ($job['provider'] === ChatbotProvider::GATEWAY) {
