@@ -369,6 +369,8 @@
     .il-unmatched summary{cursor:pointer; color:#b45309; font-weight:600;}
     .il-unmatched ul{margin:4px 0 0; padding-left:18px; max-height:180px; overflow:auto;}
     .il-warn-mark{margin-left:4px; color:#b45309; cursor:help;}
+    /* Not in Nexus: ang i-order ay kinuwenta sa stock 0, kaya naka-mute at may paliwanag (hindi para kumilos agad). */
+    .il-muted{opacity:.55; filter:grayscale(1);}
     .il-tone-green { color:#15803d; }
     .il-cf { display:inline-block; border-radius:6px; padding:2px 8px; line-height:1.3; }
     .il-cf-sub { font-size:11px; font-weight:600; }
@@ -890,6 +892,17 @@
                 <template x-for="u in stock.meta.nexus.unmatched" :key="'um-' + u.name">
                   <li><span x-text="u.name"></span> · <span x-text="num(u.pieces) + ' pcs'"></span><span x-show="u.ambiguous"
                       class="il-src-warn" title="This name fits more than one Likha item through an item mapping, so it is not counted"> · ambiguous</span></li>
+                </template>
+              </ul>
+            </details>
+          </template>
+          <template x-if="stockNexus() && stockNexus().not_in_nexus_count > 0">
+            <details class="il-unmatched il-not-in-nexus">
+              <summary x-text="num(stock.meta.nexus.not_in_nexus_count) + ' items Not in Nexus'"
+                       title="Items with no stock-in recorded in Nexus: their stock is unknown, and their quantity to order is counted with stock 0"></summary>
+              <ul>
+                <template x-for="name in stock.meta.nexus.not_in_nexus" :key="'nin-' + name">
+                  <li x-text="name"></li>
                 </template>
               </ul>
             </details>
@@ -3382,23 +3395,41 @@
         const S = this.stockFor(name);
         if (!this.stockNexus() || !this.stock.ready || !S || S.stock_in == null) return '';
         const ret = S.returned == null ? 'n/a' : this.num(S.returned);
-        return 'stock-in ' + this.num(S.stock_in) + ' + returned ' + ret + ' − shipped ' + this.num(S.shipped)
+        return 'from ' + S.stock_start + ': stock-in ' + this.num(S.stock_in) + ' + returned ' + ret + ' − shipped ' + this.num(S.shipped)
           + ' = ' + (S.stock_raw < 0 ? '−' + this.num(-S.stock_raw) : this.num(S.stock_raw))
           + (S.returned_over_shipped ? ' (returned is more than shipped: check)' : '');
       },
-      // Nexus "remaining" (nasa shelf ngayon) at ang diperensiya (Likha − Nexus); display lang.
+      // Walang numero ng stock (Nexus mode): "Not in Nexus" (walang stock-in ang item), o, kapag walang kahit isang
+      // tumutugmang Nexus name, "Nexus not synced yet" / "No Nexus name matches". '' = may stock. Ang i-order ay sa stock 0.
+      ilNoStock(name){
+        const S = this.stockFor(name);
+        if (!this.stockNexus() || !S) return '';
+        if (S.not_in_nexus) return 'Not in Nexus';
+        if (S.stock_unknown === 'not_synced') return 'Nexus not synced yet';
+        if (S.stock_unknown === 'no_matches') return 'No Nexus name matches';
+        return '';
+      },
+      ilNoStockTip(name){
+        const S = this.stockFor(name), what = this.ilNoStock(name);
+        if (what === 'Not in Nexus') {
+          return 'Not in Nexus: no stock-in recorded in Nexus for this item, so its stock is unknown; the quantity is counted with stock 0.'
+            + ((S && S.nexus_remaining != null) ? ' Nexus still shows boxes of it: they were stocked in before the history start, or a lot was never scanned at Stock In.' : '');
+        }
+        if (what === 'Nexus not synced yet') return 'Nexus has not been synced yet, so no item has a stock number; the quantity is counted with stock 0';
+        if (what === 'No Nexus name matches') return 'No Nexus name matches a Likha item yet, so no item has a stock number; the quantity is counted with stock 0';
+        return '';
+      },
+      // Nexus "remaining": buong lots (boxes) na nasa shelf pa at hindi pa nailalabas; ibang sukat ito, kaya walang "difference".
       nexusCrossText(name){
         const n = this.stockNexus(), S = this.stockFor(name);
         if (!n || !S) return '';
-        if (S.nexus_remaining == null) return 'Nexus on shelf —';
-        const d = S.nexus_diff;
-        return 'Nexus on shelf ' + this.num(S.nexus_remaining)
+        if (S.nexus_remaining == null) return 'Nexus boxes not yet released: —';
+        return 'Nexus boxes not yet released: ' + this.num(S.nexus_remaining)
           + (S.nexus_remaining_as_of ? ' (as of ' + S.nexus_remaining_as_of + ')' : '')
           + (S.nexus_remaining_stale ? ' (old)' : '')
-          + (S.nexus_remaining_mixed ? ' (an older Nexus name left out)' : '')
-          + (d == null ? '' : ', difference ' + (d > 0 ? '+' : d < 0 ? '−' : '') + this.num(Math.abs(d)));
+          + (S.nexus_remaining_mixed ? ' (an older Nexus name left out)' : '');
       },
-      nexusCrossTip(){ return 'Nexus also counts the stock from before the start, so a difference is expected'; },
+      nexusCrossTip(){ return 'Whole lots (boxes) still on the shelf in Nexus, not yet released to the floor: not all pieces on hand'; },
       // Isang profit figure kada BASE item para pareho ang set sa lahat ng variant row nito:
       //   basePct = Σ projected_profit_last_7d ÷ Σ gross_sales_last_7d × 100
       // (aggregate ng bawat item row ng page, parehong numerator/denominator ng Prof.%(7D)).
@@ -3610,6 +3641,9 @@
         const st = (key, rank, text, tone, tip) => ({ key, rank, text, tone, tip });
         if (!this.stock.loaded || !this.stock.ready || !S || !P || P.order_qty == null) {
           return st('nodata', 5, '—', 'grey', 'No stock data yet');
+        }
+        if (this.ilNoStock(name)) {
+          return st('nonexus', 4, '⚪ ' + this.ilNoStock(name), 'grey', this.ilNoStockTip(name));
         }
         if (S.stock_needs_count) {
           return st('count', 1, '🟠 Count the stock first', 'orange',

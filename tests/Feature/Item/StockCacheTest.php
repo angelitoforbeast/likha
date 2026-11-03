@@ -26,7 +26,7 @@ class StockCacheTest extends ItemTestCase
             $this->order('1 x GLOW TAPE', 'Page A', 'G' . $i, '2026-09-26');
             $this->shipped('G' . $i, '2026-09-26 10:00:00', $i === 1 ? 'Returned' : 'Delivered', $i === 1 ? '2026-10-05 12:00:00' : null);
         }
-        $this->nexusStockIn('GLOW TAPE', 10, '2026-10-01');
+        $this->nexusStockIn('GLOW TAPE', 10, '2026-09-26');
     }
 
     protected function tearDown(): void
@@ -62,7 +62,7 @@ class StockCacheTest extends ItemTestCase
         $this->assertSame($cold['items'], $warm['items']);
         $this->assertSame(8, $this->stockOf($warm));   // 10 + 1 − 3
         $fj = fn (array $q) => array_values(array_filter($q, fn ($s) => str_contains($s, 'from_jnts')));
-        $this->assertCount(3, $fj($q1), 'cold: HOLD + shipped + returned');
+        $this->assertCount(6, $fj($q1), 'cold: HOLD + saradong shipped at returned + live shipped at returned + flags');
         $this->assertCount(1, $fj($q2), 'warm: ang HOLD lang');
         $this->assertStringContainsString('left join "from_jnts"', $fj($q2)[0]);
         $this->assertSame([], array_values(array_filter($q2, fn ($s) => str_contains($s, 'nexus_stock_ins'))));
@@ -72,9 +72,13 @@ class StockCacheTest extends ItemTestCase
     {
         [, $q] = $this->fetchStock();
 
-        $returned = array_values(array_filter($q, fn ($s) => str_contains($s, 'fj.status = ?')));
-        $this->assertCount(1, $returned);
-        $this->assertStringContainsString('group by', $returned[0]);
+        // Isang grouped returned query bawat bahagi (saradong araw, live), parehong "signingtime mula–hanggang" lang.
+        $returned = array_values(array_filter($q, fn ($s) => str_contains($s, 'fj.status = ? and fj.signingtime >= ? and fj.signingtime <= ?')));
+        $this->assertCount(2, $returned);
+        foreach ($returned as $sql) {
+            $this->assertStringContainsString('group by', $sql);
+            $this->assertStringNotContainsString('signingtime is null', $sql, 'walang "OR signingtime IS NULL" na pumipigil sa index');
+        }
     }
 
     public function test_S_220_9_3_a_successful_sync_re_keys_the_cache_and_otherwise_it_lasts_15_minutes(): void
@@ -110,7 +114,7 @@ class StockCacheTest extends ItemTestCase
     public function test_S_220_9_4_a_cold_request_waits_for_another_computing_request_and_the_lock_is_freed_after(): void
     {
         config(['services.nexus.cold_wait' => 1]);
-        $key   = 'item_stock:inputs:v1:localhost:2026-09-25:jnt:20261103101000:2026-11-03';
+        $key   = 'item_stock:stockin:v2:localhost:20261103101000:2026-11-03';
         $other = Cache::lock($key . ':lock', 60);
         $this->assertTrue($other->get(), 'ibang request ang kumukuwenta');
 

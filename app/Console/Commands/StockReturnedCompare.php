@@ -47,9 +47,10 @@ class StockReturnedCompare extends Command
 
         $this->line("Returned since $start (now: $until). Current source: " . $sources->current()['setting']);
         $this->table(['Item', 'J&T returned', 'Nexus RTS returned'], $rows);
-        if ($jnt->flags) {
-            $this->line('J&T Returned not counted: ' . ($jnt->flags['unsigned'] ?? 0) . ' without signingtime, '
-                . ($jnt->flags['future'] ?? 0) . ' with a future signingtime.');
+        $flags = app(JntReturnedSource::class)->flags($until);
+        if ($flags['unsigned'] || $flags['future']) {
+            $this->line('J&T Returned not counted (all items): ' . $flags['unsigned'] . ' without signingtime, '
+                . $flags['future'] . ' with a future signingtime.');
         }
 
         return self::SUCCESS;

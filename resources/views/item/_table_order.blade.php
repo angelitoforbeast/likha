@@ -88,12 +88,16 @@
         </td>
 
         {{-- Qty to order (+ "≈ ₱" CEO lang) --}}
-        <td x-show="ilIdOn('order_qty')" :title="ilTip('How many pieces to order now', stockFor(G.item_name))">
+        <td x-show="ilIdOn('order_qty')" :class="ilNoStock(G.item_name) ? 'il-muted' : ''"
+            :title="ilNoStock(G.item_name) ? ilNoStockTip(G.item_name) : ilTip('How many pieces to order now', stockFor(G.item_name))">
           <span class="il-m-label">Qty to order</span>
           <span x-show="stockPending()" class="il-grey">…</span>
           <template x-if="!stockPending()">
             <div>
               <div :class="ilQty(G.item_name) ? 'il-qty' : 'il-grey'" x-text="ilQty(G.item_name) || '—'"></div>
+              <template x-if="ilNoStock(G.item_name)">
+                <div class="il-sub" x-text="ilNoStock(G.item_name) + ': counted with stock 0'"></div>
+              </template>
               @if($effectiveIsCEO)
               <template x-if="ilQtyCost(G.item_name)">
                 <div class="il-sub" title="Estimated cost: qty × the cheapest quote's price, or the item value per piece" x-text="ilQtyCost(G.item_name)"></div>

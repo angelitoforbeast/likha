@@ -143,14 +143,19 @@ class ReturnedQueryPerfTest extends TestCase
             ['key' => 'item_stock_start', 'value' => '2026-10-02'],
             ['key' => 'nexus_stock_last_synced_at', 'value' => '2026-11-03 10:10:00'],
         ]);
+        // 42 Nexus items; ang unang stock-in ay iba-iba (pinakamaaga 09-13, gaya ng mini flashlight sa live), saka araw-araw.
         $rows = [];
-        foreach (\Carbon\CarbonPeriod::create('2026-10-02', '2026-11-03') as $d) {
-            for ($i = 0; $i < 42; $i++) {
-                $name = 'Item ' . str_pad((string) ($i * 7), 3, '0', STR_PAD_LEFT);
+        for ($i = 0; $i < 42; $i++) {
+            $name  = 'Item ' . str_pad((string) ($i * 7), 3, '0', STR_PAD_LEFT);
+            $first = match (true) { $i === 0 => '2026-09-13', $i === 1 => '2026-09-29', default => '2026-10-' . str_pad((string) (2 + $i % 25), 2, '0', STR_PAD_LEFT) };
+            foreach (\Carbon\CarbonPeriod::create($first, '2026-11-03') as $d) {
                 $rows[] = ['stock_date' => $d->toDateString(), 'name_key' => sha1($name), 'item_name' => $name,
                            'stock_in_lots' => 1, 'stock_in_pieces' => 20, 'remaining' => 100, 'as_of' => $d->toDateString() . ' 10:00:00'];
             }
         }
+        // Isang pangalang walang tugmang Likha item, may stock-in noong Enero: hindi ito ang hangganan ng mga query.
+        $rows[] = ['stock_date' => '2026-01-15', 'name_key' => sha1('UNKNOWN BOX'), 'item_name' => 'UNKNOWN BOX',
+                   'stock_in_lots' => 1, 'stock_in_pieces' => 5, 'remaining' => null, 'as_of' => null];
         foreach (array_chunk($rows, 500) as $c) DB::table('nexus_stock_ins')->insert($c);
         DB::statement('ANALYZE TABLE from_jnts, macro_output, nexus_stock_ins');
     }
@@ -179,23 +184,76 @@ class ReturnedQueryPerfTest extends TestCase
             'Returned since start (latest row, signed)' => DB::table('from_jnts')->where('status', 'Returned')->where('signingtime', '>=', '2026-10-02')->count(),
         ];
 
+        // Spec 222: ang hangganan ay ang pinakamaagang unang stock-in ng tumutugmang item (09-13).
+        $lower = '2026-09-13';
         $src = app(JntReturnedSource::class);
-        $out['returned query median ms (5 runs)'] = $this->median(fn () => $src->rows('2026-10-02', $until));
-        $out['returned pieces total'] = array_sum($src->returned('2026-10-02', $until)->pieces);
+        $out['returned query (per item and day, from 09-13) median ms (5 runs)'] = $this->median(fn () => $src->rows($lower, $until));
+        $out['returned pieces total'] = array_sum($src->returned($lower, $until)->pieces);
+        // Saradong range na may FORCE INDEX (signingtime, status): parehong resulta, ibang plan.
+        $closedUntil = '2026-11-01 23:59:59';
+        $out['index check says'] = $src->useIndexHint() ? 'present' : 'missing';
+        $out['returned closed range 09-13..11-01, no hint, median ms (5 runs)'] = $this->median(fn () => $src->rows($lower, $closedUntil));
+        $out['returned closed range 09-13..11-01, FORCE INDEX, median ms (5 runs)'] = $this->median(fn () => $src->rows($lower, $closedUntil, true));
+        $sortRows = function (array $r) { sort($r); return $r; };
+        $plainRows = $sortRows($src->rows($lower, $closedUntil));
+        $out['closed range rows (item x day)'] = count($plainRows);
+        $out['FORCE INDEX rows identical'] = $plainRows === $sortRows($src->rows($lower, $closedUntil, true));
+        $this->assertTrue($out['FORCE INDEX rows identical']);
+        $this->assertSame('present', $out['index check says']);
+        $out['shipped query (per item and first-submission day, from 09-13) median ms (5 runs)'] = $this->median(
+            fn () => DB::select(ItemStockService::shippedSql(), ItemStockService::shippedBindings($lower))
+        );
+        $out['shipped rows (item x day)'] = count(DB::select(ItemStockService::shippedSql(), ItemStockService::shippedBindings($lower)));
+
+        // Para maikumpara sa parehong makina at data: ang returned query ng spec 220 (global start 10-02, isang total kada item).
+        $q220 = "SELECT mo.`ITEM_NAME` AS item_name, SUM(CASE WHEN r.signingtime IS NOT NULL AND r.signingtime <= ? THEN 1 ELSE 0 END) AS returned_cnt
+            FROM macro_output mo
+            JOIN (SELECT fj.waybill_number, fj.signingtime FROM from_jnts fj
+                  WHERE fj.status = 'Returned' AND (fj.signingtime IS NULL OR fj.signingtime >= '2026-10-02 00:00:00')
+                    AND NOT EXISTS (SELECT 1 FROM from_jnts n WHERE n.waybill_number = fj.waybill_number AND n.id > fj.id)
+                    AND NOT EXISTS (SELECT 1 FROM from_jnts b WHERE b.waybill_number = fj.waybill_number AND b.submission_time < '2026-10-02 00:00:00')
+                    AND (fj.submission_time >= '2026-10-02 00:00:00'
+                         OR EXISTS (SELECT 1 FROM from_jnts a WHERE a.waybill_number = fj.waybill_number AND a.submission_time >= '2026-10-02 00:00:00'))) r
+              ON r.waybill_number = mo.waybill
+            WHERE (mo.`STATUS` IS NULL OR LOWER(REPLACE(REPLACE(TRIM(mo.`STATUS`), ' ', ''), '_', '')) NOT IN ('cannotproceed', 'odz'))
+            GROUP BY mo.`ITEM_NAME`";
+        $out['spec 220 returned query, same data, median ms (5 runs)'] = $this->median(fn () => DB::select($q220, [$until]));
+        $q220s = "SELECT mo.`ITEM_NAME` AS item_name, COUNT(*) AS cnt FROM macro_output mo
+             JOIN (SELECT DISTINCT fj.waybill_number FROM from_jnts fj WHERE fj.submission_time >= '2026-10-02 00:00:00'
+                   AND NOT EXISTS (SELECT 1 FROM from_jnts fj2 WHERE fj2.waybill_number = fj.waybill_number AND fj2.submission_time < '2026-10-02 00:00:00')) s
+               ON s.waybill_number = mo.waybill
+             WHERE (mo.`STATUS` IS NULL OR LOWER(REPLACE(REPLACE(TRIM(mo.`STATUS`), ' ', ''), '_', '')) NOT IN ('cannotproceed', 'odz'))
+             GROUP BY mo.`ITEM_NAME`";
+        $out['spec 220 shipped query, same data, median ms (5 runs)'] = $this->median(fn () => DB::select($q220s));
+
+        $out['flags query (two COUNTs, global) median ms (5 runs)'] = $this->median(fn () => $src->flags($until));
+        $out['returned query, live part only (11-02..now) median ms (5 runs)'] = $this->median(fn () => $src->rows('2026-11-02', $until));
+        $out['shipped query, live part only (11-02..11-03) median ms (5 runs)'] = $this->median(
+            fn () => DB::select(ItemStockService::shippedSql(), ItemStockService::shippedBindings('2026-11-02', '2026-11-03'))
+        );
 
         $svc = app(ItemStockService::class);
+        config(['app.url' => 'http://localhost']);
         $out['cold /item/stock build median ms (5 runs, cache flushed)'] = $this->median(function () use ($svc) {
             Cache::flush();
             $svc->build('2026-10-01', '2026-11-03', false);
         });
         $out['warm /item/stock build median ms (5 runs)'] = $this->median(fn () => $svc->build('2026-10-01', '2026-11-03', false));
+        // stock:warm kapag naka-cache na ang saradong araw: ang live part lang ang kinukuwenta ulit.
+        $out['stock:warm with closed days cached median ms (5 runs)'] = $this->median(fn () => $svc->warmInputs());
+        $out['nightly warm (last 7 closed days recomputed) median ms (3 runs)'] = $this->median(fn () => $svc->warmInputs(7), 3);
 
         config(['services.nexus.token' => '']);
         $out['old path (PO received, no cache) build median ms'] = $this->median(fn () => $svc->build('2026-10-01', '2026-11-03', false));
 
-        $explain = DB::select('EXPLAIN ' . JntReturnedSource::sql(), JntReturnedSource::bindings('2026-10-02', $until));
-        $out['explain'] = array_map(fn ($r) => sprintf('%s %s type=%s key=%s rows=%s filtered=%s %s',
-            $r->id, $r->table, $r->type, $r->key ?? '-', $r->rows, $r->filtered, $r->Extra ?? ''), $explain);
+        $fmt = fn ($r) => sprintf('%s %s type=%s key=%s rows=%s filtered=%s %s',
+            $r->id, $r->table, $r->type, $r->key ?? '-', $r->rows, $r->filtered, $r->Extra ?? '');
+        $out['explain returned'] = array_map($fmt, DB::select('EXPLAIN ' . JntReturnedSource::sql(), JntReturnedSource::bindings($lower, $until)));
+        $out['explain returned closed, FORCE INDEX'] = array_map($fmt, DB::select('EXPLAIN ' . JntReturnedSource::sql(true), JntReturnedSource::bindings($lower, $closedUntil)));
+        $out['explain shipped']  = array_map($fmt, DB::select('EXPLAIN ' . ItemStockService::shippedSql(), ItemStockService::shippedBindings($lower)));
+        $c = \App\Services\HoldService::CANCELLED_STATUSES;
+        $out['explain flags']    = array_map($fmt, DB::select('EXPLAIN ' . JntReturnedSource::flagsSql(),
+            array_merge([JntReturnedSource::STATUS], $c, [$until, JntReturnedSource::STATUS], $c)));
 
         fwrite(STDERR, "\nPERF_220 " . json_encode($out, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
         $this->assertGreaterThan(0, $out['returned pieces total']);

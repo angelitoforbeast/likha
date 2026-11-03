@@ -4111,3 +4111,92 @@ Slice 221 (narrowed by Amendment 221-1 to S-221.1; S-221.2 and S-221.3 removed).
 | S-221.1.3 | happy | Given a quiet page that gets an order, then within the banner's cache time (≤ 60 s) its setup line is orange again | `test_S_221_1_3_a_quiet_page_that_gets_an_order_is_orange_again_within_the_cache_time` | 2026-11-03 passed |
 | S-221.1.4 | edge | Given page names that differ only in case or spacing between the settings and the orders, then they are matched the way `PageSettings::pageKey` matches pages | `test_S_221_1_4_page_names_that_differ_in_case_or_spacing_are_matched_like_page_key` | 2026-11-03 passed |
 | S-221.1.5 | edge | Given 80 pages, then the order counts come from one grouped query per banner build (no per-page query), within the existing cache | `test_S_221_1_5_eighty_pages_take_one_grouped_order_query_per_banner_build_within_the_cache` | 2026-11-03 passed |
+
+## Slice 222 – Stock from each item's first Nexus stock-in
+
+As the owner, I want each item's stock counted from its own first Nexus stock-in day (stock-in, plus returns, minus shipped), so items that arrived before the global start show what is really there, and items Nexus never received say so instead of showing a number.
+
+Slice 222. Nexus mode only (Likha); PO mode (no token, Incepxion) unchanged. Threat model as in slice 220: the Nexus API response (now also range answers) and J&T data are untrusted; `NEXUS_API_TOKEN` is secret; `app_settings` and config are trusted. No new table, no migration. Risk tier: medium (the stock number that drives ordering).
+Tests (`tests/Feature/Item/`): `StockFromFirstStockInTest`, `NexusStockHistoryTest`, and updates in `NexusStockReadTest`, `ReturnedStockTest`, `StockCacheTest`, `StockSourceViewTest`; Nexus faked with `Http::fake` (`Http::preventStrayRequests()`), sqlite. Timing: `ReturnedQueryPerfTest` (opt-in) on a throwaway Docker `mysql:8.4`.
+
+### S-222.1 Per-item start (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-222.1.1 | happy | Given SEAT COVER with 10,000 pieces in on 2026-09-29, 8,105 pieces shipped (first submission) since 09-29 and 4,613 pieces Returned (signed) since 09-29, then stock = 6,508, and `stock_start` = 2026-09-29 | `test_S_222_1_1_seat_cover_counts_from_its_first_stock_in_on_09_29` | 2026-11-03 passed |
+| S-222.1.2 | happy | Given an item first stocked in on 10-24, then shipments with a first submission before 10-24 are not subtracted and those on/after 10-24 are; a waybill first submitted before 10-24 with a newer J&T row after it is still before | `test_S_222_1_2_and_1_3_shipments_before_the_items_first_stock_in_day_are_ignored_and_the_day_is_inclusive` | 2026-11-03 passed |
+| S-222.1.3 | edge | The start day is inclusive: a first submission at 00:00 on the start day (Manila) counts, 23:59:59 the day before does not | `test_S_222_1_2_and_1_3_…` | 2026-11-03 passed |
+| S-222.1.4 | edge | Two Nexus names bridging to one item: the start is the earlier of their first stock-in days and both names' pieces count | `test_S_222_1_4_and_1_5_two_nexus_names_take_the_earlier_first_day_and_a_shelf_only_row_never_sets_it` | 2026-11-03 passed |
+| S-222.1.5 | edge | A Nexus row with stock_in_pieces 0 (shelf-only) never sets the start | `test_S_222_1_4_and_1_5_…` | 2026-11-03 passed |
+| S-222.1.6 | edge | All stock-in pieces from the start count, including days before item_stock_start (10-02) | `test_S_222_1_6_stock_in_before_the_global_start_counts`, `NexusStockReadTest::test_S_220_6_2_per_item_every_stock_in_from_the_items_first_day_through_today_counts_but_not_a_future_day` | 2026-11-03 passed |
+| S-222.1.7 | happy | The items from the live read-only comparison (2026-11-03) come out the same: glow tape 211, christmas lights 4,126, reflective sticker 293, rgb strobe light 371, vintage curtain 1,023, invisible belt 696, waterproof phone case 978, seat cover 6,508 (fixture: each item's In, start, Ship and Ret from that comparison, plus shipments and returns before the start that must not count) | `test_S_222_1_7_the_items_that_matched_nexus_in_the_live_comparison_come_out_the_same` | 2026-11-03 passed |
+
+### S-222.2 Returned from the item's start, any ship date (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-222.2.1 | happy | Given a waybill shipped before the item's start and Returned (signed) after it, then it counts as returned (replaces S-220.4.4) | `test_S_222_2_1_and_2_2_returns_count_from_the_items_start_whatever_the_ship_date`, `ReturnedStockTest::test_S_222_2_1_and_2_2_a_late_return_counts_whatever_the_ship_date_and_one_signed_before_the_start_does_not` | 2026-11-03 passed |
+| S-222.2.2 | negative | Returned signed before the item's start: not counted | same two tests | 2026-11-03 passed |
+| S-222.2.3 | negative | 'For Return', no signingtime, a future signingtime, a cancelled order, or a latest from_jnts row that is not Returned: not counted (as in slice 220) | `test_S_222_2_3_returns_that_never_count` | 2026-11-03 passed |
+| S-222.2.4 | edge | The returned source switch stays: "nexus" with a fake source uses the same per-item start (by day); the stub is "not available" | `test_S_222_2_4_the_nexus_rts_source_uses_the_same_per_item_start` | 2026-11-03 passed |
+
+### S-222.3 Not in Nexus (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-222.3.1 | happy | Given an item with no Nexus stock-in ever, then /item/stock gives `not_in_nexus` true, stock, stock_raw and the breakdown null, no needs_count, and the page shows "Not in Nexus" (Stock cell and Next step) instead of a number or "Count the stock first" | `test_S_222_3_1_to_3_4_an_item_with_no_nexus_stock_in_is_not_in_nexus`, `StockSourceViewTest::test_S_222_3_not_in_nexus_shows_instead_of_a_number_and_the_quantity_is_muted_with_its_tooltip` | 2026-11-03 passed |
+| S-222.3.2 | edge | Its order qty is computed with stock 0 and marked (`stock_assumed_zero`); the Qty to order cell is muted, says "Not in Nexus: counted with stock 0", and has the Not in Nexus tooltip | same two tests | 2026-11-03 passed |
+| S-222.3.3 | edge | An item whose only Nexus rows are shelf-only (0 pieces) is Not in Nexus | `test_S_222_3_1_to_3_4_…` | 2026-11-03 passed |
+| S-222.3.4 | edge | The list of Not in Nexus items is on /item (collapsed, with a count) for the owner check | `test_S_222_3_1_to_3_4_…`, view test | 2026-11-03 passed |
+
+### S-222.4 Clamp (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-222.4.1 | happy | Raw −10 shows stock 0 with needs_count ("Count the stock first") | `test_S_222_4_1_and_4_2_the_clamp` | 2026-11-03 passed |
+| S-222.4.2 | edge | Raw 0 shows 0 without needs_count | `test_S_222_4_1_and_4_2_the_clamp` | 2026-11-03 passed |
+
+### S-222.5 History backfill (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-222.5.1 | happy | `nexus:sync-stock --history` asks ranges of 31 days or less, newest first, from history_from (default 2026-01-01, 9 ranges) to the day before item_stock_start, and splits each item's `stock_in` list into per-day rows (lots and pieces of that day) | `test_S_222_5_1_ranges_newest_first_are_split_into_per_day_rows`, `test_the_default_history_from_is_2026_01_01_in_windows_of_31_days_or_less` | 2026-11-03 passed |
+| S-222.5.2 | edge | History rows have no remaining and no as_of; re-running stores the same rows and leaves an existing row's remaining and as_of (idempotent upsert of lots and pieces only) | `test_S_222_5_2_a_rerun_stores_the_same_rows_and_keeps_an_existing_rows_remaining` | 2026-11-03 passed |
+| S-222.5.3 | negative | A 429 or 401 stops the backfill; `nexus_stock_history_done_from` keeps the last finished range, so the next `--history` continues from there; when done it says complete and asks nothing | `test_S_222_5_3_a_429_stops_and_the_next_run_continues_where_it_stopped` | 2026-11-03 passed |
+| S-222.5.4 | negative | Nothing before history_from is asked; nothing on or after item_stock_start; only `from/to` ranges, never `?date=` | `test_S_222_5_4_nothing_before_history_from_or_on_and_after_the_stock_start_is_asked` | 2026-11-03 passed |
+| S-222.5.5 | negative | An entry dated outside its range, bad pieces, an old single-number `stock_in`, or a missing name: skipped and logged; a malformed answer stops the run; stored rows are never zeroed by the backfill | `test_S_222_5_5_bad_entries_are_skipped_a_malformed_answer_stops_and_stored_rows_are_never_zeroed` | 2026-11-03 passed |
+| S-222.5.6 | edge | No token: "Nexus not configured", nothing asked; hourly and daily runs are unchanged (`?date=` for yesterday and today; the 7-day pass) | `test_history_needs_a_token_and_the_hourly_run_stays_on_dates`, the slice 220 sync tests | 2026-11-03 passed |
+
+### S-222.6 Nexus boxes label (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-222.6.1 | happy | The cross-check reads "Nexus boxes not yet released: N" with the tooltip "Whole lots (boxes) still on the shelf in Nexus, not yet released to the floor: not all pieces on hand"; there is no "difference" (`nexus_diff` is gone from the response); replaces S-220.7.1 | `test_S_222_6_1_the_nexus_count_is_labelled_boxes_not_yet_released_with_no_difference`, `NexusStockReadTest::test_S_220_7_1_to_7_4_nexus_boxes_with_their_as_of_and_a_dash_when_missing_and_no_difference` | 2026-11-03 passed |
+
+### S-222.7 PO mode untouched (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-222.7.1 | happy | Without a Nexus token, /item/stock is the same as on 943a2d6c: the slice 220 PO-mode tests (`StockEndpointTest`, `LifecycleStockTest`, `test_S_220_6_12_…`) pass unchanged | `StockEndpointTest`, `LifecycleStockTest`, `NexusStockReadTest::test_S_220_6_12_without_a_nexus_token_the_stock_is_po_received_exactly_as_before` | 2026-11-03 passed |
+
+### S-222.8 Performance (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-222.8.1 | edge | Shipped and returned are one grouped query each, by item and day, bounded by the earliest **matched** first stock-in day (an unmatched Nexus name never lowers it) and filtered by each item's start in PHP; a warm call runs neither | `test_S_222_8_1_one_grouped_query_each_bounded_by_the_earliest_matched_first_day`, `StockCacheTest` | 2026-11-03 passed |
+| S-222.8.2 | edge | The cold time on production-like MySQL volume is reported next to the spec 220 queries on the same data | `ReturnedQueryPerfTest` (opt-in), numbers in the 222 result | 2026-11-03 measured |
+
+### S-222.9 Prewarm (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-222.9.1 | happy | After a successful `nexus:sync-stock`, the stock inputs for the default key are computed and stored, so the next page call runs no shipped, returned or nexus_stock_ins query | `test_after_a_successful_sync_the_next_page_call_runs_no_stock_query` | 2026-11-03 passed |
+| S-222.9.2 | happy | `stock:warm` (every 10 minutes, from :05) recomputes and stores the key before its 15-minute TTL lapses | `test_the_warm_command_refreshes_the_key_before_the_ttl`, `test_stock_warm_is_scheduled_every_10_minutes_and_does_nothing_without_nexus` | 2026-11-03 passed |
+| S-222.9.3 | negative | A failed warm leaves the old value in place | `test_a_failed_warm_leaves_the_old_value_in_place` | 2026-11-03 passed |
+| S-222.9.4 | edge | A warm never computes while a page request holds the key's lock; it reports "busy" | `test_a_warm_never_computes_while_a_page_request_holds_the_lock` | 2026-11-03 passed |
+
+### S-222.10 Review fixes: Suppliers tab, cheap returned, per-day cache (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-222.10.1 | negative | On the Suppliers tab (and the old table) a Not in Nexus item shows "Not in Nexus" in Stock, not "0"; DOI, order-by and Qty to order are muted with the Not in Nexus tooltip | `test_B1_the_suppliers_tab_shows_not_in_nexus_and_mutes_doi_order_by_and_qty` | 2026-11-03 passed |
+| S-222.10.2 | edge | The returned main query is a plain `status = Returned AND signingtime` range (no `IS NULL OR`); the unsigned and future counts are their own query, global for all items and any date, and labelled so (`flags_scope`) | `test_the_returned_main_query_is_a_plain_signingtime_range_and_the_flags_are_a_separate_global_count`, `StockCacheTest` | 2026-11-03 passed |
+| S-222.10.3 | edge | The flags count is cached an hour; the warm refreshes it only once it is older than 45 minutes | `test_the_flags_count_is_cached_for_an_hour_and_the_warm_refreshes_it_only_after_45_minutes` | 2026-11-03 passed |
+| S-222.10.4 | happy | Shipped and returned for closed days (before yesterday, Manila) come from a 26-hour cache per day per source; only yesterday and today are queried live; a closed day is recomputed after its TTL | `test_closed_days_come_from_a_26_hour_per_day_cache_and_only_yesterday_and_today_are_live` | 2026-11-03 passed |
+| S-222.10.5 | happy | The 02:40 `nexus:sync-stock --days=7` refreshes the last 7 closed days; older closed days wait for their TTL (a late status change shows within one day) | `test_the_nightly_daily_pass_refreshes_the_last_7_closed_days_and_older_days_wait_for_their_ttl` | 2026-11-03 passed |
+| S-222.10.6 | edge | A regular `stock:warm` with the closed days cached runs only the two live queries; it is scheduled `5-59/10`, off the hourly sync at :10 | `test_a_regular_warm_only_runs_the_live_queries_once_the_closed_days_are_cached`, `StockWarmTest` | 2026-11-03 passed |
+| S-222.10.7 | negative | When no Nexus name matches at all, items show "Nexus not synced yet" or "No Nexus name matches", not "Not in Nexus" on every item | `NexusStockReadTest` (B, 6.5, 2.8, 3.2/3.4, 8.6), `test_no_matches_at_all_says_not_synced_or_no_matches_…` | 2026-11-03 passed |
+| S-222.10.8 | edge | When "Nexus boxes not yet released" shows next to Not in Nexus, the tooltip explains it (stocked in before the history start, or a lot never scanned at Stock In) | `test_no_matches_at_all_says_not_synced_or_no_matches_…` | 2026-11-03 passed |
+| S-222.10.9 | negative | The nightly closed-day refresh is its own entry, `stock:warm --closed-days=7` daily at 02:55 Manila (withoutOverlapping); a failed Nexus daily pass does not skip it, and `nexus:sync-stock --days=7` no longer refreshes closed days (it still warms after success) | `test_the_closed_day_refresh_has_its_own_daily_schedule_at_0255_separate_from_the_nexus_pass`, `test_the_nightly_closed_day_warm_refreshes_the_last_7_closed_days_even_when_nexus_fails`, `test_the_nexus_daily_pass_no_longer_refreshes_closed_days_but_still_warms_after_success` | 2026-11-03 passed |
+| S-222.10.10 | negative | On the Suppliers tab a Not in Nexus item's DOI shows "—" with the tooltip, never "kulang N araw" | `test_B1_the_suppliers_tab_shows_not_in_nexus_and_mutes_doi_order_by_and_qty` | 2026-11-03 passed |
+| S-222.10.11 | edge | The closed-range returned query has `FORCE INDEX (idx_from_jnts_signing_status)` only on MySQL with the index present (information_schema checked once, cached 24 h); no hint when the check says no, when information_schema cannot be read, or on sqlite; results are identical either way | `StockIndexHintTest`, `ReturnedQueryPerfTest` (opt-in, MySQL: identical rows) | 2026-11-03 passed |

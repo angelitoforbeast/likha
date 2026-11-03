@@ -43,6 +43,8 @@ return [
         'timeout' => (int) (env('NEXUS_API_TIMEOUT') ?: 20),
         // Ilang segundo maghihintay ang cold /item/stock sa ibang request na kumukuwenta na ng parehong stock inputs.
         'cold_wait' => 15,
+        // Mula kailan kinukuha ng nexus:sync-stock --history ang stock-in bago ang item_stock_start (Y-m-d).
+        'history_from' => env('NEXUS_STOCK_HISTORY_FROM') ?: '2026-01-01',
     ],
 
     // Meta Ads (Marketing API): ang app ng "Connect Facebook" sa /ads_manager/report. Walang app id = "Meta app not set up yet".

@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Services\Nexus\StockInSync;
 use App\Services\Stock\ItemNameBridge;
+use App\Services\Stock\JntReturnedSource;
 use App\Services\Stock\ReturnedResult;
 use App\Services\Stock\ReturnedSource;
 use App\Services\Stock\ReturnedSources;
@@ -43,6 +44,12 @@ class ItemStockService
     private const OPEN_PO_STATUSES = ['ordered', 'delivered'];
     /** Ilang segundo ang cache ng Nexus stock inputs (shipped, returned, stock-in). */
     private const INPUTS_TTL     = 900;
+    /** Habang nagpapainit (warmInputs): {keys, busy}; null = karaniwang page call. */
+    private ?array $warming = null;
+    /** Ang host ng key habang nagpapainit (mula APP_URL); null = ang host ng request. */
+    private ?string $hostOverride = null;
+    /** Habang nagpapainit: ilan sa huling saradong araw ang kukuwentahin ulit (gabi-gabi: 7). */
+    private int $refreshClosed = 0;
     /** Lampas dito mula sa huling matagumpay na sync = luma (3 oras). */
     public const STALE_SECONDS   = 10800;
     /** Ang mga "remaining" ng isang item na hindi lalayo nang higit dito sa pinakabago ay iisang takbo ng sync. */
@@ -86,6 +93,7 @@ class ItemStockService
         $life      = $this->lifecycleInputs($end);
         $palugit   = $this->palugitDefaults();
         $items     = [];
+        $notInNexus = [];
         foreach ($keys as $k) {
             $holdUnits = (int) ($hold[$k]['units'] ?? 0);
             $inc       = (int) ($incoming[$k] ?? 0);
@@ -111,7 +119,14 @@ class ItemStockService
                 'stock' => null,
             ];
             $stock = null;
-            if ($ready) {
+            $raw   = null;
+            if ($ready && $nexus && !isset($src['start'][$k])) {
+                // Walang Nexus stock-in kailanman: walang numero ng stock; ang i-order ay kinukuwenta sa 0 at may marka.
+                // Kapag WALANG kahit isang tumutugmang Nexus name (hindi pa na-sync, o lahat hindi tugma), hindi ito
+                // "Not in Nexus" ng bawat item: stock_unknown ang dahilan.
+                $ctx['stock'] = 0;
+                if (($src['match_state'] ?? 'ok') === 'ok') $notInNexus[$k] = true;
+            } elseif ($ready) {
                 $raw   = (int) ($received[$k] ?? 0) + (int) ($src['returned'][$k] ?? 0) - (int) ($left['units'][$k] ?? 0);
                 $stock = max(0, $raw);
                 $ctx['stock'] = $stock;
@@ -126,13 +141,13 @@ class ItemStockService
             sort($variants);
 
             $items[$k] = [
-                'name'             => $hold[$k]['name'] ?? $demand[$k]['name'] ?? $left['names'][$k] ?? $k,
+                'name'             => $hold[$k]['name'] ?? $demand[$k]['name'] ?? $left['names'][$k] ?? $src['names'][$k] ?? $k,
                 'variants'         => $variants,
                 'hold_units'       => $holdUnits,
                 'incoming'         => $inc,
                 'stock_raw'        => $ready ? $raw : null,
                 'stock'            => $stock,
-                'stock_needs_count' => $ready ? $raw < 0 : null,
+                'stock_needs_count' => $ready ? $raw !== null && $raw < 0 : null,
                 'lead'             => $lead,
                 'palugit_override' => $override,
                 'category_id'      => $category[$k]['id'] ?? null,
@@ -144,7 +159,13 @@ class ItemStockService
                 'normal'           => $normal,
                 'lugi'             => $lugi,
             ];
-            if ($nexus) $items[$k] += $this->nexusItemFields($k, $ready, $stock, $src, $left);
+            if ($nexus) $items[$k] += $this->nexusItemFields($k, $ready, $src, $left);
+        }
+        if ($nexus && $notInNexus) {
+            $names = array_map(fn ($k) => $items[$k]['name'], array_keys($notInNexus));
+            sort($names, SORT_NATURAL | SORT_FLAG_CASE);
+            $src['meta']['nexus']['not_in_nexus']       = $names;
+            $src['meta']['nexus']['not_in_nexus_count'] = count($names);
         }
 
         return [
@@ -160,25 +181,33 @@ class ItemStockService
         ];
     }
 
-    /** Dagdag na fields ng isang item kapag Nexus ang stock: ang breakdown at ang cross-check sa Nexus remaining. */
-    private function nexusItemFields(string $k, bool $ready, ?int $stock, array $src, array $left): array
+    /**
+     * Dagdag na fields ng isang item kapag Nexus ang stock: ang simula (unang Nexus stock-in), ang breakdown mula roon,
+     * "Not in Nexus" kapag walang stock-in kailanman, at ang Nexus boxes na hindi pa nailalabas (display lang).
+     */
+    private function nexusItemFields(string $k, bool $ready, array $src, array $left): array
     {
         $returnedOk = $src['meta']['returned']['available'] === true;
+        $start      = $src['start'][$k] ?? null;
+        $inNexus    = $ready && $start !== null;
         $shipped    = (int) ($left['units'][$k] ?? 0);
         $returned   = (int) ($src['returned'][$k] ?? 0);
         $rem        = $src['remaining'][$k] ?? null;
-        $remaining  = $rem['n'] ?? null;
 
         return [
-            'stock_in'              => $ready ? (int) ($src['stock_in'][$k] ?? 0) : null,
-            'returned'              => $ready && $returnedOk ? $returned : null,
-            'shipped'               => $ready ? $shipped : null,
-            'returned_over_shipped' => $ready && $returnedOk ? $returned > $shipped : null,
-            'nexus_remaining'       => $remaining,
+            'stock_start'           => $inNexus ? $start : null,
+            'not_in_nexus'          => $ready ? !$inNexus && ($src['match_state'] ?? 'ok') === 'ok' : null,
+            // Walang tugmang Nexus name kahit isa: 'not_synced' (walang Nexus row) o 'no_matches'; null kapag may tugma.
+            'stock_unknown'         => $ready && !$inNexus && ($src['match_state'] ?? 'ok') !== 'ok' ? $src['match_state'] : null,
+            'stock_assumed_zero'    => $ready && !$inNexus,
+            'stock_in'              => $inNexus ? (int) ($src['stock_in'][$k] ?? 0) : null,
+            'returned'              => $inNexus && $returnedOk ? $returned : null,
+            'shipped'               => $inNexus ? $shipped : null,
+            'returned_over_shipped' => $inNexus && $returnedOk ? $returned > $shipped : null,
+            'nexus_remaining'       => $rem['n'] ?? null,
             'nexus_remaining_as_of' => $rem['as_of'] ?? null,
             'nexus_remaining_stale' => $rem['stale'] ?? null,
             'nexus_remaining_mixed' => $rem['mixed'] ?? null,
-            'nexus_diff'            => $remaining !== null && $stock !== null ? $stock - $remaining : null,
         ];
     }
 
@@ -194,11 +223,14 @@ class ItemStockService
     }
 
     /**
-     * Stock inputs kapag Nexus: stock-in (nexus_stock_ins, START..ngayon), returned (ang napiling source) at shipped
-     * (parehong query ng dati). Ang raw na aggregates ay naka-cache (host, START, source, huling sync, araw; 15 min);
-     * ang pagtutugma ng pangalan ay sa bawat request, kaya ang bagong item_type_mappings ay agad na nabibilang.
+     * Stock inputs kapag Nexus, kada item mula sa sarili nitong simula = ang unang araw na may Nexus stock-in (pinakamaaga
+     * sa lahat ng pangalang tumutugma rito):
+     *   stock_in  = lahat ng Nexus stock-in pieces ng item (lahat ay mula sa simula),
+     *   returned  = J&T Returned na signingtime mula sa simula, kahit kailan na-ship,
+     *   shipped   = waybill na ang unang J&T submission ay mula sa simula.
+     * Ang raw na aggregates ay naka-cache (15 min); ang pagtutugma at ang pagsala kada simula ay sa bawat request.
      *
-     * @return array{left: array, stock_in: array<string,int>, returned: array<string,int>, remaining: array<string,int>, meta: array}
+     * @return array{left: array, stock_in: array<string,int>, start: array<string,string>, returned: array<string,int>, remaining: array, meta: array}
      */
     private function nexusStock(?string $stockStart, array $likhaKeys): array
     {
@@ -226,21 +258,26 @@ class ItemStockService
             ? ['at' => substr((string) ($dailyPass['at'] ?? ''), 0, 16), 'status' => (string) $dailyPass['status']]
             : null;
 
-        $out = ['left' => [], 'stock_in' => [], 'returned' => [], 'remaining' => [], 'meta' => []];
+        $out = ['left' => ['units' => [], 'names' => []], 'stock_in' => [], 'start' => [], 'returned' => [], 'remaining' => [], 'meta' => []];
         $returnedMeta = ['setting' => $src['setting'], 'source' => $src['source']->key(), 'available' => null,
                          'warning' => $src['warning'], 'flags' => new \stdClass(), 'note' => null];
         $unmatched = [];
         $remainingAsOf = null;
+        $syncKey = $synced?->format('YmdHis') ?? 'never';
+        $host    = $this->hostOverride ?? strtolower(request()->getHost());
+        $today   = $now->toDateString();
 
         if ($stockStart !== null) {
-            $in     = $this->nexusInputs($stockStart, $src['source'], $synced?->format('YmdHis'), $now);
-            $left   = $this->leftFromRows($in['shipped']);
-            $bridge = new ItemNameBridge(array_merge($likhaKeys, array_keys($left['units'])), new ItemAliasResolver());
+            $in     = $this->cachedInputs("item_stock:stockin:v2:$host:$syncKey:$today", fn () => $this->stockInRows($today));
+            $bridge = new ItemNameBridge($likhaKeys, new ItemAliasResolver());
 
-            foreach ($in['stock_in'] as [$name, $pieces]) {
+            foreach ($in['stock_in'] as [$name, $firstDay, $pieces]) {
                 $hit = $bridge->resolve($name);
                 if ($hit['key'] !== null) {
-                    $out['stock_in'][$hit['key']] = ($out['stock_in'][$hit['key']] ?? 0) + $pieces;
+                    $k = $hit['key'];
+                    $out['stock_in'][$k] = ($out['stock_in'][$k] ?? 0) + $pieces;
+                    $out['names'][$k] ??= $name;
+                    if ($firstDay !== null && (!isset($out['start'][$k]) || $firstDay < $out['start'][$k])) $out['start'][$k] = $firstDay;
                     continue;
                 }
                 $nk = StockInSync::normalizeName($name);
@@ -249,16 +286,36 @@ class ItemStockService
                 $unmatched[$nk]['ambiguous'] = $unmatched[$nk]['ambiguous'] || $hit['ambiguous'];
             }
 
-            $ret = ReturnedResult::fromArray($in['returned']);
-            $returnedMeta['available'] = $ret->available;
-            $returnedMeta['flags']     = $ret->flags ?: new \stdClass();
-            $returnedMeta['note']      = $ret->note;
-            if (!$ret->available) {
-                $returnedMeta['warning'] ??= 'unavailable';
-            }
-            foreach ($ret->pieces as $name => $pieces) {
-                $k = $ret->likhaKeys ? (string) $name : $bridge->likhaKey((string) $name);
-                if ($k !== null && $k !== '') $out['returned'][$k] = ($out['returned'][$k] ?? 0) + (int) $pieces;
+            // Ang pinakamaagang simula ng isang TUMUTUGMANG item ang hangganan ng shipped at returned query.
+            $lower = $out['start'] ? min($out['start']) : null;
+            $out['match_state'] = $in['stock_in'] === [] ? 'not_synced' : ($lower === null ? 'no_matches' : 'ok');
+            if ($lower !== null) {
+                $moves = $this->moves($src['source'], $lower, $now, $host, $syncKey);
+                $returnedMeta['flags_scope'] = 'all items, any date (not per item start)';
+                foreach ($moves['shipped'] as [$name, $day, $cnt]) {
+                    $raw = trim($name);
+                    if ($raw === '' || $day === null) continue;
+                    $p = ItemBaseKey::parse($raw);
+                    if ($p['key'] === '' || !isset($out['start'][$p['key']]) || $day < $out['start'][$p['key']]) continue;
+                    $out['left']['units'][$p['key']] = ($out['left']['units'][$p['key']] ?? 0) + $cnt * $p['qty'];
+                    $out['left']['names'][$p['key']] ??= $p['base'];
+                }
+
+                $ret = ReturnedResult::fromArray($moves['returned']);
+                $returnedMeta['available'] = $ret->available;
+                $returnedMeta['flags']     = $moves['flags'] ?: ($ret->flags ?: new \stdClass());
+                $returnedMeta['note']      = $ret->note;
+                if (!$ret->available) {
+                    $returnedMeta['warning'] ??= 'unavailable';
+                }
+                foreach (array_keys($ret->pieces) as $name) {
+                    $k = $ret->likhaKeys ? (string) $name : $bridge->likhaKey((string) $name);
+                    if ($k === null || $k === '' || !isset($out['start'][$k])) continue;
+                    $n = $ret->since((string) $name, $out['start'][$k]);
+                    if ($n > 0) $out['returned'][$k] = ($out['returned'][$k] ?? 0) + $n;
+                }
+            } else {
+                $returnedMeta['available'] = true;
             }
 
             // Kada Likha key: ang pinakabagong remaining ng bawat pangalan; ang pangalang mas luma nang higit sa isang
@@ -281,7 +338,6 @@ class ItemStockService
                     'mixed' => count($cur) < count($list),
                 ];
             }
-            $out['left'] = $left;
         }
 
         usort($unmatched, fn ($a, $b) => [$b['pieces'], $a['name']] <=> [$a['pieces'], $b['name']]);
@@ -301,6 +357,11 @@ class ItemStockService
                     && Carbon::parse($remainingAsOf, 'Asia/Manila')->diffInSeconds($now, true) > self::STALE_SECONDS,
                 'unmatched'       => array_values($unmatched),
                 'unmatched_count' => count($unmatched),
+                // ok | not_synced (walang Nexus row) | no_matches (may row, walang tumugma); null kapag walang start.
+                'match_state'     => $out['match_state'] ?? null,
+                // Pinupunan sa build(): ang mga item na walang Nexus stock-in kailanman.
+                'not_in_nexus'    => [],
+                'not_in_nexus_count' => 0,
             ],
             'returned' => $returnedMeta,
         ];
@@ -308,20 +369,17 @@ class ItemStockService
         return $out;
     }
 
-    /** Raw aggregates ng stock (walang pagtutugma), naka-cache. */
-    private function nexusInputs(string $stockStart, ReturnedSource $source, ?string $syncedAt, Carbon $now): array
+    /**
+     * Isang naka-cache na input (15 min). Isang kuwenta lang kahit sabay-sabay ang cold request: ang iba ay naghihintay sa
+     * lock at kinukuha ang naitabi; lampas sa paghihintay, kinukuwenta na rin. Ang orasan ng paghihintay ay microtime.
+     */
+    private function cachedInputs(string $key, callable $compute): array
     {
-        $today = $now->toDateString();
-        $key   = 'item_stock:inputs:v1:' . strtolower(request()->getHost()) . ':' . $stockStart . ':' . $source->key()
-               . ':' . ($syncedAt ?? 'never') . ':' . $today;
+        if ($this->warming !== null) return $this->warmInput($key, $compute);
 
         $hit = Cache::get($key);
         if (is_array($hit)) return $hit;
 
-        // Isang kuwenta lang kahit sabay-sabay ang cold request: ang iba ay naghihintay sa lock at kinukuha ang naitabi.
-        // Kapag lumampas ang paghihintay, kinukuwenta na rin (tama pa rin ang sagot, mas mabagal lang). Ang orasan ng
-        // paghihintay ay microtime, hindi Carbon, kaya hindi ito nakadepende sa oras ng app.
-        $compute  = fn () => $this->nexusInputsFresh($stockStart, $source, $now, $today);
         $lock     = Cache::lock($key . ':lock', 120);
         $deadline = microtime(true) + max(0, (int) config('services.nexus.cold_wait', 15));
         while (!$lock->get()) {
@@ -337,40 +395,296 @@ class ItemStockService
         }
     }
 
-    private function nexusInputsFresh(string $stockStart, ReturnedSource $source, Carbon $now, string $today): array
+    /**
+     * Pagpapainit (stock:warm, o pagkatapos ng sync): kinukuwenta ulit at itinatabi kahit may laman pa, para hindi
+     * lumipas ang TTL. Parehong lock ng page: kapag may ibang kumukuwenta na, hindi na sumasabay (ang naitabi ang gamit).
+     * Kapag bumagsak ang kuwenta, walang ginagalaw sa cache (ang luma ang nananatili).
+     */
+    private function warmInput(string $key, callable $compute): array
     {
-        return (function () use ($stockStart, $source, $now, $today) {
-            $hasTable = Schema::hasTable(StockInSync::TABLE);
-            $stockIn  = [];
-            $remain   = [];
-            if ($hasTable) {
-                foreach (DB::table(StockInSync::TABLE)
-                    ->whereBetween('stock_date', [$stockStart, $today])
-                    ->selectRaw('item_name, SUM(stock_in_pieces) as pieces')
-                    ->groupBy('item_name')->get() as $r) {
-                    $stockIn[] = [(string) $r->item_name, (int) $r->pieces];
-                }
-                // Ang pinakabagong "remaining" kada pangalan (hawak ng Nexus ngayon; display lang).
-                $seen = [];
-                foreach (DB::table(StockInSync::TABLE . ' as n')
-                    ->whereNotNull('n.as_of')->whereNotNull('n.remaining')
-                    ->whereNotExists(fn ($q) => $q->from(StockInSync::TABLE . ' as m')
-                        ->whereColumn('m.name_key', 'n.name_key')->whereColumn('m.as_of', '>', 'n.as_of'))
-                    ->orderByDesc('n.stock_date')
-                    ->get(['n.name_key', 'n.item_name', 'n.remaining', 'n.as_of']) as $r) {
-                    if (isset($seen[$r->name_key])) continue;
-                    $seen[$r->name_key] = true;
-                    $remain[] = [(string) $r->item_name, (int) $r->remaining, substr((string) $r->as_of, 0, 19)];
-                }
+        $lock     = Cache::lock($key . ':lock', 120);
+        $deadline = microtime(true) + max(0, (int) config('services.nexus.cold_wait', 15));
+        while (!$lock->get()) {
+            usleep(100000);
+            if (microtime(true) >= $deadline) {
+                $this->warming['busy'][] = $key;
+                $hit = Cache::get($key);
+                return is_array($hit) ? $hit : $compute();
+            }
+        }
+        try {
+            $value = $compute();
+            Cache::put($key, $value, self::INPUTS_TTL);
+            $this->warming['keys'][] = $key;
+
+            return $value;
+        } finally {
+            $lock->release();
+        }
+    }
+
+    /**
+     * Pinapainit ang stock inputs ng default na /item/stock (walang start_date / end_date: mula sa unang araw ng nakaraang
+     * buwan hanggang ngayon). Ang host ay galing sa APP_URL, kaya ang key ay ang ginagamit ng page sa host na iyon:
+     * item_stock:stockin:v2:{host}:{huling sync}:{ngayon} at item_stock:moves:v2:{host}:{hangganan}:{source}:{huling sync}:{ngayon}.
+     * Ang mga input ay hindi nakadepende sa mga petsa ng page, kaya iisa ang key ng lahat ng page call sa host na iyon.
+     *
+     * @return array{ok: bool, keys: array<int,string>, busy: array<int,string>, ms: int, error: ?string}
+     */
+    public function warmInputs(int $refreshClosedDays = 0): array
+    {
+        $t = microtime(true);
+        $this->refreshClosed = max(0, $refreshClosedDays);
+        $this->warming = ['keys' => [], 'busy' => []];
+        $host = parse_url((string) config('app.url'), PHP_URL_HOST);
+        $this->hostOverride = is_string($host) && $host !== '' ? strtolower($host) : 'localhost';
+        try {
+            $this->build(Carbon::now('Asia/Manila')->startOfMonth()->subMonth()->toDateString(), Carbon::now('Asia/Manila')->toDateString(), false);
+
+            return ['ok' => true, 'keys' => $this->warming['keys'], 'busy' => $this->warming['busy'],
+                    'ms' => (int) round((microtime(true) - $t) * 1000), 'error' => null];
+        } catch (\Throwable $e) {
+            report($e);
+
+            return ['ok' => false, 'keys' => $this->warming['keys'], 'busy' => $this->warming['busy'],
+                    'ms' => (int) round((microtime(true) - $t) * 1000), 'error' => class_basename($e)];
+        } finally {
+            $this->warming = null;
+            $this->hostOverride = null;
+            $this->refreshClosed = 0;
+        }
+    }
+
+    /**
+     * Nexus stock-in kada pangalan: ang unang araw na may pieces at ang kabuuang pieces (hanggang ngayon), at ang
+     * pinakabagong "remaining" kada pangalan (boxes na hindi pa nailalabas; display lang).
+     *
+     * @return array{stock_in: array<int,array{0:string,1:?string,2:int}>, remaining: array<int,array{0:string,1:int,2:string}>}
+     */
+    private function stockInRows(string $today): array
+    {
+        $stockIn = [];
+        $remain  = [];
+        if (!Schema::hasTable(StockInSync::TABLE)) return ['stock_in' => [], 'remaining' => []];
+
+        foreach (DB::table(StockInSync::TABLE)
+            ->where('stock_date', '<=', $today)
+            ->selectRaw('item_name, MIN(CASE WHEN stock_in_pieces > 0 THEN stock_date END) as first_day, SUM(stock_in_pieces) as pieces')
+            ->groupBy('item_name')->get() as $r) {
+            $stockIn[] = [(string) $r->item_name, $r->first_day === null ? null : substr((string) $r->first_day, 0, 10), (int) $r->pieces];
+        }
+        $seen = [];
+        foreach (DB::table(StockInSync::TABLE . ' as n')
+            ->whereNotNull('n.as_of')->whereNotNull('n.remaining')
+            ->whereNotExists(fn ($q) => $q->from(StockInSync::TABLE . ' as m')
+                ->whereColumn('m.name_key', 'n.name_key')->whereColumn('m.as_of', '>', 'n.as_of'))
+            ->orderByDesc('n.stock_date')
+            ->get(['n.name_key', 'n.item_name', 'n.remaining', 'n.as_of']) as $r) {
+            if (isset($seen[$r->name_key])) continue;
+            $seen[$r->name_key] = true;
+            $remain[] = [(string) $r->item_name, (int) $r->remaining, substr((string) $r->as_of, 0, 19)];
+        }
+
+        return ['stock_in' => $stockIn, 'remaining' => $remain];
+    }
+
+    /**
+     * Shipped at returned kada araw, mula $lower (ang pinakamaagang simula ng tumutugmang item) hanggang ngayon.
+     *
+     * - Saradong araw (bago ang kahapon, Manila): kada araw sa cache nang 26 oras (item_stock:day:v1:{host}:shipped:{araw}
+     *   at …:returned:{source}:{araw}); ang kulang lang ang kinukuwenta, isang range query para sa lahat ng kulang.
+     *   Tinatanggap na kalumaan: ang pagbabago sa isang saradong araw (hal. lumang waybill na naging Returned o lumipat
+     *   ang status, o nahuling J&T upload) ay lumalabas sa loob ng isang araw — sa 26 na oras, o mas maaga para sa huling
+     *   7 saradong araw na ina-refresh gabi-gabi kasama ng 02:40 na daily pass.
+     * - Kahapon at ngayon: live (item_stock:live:v3:…, 15 min, may bagong key bawat sync), kasama ang flags.
+     *
+     * @return array{shipped: array<int,array{0:string,1:string,2:int}>, returned: array, flags: array}
+     */
+    private function moves(ReturnedSource $source, string $lower, Carbon $now, string $host, string $syncKey): array
+    {
+        $today     = $now->toDateString();
+        $liveFrom  = max($lower, $now->copy()->subDay()->toDateString());
+        $closedTo  = $now->copy()->subDays(2)->toDateString();
+        $until     = $now->format('Y-m-d H:i:s');
+
+        $closed = $lower <= $closedTo ? $this->closedDays($source, $lower, $closedTo, $host) : ['shipped' => [], 'returned' => [], 'available' => true, 'likha_keys' => true];
+        $live   = $this->cachedInputs(
+            "item_stock:live:v3:$host:$liveFrom:" . $source->key() . ":$syncKey:$today",
+            fn () => [
+                'shipped'  => $this->shippedRows($liveFrom, $today),
+                'returned' => $source->returned($liveFrom, $until)->toArray(),
+            ]
+        );
+        $flags = $this->returnedFlags($source, $host, $now);
+
+        $liveRet = ReturnedResult::fromArray($live['returned']);
+        $byDay   = [];
+        $pieces  = $liveRet->byDay ? [] : $liveRet->pieces;   // walang araw ang source: lahat ng pieces ay bilang
+        foreach ($liveRet->byDay as $name => $perDay) {
+            foreach ($perDay as $day => $n) {
+                if ($day < $liveFrom) continue;                  // ang mga naunang araw ay galing sa saradong cache
+                $byDay[$name][$day] = (int) $n;
+                $pieces[$name] = ($pieces[$name] ?? 0) + (int) $n;
+            }
+        }
+        foreach ($closed['returned'] as $day => $names) {
+            foreach ($names as $name => $n) {
+                $byDay[$name][$day] = ($byDay[$name][$day] ?? 0) + (int) $n;
+                $pieces[$name] = ($pieces[$name] ?? 0) + (int) $n;
+            }
+        }
+        $available = $liveRet->available && $closed['available'];
+        $returned  = $available
+            ? new ReturnedResult(true, $pieces, $liveRet->likhaKeys, [], null, $byDay)
+            : ReturnedResult::unavailable($liveRet->note ?? 'not available');
+
+        $shipped = $live['shipped'];
+        foreach ($closed['shipped'] as $day => $rows) {
+            foreach ($rows as [$name, $cnt]) $shipped[] = [$name, $day, $cnt];
+        }
+
+        return ['shipped' => $shipped, 'returned' => $returned->toArray(), 'flags' => $flags];
+    }
+
+    /**
+     * Ang flags ng returned (walang signingtime / signingtime sa hinaharap; para sa lahat ng item): diagnostic lang, kaya
+     * naka-cache nang 1 oras sa sariling key. Ang warm ay kinukuwenta ulit lang kapag 45 minuto na ang edad nito, kaya
+     * ang page ay halos hindi nagbabayad nito, at ang warm kada 10 minuto ay hindi rin.
+     */
+    private function returnedFlags(ReturnedSource $source, string $host, Carbon $now): array
+    {
+        if (!method_exists($source, 'flags')) return [];
+        $key = "item_stock:flags:v1:$host:" . $source->key() . ':' . $now->toDateString();
+        $hit = Cache::get($key);
+        $old = !is_array($hit) || ($this->warming !== null && (int) ($hit['at'] ?? 0) < $now->getTimestamp() - 2700);
+        if (!$old) return (array) $hit['flags'];
+
+        $flags = $source->flags($now->format('Y-m-d H:i:s'));
+        Cache::put($key, ['at' => $now->getTimestamp(), 'flags' => $flags], 3600);
+
+        return $flags;
+    }
+
+    /** Ilang segundo ang cache ng isang saradong araw (26 oras). */
+    private const CLOSED_DAY_TTL = 93600;
+
+    /**
+     * Ang mga saradong araw [$from, $to]: galing sa cache kada araw; ang kulang (o, habang nagpapainit na may
+     * refreshClosed, ang huling N araw) ay kinukuwenta sa isang range query bawat uri at itinatabi kada araw.
+     *
+     * @return array{shipped: array<string,array>, returned: array<string,array<string,int>>, available: bool, likha_keys: bool}
+     */
+    private function closedDays(ReturnedSource $source, string $from, string $to, string $host): array
+    {
+        $days = array_map(fn ($d) => $d->toDateString(), iterator_to_array(\Carbon\CarbonPeriod::create($from, $to)));
+        $sKey = fn (string $d) => "item_stock:day:v1:$host:shipped:$d";
+        $rKey = fn (string $d) => "item_stock:day:v1:$host:returned:" . $source->key() . ":$d";
+        $force = $this->warming !== null && $this->refreshClosed > 0
+            ? array_slice($days, -$this->refreshClosed) : [];
+
+        $read = function () use ($days, $sKey, $rKey, $force) {
+            $hits = Cache::many(array_merge(array_map($sKey, $days), array_map($rKey, $days)));
+            $missS = $missR = [];
+            foreach ($days as $d) {
+                if (!is_array($hits[$sKey($d)] ?? null) || in_array($d, $force, true)) $missS[] = $d;
+                if (!is_array($hits[$rKey($d)] ?? null) || in_array($d, $force, true)) $missR[] = $d;
             }
 
-            return [
-                'shipped'   => $this->leftRows($stockStart),
-                'returned'  => $source->returned($stockStart, $now->format('Y-m-d H:i:s'))->toArray(),
-                'stock_in'  => $stockIn,
-                'remaining' => $remain,
-            ];
-        })();
+            return [$hits, $missS, $missR];
+        };
+
+        $unavailable = false;
+        [$hits, $missS, $missR] = $read();
+        if ($missS || $missR) {
+            // Isang kuwenta lang ng kulang na araw kahit sabay-sabay: ang iba ay naghihintay at binabasa ulit ang cache.
+            $lock     = Cache::lock("item_stock:day:v1:$host:" . $source->key() . ':lock', 300);
+            $deadline = microtime(true) + max(0, (int) config('services.nexus.cold_wait', 15));
+            $got      = $lock->get();
+            while (!$got && microtime(true) < $deadline) {
+                usleep(100000);
+                [$hits, $missS, $missR] = $read();
+                if (!$missS && !$missR) break;
+                $got = $lock->get();
+            }
+            try {
+                if ($got) [$hits, $missS, $missR] = $read();
+                $put = [];
+                if ($missS) {
+                    $byDay = array_fill_keys($missS, []);
+                    foreach ($this->shippedRows(min($missS), max($missS)) as [$name, $day, $cnt]) {
+                        if (isset($byDay[$day])) $byDay[$day][] = [$name, $cnt];
+                    }
+                    foreach ($byDay as $d => $rows) { $put[$sKey($d)] = $rows; $hits[$sKey($d)] = $rows; }
+                }
+                if ($missR) {
+                    $res = $source instanceof JntReturnedSource
+                        ? $source->returnedClosed(min($missR), max($missR) . ' 23:59:59')
+                        : $source->returned(min($missR), max($missR) . ' 23:59:59');
+                    if (!$res->available) {
+                        $unavailable = true;                     // hindi itinatabi; ang shipped ay tuloy pa rin
+                    } else {
+                        $byDay = array_fill_keys($missR, []);
+                        foreach ($res->byDay ?: [] as $name => $perDay) {
+                            foreach ($perDay as $d => $n) if (isset($byDay[$d])) $byDay[$d][$name] = (int) $n;
+                        }
+                        foreach ($byDay as $d => $names) { $put[$rKey($d)] = $names; $hits[$rKey($d)] = $names; }
+                    }
+                }
+                if ($put) Cache::putMany($put, self::CLOSED_DAY_TTL);
+            } finally {
+                if ($got) $lock->release();
+            }
+        }
+
+        $out = ['shipped' => [], 'returned' => [], 'available' => !$unavailable, 'likha_keys' => true];
+        foreach ($days as $d) {
+            $out['shipped'][$d]  = $hits[$sKey($d)] ?? [];
+            $out['returned'][$d] = $hits[$rKey($d)] ?? [];
+        }
+
+        return $out;
+    }
+
+    /**
+     * Shipped kada item at araw (Manila) ng UNANG J&T submission ng waybill, mula $from hanggang $to (kasama). Ang
+     * waybill na unang na-submit bago ang $from ay hindi kasama (bago ang simula ng lahat ng item, o nasa saradong araw).
+     * @return array<int,array{0:string,1:string,2:int}>
+     */
+    private function shippedRows(string $from, string $to): array
+    {
+        return array_map(
+            fn ($r) => [(string) ($r->item_name ?? ''), substr((string) $r->day, 0, 10), (int) $r->cnt],
+            DB::select(self::shippedSql(), self::shippedBindings($from, $to))
+        );
+    }
+
+    /**
+     * Ang SQL ng shipped kada item at araw (para rin sa EXPLAIN); bindings: shippedBindings().
+     * Ang unang J&T row ng waybill = ang row na walang mas naunang row ng parehong waybill (mas maagang submission_time,
+     * o parehong oras at mas mababang id). Kapag ito ay ≥ $lower, wala ring row bago ang $lower. Isang subquery sa index ng
+     * waybill kada row (walang GROUP BY sa buong from_jnts), at ang range ng submission_time ay dumadaan sa index nito.
+     */
+    public static function shippedSql(): string
+    {
+        $item = self::col('ITEM_NAME');
+
+        return "SELECT $item AS item_name, DATE(f.submission_time) AS day, COUNT(*) AS cnt
+             FROM macro_output mo
+             JOIN (SELECT fj.waybill_number, fj.submission_time FROM from_jnts fj
+                   WHERE fj.submission_time >= ? AND fj.submission_time <= ?
+                     AND NOT EXISTS (SELECT 1 FROM from_jnts b
+                                     WHERE b.waybill_number = fj.waybill_number
+                                       AND (b.submission_time < fj.submission_time
+                                            OR (b.submission_time = fj.submission_time AND b.id < fj.id)))) f
+               ON f.waybill_number = mo.waybill
+             WHERE " . self::notCancelledSql() . "
+             GROUP BY $item, DATE(f.submission_time)";
+    }
+
+    /** @return array<int,mixed> */
+    public static function shippedBindings(string $from, ?string $to = null): array
+    {
+        return array_merge([$from . ' 00:00:00', ($to ?? '9999-12-31') . ' 23:59:59'], HoldService::CANCELLED_STATUSES);
     }
 
     /**
