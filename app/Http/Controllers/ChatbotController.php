@@ -117,6 +117,9 @@ class ChatbotController extends Controller
         $adGroups = app(\App\Services\Chatbot\AdGroups::class);
         // Ang naitalang pangalan sa Facebook at ang mga row na may parehong page ID (dalawang query, walang tawag sa labas).
         $facebook = app(FacebookName::class)->overview();
+        // Ang mga address ng forbeast gateway (GATEWAY_URLS): ipinapakita lang kapag higit sa isa, kaya pareho ang JSON kung wala.
+        $routes = Gateways::routes();
+        $apps = count($routes) > 1 ? array_combine(array_keys($routes), array_map(fn ($k) => Gateways::routeLabel($k), array_keys($routes))) : null;
 
         $rows = [];
         foreach ($pages as $page) {
@@ -157,8 +160,7 @@ class ChatbotController extends Controller
                 'auto_switched' => ForbeastWatch::note($autoSwitch, $providerRow, $provider, $gatewayRow),
                 // Aling gateway ang sumasagot kapag gateway ang provider, at ang mapipili (naka-set up at gumagana ang token ng page).
                 'gateway' => Gateways::active($page), 'gateways' => Gateways::readyFor($page),
-                // Ang address ng forbeast gateway ng page (chatbot.gateway_app).
-                'gateway_app' => Gateways::route($page),
+            ] + ($apps !== null ? ['gateway_app' => Gateways::route($page)] : []) + [ // ang address ng forbeast gateway ng page (chatbot.gateway_app)
                 'flow_text' => $linked === null && $text !== null && $text !== '' ? $text : null,
                 'flow_code' => $linked !== null ? ($flowCodes[$flowId] ?? null) : null,
                 // Ang mga value na huling isinulat mula sa Forbeast (ang "via Forbeast" ng cell).
@@ -188,9 +190,9 @@ class ChatbotController extends Controller
 
         return response()->json(['columns' => $columns, 'rows' => $rows, 'flows' => $this->flowNames(), 'gateway_ready' => ChatbotProvider::gatewayReady(),
             'gateway_labels' => Gateways::LABELS,
-            // Ang mga address ng forbeast gateway na mapipili (key => pangalan); walang laman kapag isa lang.
-            'gateway_apps' => count($routes = Gateways::routes()) > 1 ? array_combine(array_keys($routes), array_map(fn ($k) => Gateways::routeLabel($k), array_keys($routes))) : [],
-            'bots' => \App\Services\Chatbot\ChatbotConnections::bots(), 'ai_site' => $ai->site()]);
+            'bots' => \App\Services\Chatbot\ChatbotConnections::bots(), 'ai_site' => $ai->site()]
+            // Ang mga address na mapipili (key => pangalan), kapag higit sa isa lang.
+            + ($apps !== null ? ['gateway_apps' => $apps] : []));
     }
 
     /** Auto-save ng isang botfield. Blangko = burahin. Last write wins. */

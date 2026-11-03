@@ -205,7 +205,8 @@ class GatewayRoutePerPageTest extends ChatblastTestCase
         $this->get('/chatbot/pages')->assertOk()->assertSee('data-gateway-app-url', false);
 
         config(['services.gateway.urls' => '']);
-        $this->assertSame([], $data()->json('gateway_apps'), 'one address: nothing to choose');
+        $this->assertNull($data()->json('gateway_apps'), 'one address: nothing to choose, and the data is as before');
+        $this->assertArrayNotHasKey('gateway_app', $row());
         $this->postJson('/chatbot/gateway-app', ['page_name' => 'Page Uno', 'gateway_app' => 'forbeast'])->assertStatus(422);
     }
 
