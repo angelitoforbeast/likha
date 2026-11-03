@@ -5,6 +5,8 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use App\Models\AdsManagerReport;
 use App\Models\MacroOutput;
+use App\Services\Chatbot\AdGroups;
+use App\Services\PageSettings;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -63,7 +65,7 @@ class CPPController extends Controller
             [$start, $end] = [$end, $start];
         }
 
-        [$matrix, $dateRange] = $this->buildData($start, $end);
+        [$matrix, $dateRange, $adGroupRows] = $this->buildData($start, $end, true);
 
         // Multi-page selection (?pages=A,B,C — comma-separated). Empty/missing
         // means "all". Backwards-compat: ?ui_page= still works as single-page
@@ -81,6 +83,7 @@ class CPPController extends Controller
             'start'          => $start,
             'end'            => $end,
             'selectedPages'  => $selectedPages, // pre-fill multi-select checkboxes
+            'adGroupRows'    => $adGroupRows,   // Ad-based na page: ang mga row kada ad group sa ilalim ng row nito
         ]);
     }
 
@@ -90,14 +93,19 @@ class CPPController extends Controller
      * - Handles MySQL/Postgres timestamp parsing
      * - UNION of keys from Ads and Orders
      */
-    private function buildData(string $start, string $end): array
+    private function buildData(string $start, string $end, bool $withGroups = false): array
     {
         $normalize = fn ($s) => strtolower(preg_replace('/\s+/', '', (string) $s));
+
+        // 0) Ang mga Ad-based na page (adgroup.mode = ad), normalized na pangalan => pangalan sa settings. Kapag wala, ang
+        //    mga query ay gaya ng dati (walang dagdag na column).
+        $adBased = $withGroups ? $this->adBasedPages($normalize) : [];
+        $orderAdCol = $adBased && Schema::hasColumn('macro_output', 'botcake_ad_id');
 
         // 1) ADS (filtered)
         $adsRows = AdsManagerReport::query()
             ->whereBetween('day', [$start, $end])
-            ->select(['day', 'page_name', 'amount_spent_php', 'messaging_conversations_started', 'impressions'])
+            ->select(array_merge(['day', 'page_name', 'amount_spent_php', 'messaging_conversations_started', 'impressions'], $adBased ? ['ad_id', 'ad_set_id', 'campaign_id'] : []))
             ->get();
 
         $adsByKey = $adsRows->groupBy(function ($row) use ($normalize) {
@@ -110,18 +118,18 @@ class CPPController extends Controller
 
         if ($driver === 'mysql') {
             $orderRows = MacroOutput::query()
-                ->selectRaw("DATE(STR_TO_DATE(`TIMESTAMP`, '%H:%i %d-%m-%Y')) AS ts_date, `PAGE`, `ITEM_NAME`, `COD`, `STATUS`")
+                ->selectRaw("DATE(STR_TO_DATE(`TIMESTAMP`, '%H:%i %d-%m-%Y')) AS ts_date, `PAGE`, `ITEM_NAME`, `COD`, `STATUS`" . ($orderAdCol ? ', `botcake_ad_id`' : ''))
                 ->whereRaw("DATE(STR_TO_DATE(`TIMESTAMP`, '%H:%i %d-%m-%Y')) BETWEEN ? AND ?", [$start, $end])
                 ->get();
         } elseif ($driver === 'pgsql') {
             $orderRows = MacroOutput::query()
-                ->selectRaw("to_timestamp(\"TIMESTAMP\", 'HH24:MI DD-MM-YYYY')::date AS ts_date, \"PAGE\", \"ITEM_NAME\", \"COD\", \"STATUS\"")
+                ->selectRaw("to_timestamp(\"TIMESTAMP\", 'HH24:MI DD-MM-YYYY')::date AS ts_date, \"PAGE\", \"ITEM_NAME\", \"COD\", \"STATUS\"" . ($orderAdCol ? ', "botcake_ad_id"' : ''))
                 ->whereRaw("to_timestamp(\"TIMESTAMP\", 'HH24:MI DD-MM-YYYY')::date BETWEEN ? AND ?", [$start, $end])
                 ->get();
         } else {
             // Fallback: parse in PHP then filter
             $orderRows = MacroOutput::query()
-                ->select(['TIMESTAMP', 'PAGE', 'ITEM_NAME', 'COD', 'STATUS'])
+                ->select(array_merge(['TIMESTAMP', 'PAGE', 'ITEM_NAME', 'COD', 'STATUS'], $orderAdCol ? ['botcake_ad_id'] : []))
                 ->get()
                 ->transform(function ($row) {
                     try {
@@ -145,8 +153,18 @@ class CPPController extends Controller
             ->unique()
             ->values();
 
-        // 4) Merge + compute per (date,page)
-        $summary = [];
+        // 4) Merge + compute per (date,page). Ang Ad-based na page: hinahati rin ang ads at orders kada ad group.
+        $groupInfo = [];
+        foreach ($adBased as $normPage => $settingsPage) {
+            $orderAds = $orderAdCol ? $orderRows->filter(fn ($o) => $normalize($o->PAGE) === $normPage)->pluck('botcake_ad_id')->filter()->unique()->values()->all() : [];
+            $groupInfo[$normPage] = [
+                'groups' => app(AdGroups::class)->groups($settingsPage),
+                'index'  => app(AdGroups::class)->index($settingsPage),
+                'orders' => app(AdGroups::class)->groupsForAds($settingsPage, $orderAds),
+            ];
+        }
+        $matrix = [];
+        $groupCells = []; // [page][bucket][date] => cell
         foreach ($allKeys as $key) {
             [$date, $normPage] = explode('__', $key);
             $ads    = $adsByKey->get($key, collect());
@@ -156,47 +174,21 @@ class CPPController extends Controller
                 ?? optional($orders->first())->PAGE
                 ?? '[Unknown Page]';
 
-            $spent       = (float) $ads->sum('amount_spent_php');
-            $messages    = (int)   $ads->sum('messaging_conversations_started');
-            $impressions = (int)   $ads->sum('impressions');
+            $matrix[$pageName] ??= [];
+            $matrix[$pageName][$date] = $this->cell($ads, $orders);
 
-            // Your definitions
-            $cpm = $messages    > 0 ? round($spent / $messages, 2) : null;               // "cost per message"
-            $cpi = $impressions > 0 ? round(($spent * 1000) / $impressions, 2) : null;   // per 1k impressions
-            $ordersCount = $orders->count();
-            $cpp         = $ordersCount > 0 ? round($spent / $ordersCount, 2) : null;
+            if (!isset($groupInfo[$normPage])) continue;
+            $info = $groupInfo[$normPage];
+            $adsBy = $ads->groupBy(fn ($r) => $this->spendBucket($r, $info['index']));
+            $ordersBy = $orders->groupBy(function ($o) use ($info) {
+                $ad = trim((string) ($o->botcake_ad_id ?? ''));
+                if ($ad === '') return 'unknown';
 
-            $cannotProceed = $orders->filter(fn($o) => strtoupper(trim((string)($o->STATUS ?? ''))) === 'CANNOT PROCEED')->count();
-            $proceedCount  = $orders->filter(fn($o) => strtoupper(trim((string)($o->STATUS ?? ''))) === 'PROCEED')->count();
-
-            // (item + COD) pair counts → mode pair per day sa view (dala na ang presyo).
-            $pairCounts = [];
-            foreach ($orders as $o) {
-                $itemName = trim((string) ($o->ITEM_NAME ?? ''));
-                if ($itemName === '') continue;
-                $cod = preg_replace('/[^\d.]/', '', (string) ($o->COD ?? '')); // normalize: digits + dot lang
-                $key = $itemName . '|||' . $cod;
-                if (!isset($pairCounts[$key])) {
-                    $pairCounts[$key] = ['i' => $itemName, 'c' => $cod, 'n' => 0];
-                }
-                $pairCounts[$key]['n']++;
+                return isset($info['orders'][$ad]) ? 'g' . $info['orders'][$ad] : 'nogroup';
+            });
+            foreach ($adsBy->keys()->merge($ordersBy->keys())->unique() as $bucket) {
+                $groupCells[$pageName][$bucket][$date] = $this->cell($adsBy->get($bucket, collect()), $ordersBy->get($bucket, collect()));
             }
-            $pairs = array_values($pairCounts);
-
-            $summary[] = [
-                'date'           => $date,
-                'page'           => $pageName,
-                'amount_spent'   => $spent,
-                'orders'         => $ordersCount,
-                'cpp'            => $cpp,
-                'cpm'            => $cpm,
-                'cpi'            => $cpi,
-                'item_names'     => $orders->pluck('ITEM_NAME')->filter()->unique()->values()->all(),
-                'item_pairs'     => $pairs, // [{i:item, c:cod, n:count}] → mode pair (item + presyo)
-                'cods'           => $orders->pluck('COD')->filter()->unique()->values()->all(),
-                'cannot_proceed' => $cannotProceed,
-                'proceed'        => $proceedCount,
-            ];
         }
 
         // 5) Full date list (start→end)
@@ -205,29 +197,99 @@ class CPPController extends Controller
             $dateRange[] = $d->format('Y-m-d');
         }
 
-        // 6) Build matrix[page][date]
-        $matrix = [];
-        foreach ($summary as $row) {
-            $page = $row['page'];
-            $date = $row['date'];
-            $matrix[$page] ??= [];
-            $matrix[$page][$date] = [
-                'cpp'        => $row['cpp'],
-                'orders'     => $row['orders'],
-                'cpm'        => $row['cpm'],
-                'cpi'        => $row['cpi'],
-                'spent'      => $row['amount_spent'],
-                'item_names' => $row['item_names'],
-                'item_pairs' => $row['item_pairs'],
-                'cods'       => $row['cods'],
-                'tcpr_fail'  => $row['cannot_proceed'],
-                'proceed'    => $row['proceed'],
-            ];
-        }
-
         ksort($matrix);
 
-        return [$matrix, $dateRange];
+        // 6) Ang mga row ng ad group kada Ad-based na page: lahat ng group (kahit walang laman sa range), saka ang "Not in
+        //    a group" (ad na walang group) at "Unknown ad" (walang ad) kapag may laman, kaya ang kabuuan ay ang row ng page.
+        $adGroupRows = [];
+        foreach ($groupCells as $pageName => $buckets) {
+            $info = $groupInfo[$normalize($pageName)];
+            $rows = [];
+            foreach ($info['groups'] as $id => $g) {
+                $rows[] = ['label' => 'Ad group: ' . $g['name'], 'kind' => 'group', 'cells' => $buckets['g' . $id] ?? []];
+            }
+            if (isset($buckets['nogroup'])) $rows[] = ['label' => 'Not in a group', 'kind' => 'nogroup', 'cells' => $buckets['nogroup']];
+            if (isset($buckets['unknown'])) $rows[] = ['label' => 'Unknown ad', 'kind' => 'unknown', 'cells' => $buckets['unknown']];
+            $adGroupRows[$pageName] = $rows;
+        }
+
+        return [$matrix, $dateRange, $adGroupRows];
+    }
+
+    /**
+     * Ang mga numero ng isang (araw, page) o ng isang ad group nito: ang parehong formula para sa dalawa.
+     * @param \Illuminate\Support\Collection $ads mga row ng ads_manager_reports
+     * @param \Illuminate\Support\Collection $orders mga row ng macro_output
+     */
+    private function cell($ads, $orders): array
+    {
+        $spent       = (float) $ads->sum('amount_spent_php');
+        $messages    = (int)   $ads->sum('messaging_conversations_started');
+        $impressions = (int)   $ads->sum('impressions');
+
+        // Your definitions
+        $cpm = $messages    > 0 ? round($spent / $messages, 2) : null;               // "cost per message"
+        $cpi = $impressions > 0 ? round(($spent * 1000) / $impressions, 2) : null;   // per 1k impressions
+        $ordersCount = $orders->count();
+        $cpp         = $ordersCount > 0 ? round($spent / $ordersCount, 2) : null;
+
+        $cannotProceed = $orders->filter(fn($o) => strtoupper(trim((string)($o->STATUS ?? ''))) === 'CANNOT PROCEED')->count();
+        $proceedCount  = $orders->filter(fn($o) => strtoupper(trim((string)($o->STATUS ?? ''))) === 'PROCEED')->count();
+
+        // (item + COD) pair counts → mode pair per day sa view (dala na ang presyo).
+        $pairCounts = [];
+        foreach ($orders as $o) {
+            $itemName = trim((string) ($o->ITEM_NAME ?? ''));
+            if ($itemName === '') continue;
+            $cod = preg_replace('/[^\d.]/', '', (string) ($o->COD ?? '')); // normalize: digits + dot lang
+            $key = $itemName . '|||' . $cod;
+            if (!isset($pairCounts[$key])) {
+                $pairCounts[$key] = ['i' => $itemName, 'c' => $cod, 'n' => 0];
+            }
+            $pairCounts[$key]['n']++;
+        }
+
+        return [
+            'cpp'        => $cpp,
+            'orders'     => $ordersCount,
+            'cpm'        => $cpm,
+            'cpi'        => $cpi,
+            'spent'      => $spent,
+            'item_names' => $orders->pluck('ITEM_NAME')->filter()->unique()->values()->all(),
+            'item_pairs' => array_values($pairCounts), // [{i:item, c:cod, n:count}] → mode pair (item + presyo)
+            'cods'       => $orders->pluck('COD')->filter()->unique()->values()->all(),
+            'tcpr_fail'  => $cannotProceed,
+            'proceed'    => $proceedCount,
+        ];
+    }
+
+    /**
+     * Ang ad group ng isang report row: ang group ng ad_id, saka ng ad_set_id, saka ng campaign_id (ang pinakatiyak ang
+     * nananaig, gaya ng sa sagot ng chatbot). Walang group: "nogroup"; walang ad ID man lang: "unknown".
+     */
+    private function spendBucket($row, array $index): string
+    {
+        $ids = array_map(fn ($c) => trim((string) ($row->{$c} ?? '')), ['ad_id', 'ad_set_id', 'campaign_id']);
+        foreach ($ids as $id) {
+            if ($id !== '' && isset($index[$id])) return 'g' . $index[$id];
+        }
+
+        return $ids[0] === '' ? 'unknown' : 'nogroup';
+    }
+
+    /**
+     * Ang mga Ad-based na page (adgroup.mode = ad): normalized na pangalan (gaya ng $normalize ng CPP) => pangalan sa
+     * page settings. Isang query sa page_settings; ang mode mismo ay mula sa naka-cache na settings ng page.
+     * @return array<string, string>
+     */
+    private function adBasedPages(callable $normalize): array
+    {
+        $out = [];
+        foreach (app(PageSettings::class)->pagesWith(AdGroups::PROVIDER, [AdGroups::MODE_KEY]) as $page) {
+            if (app(AdGroups::class)->adBased($page)) $out[$normalize($page)] ??= $page;
+        }
+
+        return $out;
     }
 
     // ─────────────────────────────────────────────────────────────────────
