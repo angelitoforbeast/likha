@@ -119,6 +119,23 @@ class Gateways
         return $out;
     }
 
+    /**
+     * Ang Meta app ng mga address ng forbeast gateway (GATEWAY_APP_IDS, "key=app_id", hiwalay sa space o comma, gaya ng
+     * GATEWAY_URLS): ang echo mula sa app na ito ay padala ng forbeast gateway sa address na iyon. Ang forbeast= ay hindi
+     * pinapansin (kilala na ang app nito, ChatEchoes::APPS); ang maling entry ay nilalaktawan.
+     * @return array<string, string> app_id => key
+     */
+    public static function appIds(): array
+    {
+        $out = [];
+        foreach (preg_split('/[\s,]+/', trim((string) config('services.gateway.app_ids', ''))) ?: [] as $entry) {
+            if (!preg_match('/^([a-z0-9_-]{1,30})=(\d{1,32})$/', $entry, $m) || $m[1] === self::FORBEAST) continue;
+            $out[$m[2]] ??= $m[1];
+        }
+
+        return $out;
+    }
+
     /** Ang pangalan ng address sa screen. */
     public static function routeLabel(string $route): string
     {
