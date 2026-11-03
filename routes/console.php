@@ -288,3 +288,11 @@ Schedule::command('nexus:sync-stock --days=7')
     ->timezone('Asia/Manila')
     ->dailyAt('02:40')
     ->withoutOverlapping(60);
+
+// /item stock (Nexus mode): pinapainit ang stock inputs kada 10 minuto, bago lumipas ang 15-minutong cache, para halos
+// hindi tamaan ng page ang mabagal na cold na kuwenta. Sa background: ilang segundo ang isang cold na kuwenta.
+Schedule::command('stock:warm')
+    ->timezone('Asia/Manila')
+    ->everyTenMinutes()
+    ->withoutOverlapping(10)
+    ->runInBackground();

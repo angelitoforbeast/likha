@@ -43,6 +43,10 @@ class ItemStockService
     private const OPEN_PO_STATUSES = ['ordered', 'delivered'];
     /** Ilang segundo ang cache ng Nexus stock inputs (shipped, returned, stock-in). */
     private const INPUTS_TTL     = 900;
+    /** Habang nagpapainit (warmInputs): {keys, busy}; null = karaniwang page call. */
+    private ?array $warming = null;
+    /** Ang host ng key habang nagpapainit (mula APP_URL); null = ang host ng request. */
+    private ?string $hostOverride = null;
     /** Lampas dito mula sa huling matagumpay na sync = luma (3 oras). */
     public const STALE_SECONDS   = 10800;
     /** Ang mga "remaining" ng isang item na hindi lalayo nang higit dito sa pinakabago ay iisang takbo ng sync. */
@@ -253,7 +257,7 @@ class ItemStockService
         $unmatched = [];
         $remainingAsOf = null;
         $syncKey = $synced?->format('YmdHis') ?? 'never';
-        $host    = strtolower(request()->getHost());
+        $host    = $this->hostOverride ?? strtolower(request()->getHost());
         $today   = $now->toDateString();
 
         if ($stockStart !== null) {
@@ -364,6 +368,8 @@ class ItemStockService
      */
     private function cachedInputs(string $key, callable $compute): array
     {
+        if ($this->warming !== null) return $this->warmInput($key, $compute);
+
         $hit = Cache::get($key);
         if (is_array($hit)) return $hit;
 
@@ -379,6 +385,64 @@ class ItemStockService
             return Cache::remember($key, self::INPUTS_TTL, $compute);
         } finally {
             $lock->release();
+        }
+    }
+
+    /**
+     * Pagpapainit (stock:warm, o pagkatapos ng sync): kinukuwenta ulit at itinatabi kahit may laman pa, para hindi
+     * lumipas ang TTL. Parehong lock ng page: kapag may ibang kumukuwenta na, hindi na sumasabay (ang naitabi ang gamit).
+     * Kapag bumagsak ang kuwenta, walang ginagalaw sa cache (ang luma ang nananatili).
+     */
+    private function warmInput(string $key, callable $compute): array
+    {
+        $lock     = Cache::lock($key . ':lock', 120);
+        $deadline = microtime(true) + max(0, (int) config('services.nexus.cold_wait', 15));
+        while (!$lock->get()) {
+            usleep(100000);
+            if (microtime(true) >= $deadline) {
+                $this->warming['busy'][] = $key;
+                $hit = Cache::get($key);
+                return is_array($hit) ? $hit : $compute();
+            }
+        }
+        try {
+            $value = $compute();
+            Cache::put($key, $value, self::INPUTS_TTL);
+            $this->warming['keys'][] = $key;
+
+            return $value;
+        } finally {
+            $lock->release();
+        }
+    }
+
+    /**
+     * Pinapainit ang stock inputs ng default na /item/stock (walang start_date / end_date: mula sa unang araw ng nakaraang
+     * buwan hanggang ngayon). Ang host ay galing sa APP_URL, kaya ang key ay ang ginagamit ng page sa host na iyon:
+     * item_stock:stockin:v2:{host}:{huling sync}:{ngayon} at item_stock:moves:v2:{host}:{hangganan}:{source}:{huling sync}:{ngayon}.
+     * Ang mga input ay hindi nakadepende sa mga petsa ng page, kaya iisa ang key ng lahat ng page call sa host na iyon.
+     *
+     * @return array{ok: bool, keys: array<int,string>, busy: array<int,string>, ms: int, error: ?string}
+     */
+    public function warmInputs(): array
+    {
+        $t = microtime(true);
+        $this->warming = ['keys' => [], 'busy' => []];
+        $host = parse_url((string) config('app.url'), PHP_URL_HOST);
+        $this->hostOverride = is_string($host) && $host !== '' ? strtolower($host) : 'localhost';
+        try {
+            $this->build(Carbon::now('Asia/Manila')->startOfMonth()->subMonth()->toDateString(), Carbon::now('Asia/Manila')->toDateString(), false);
+
+            return ['ok' => true, 'keys' => $this->warming['keys'], 'busy' => $this->warming['busy'],
+                    'ms' => (int) round((microtime(true) - $t) * 1000), 'error' => null];
+        } catch (\Throwable $e) {
+            report($e);
+
+            return ['ok' => false, 'keys' => $this->warming['keys'], 'busy' => $this->warming['busy'],
+                    'ms' => (int) round((microtime(true) - $t) * 1000), 'error' => class_basename($e)];
+        } finally {
+            $this->warming = null;
+            $this->hostOverride = null;
         }
     }
 
