@@ -63,10 +63,11 @@ cold queries are bounded by the earliest **matched** first stock-in day, and Not
 |---|---|---|---|
 | Full suite, base 943a2d6c | 4,308 | 3 (ExampleTest, ItemTableFitScriptTest, Astra S-26.18) | 0 |
 | Full suite, head (code at 9c0a5a60, with the prewarm) | 4,333 | 3 (ExampleTest, ItemTableFitScriptTest, Astra S-26.18) | 1 (perf, opt-in) |
-| `tests/Feature/Item`, head | 360 | 1 (ItemTableFitScriptTest, base) | 1 |
-| 222 and stock files | 152 | 0 | 1 |
+| Full suite, head after the review fixes (code at 909084dc) | 4,340 | 3 (ExampleTest, ItemTableFitScriptTest, Chatblast BigBroadcastTest S-167.1; Astra S-26.18 passed this run) | 1 (perf, opt-in) |
+| `tests/Feature/Item`, head | 367 | 1 (ItemTableFitScriptTest, base) | 1 |
+| 222 and stock files (`tests/Feature/Item/*Stock*`, `*Returned*`) | 166 | 0 | 1 |
 
-No new failure: the three failures are the base list. Head = base + 25 tests. Most tests show the `artisan test` printer warning of a worktree, as in spec 220.
+No code-caused failure. BigBroadcastTest S-167.1 (4,940 of 5,000 pending, a timing case in Chatblast, which this branch does not touch) passes on its own: `BigBroadcastTest.php` 10 of 10 OK right after the suite. Head = base + 32 tests. Most tests show the `artisan test` printer warning of a worktree, as in spec 220.
 
 ## Story changes (accepted with the plan)
 
