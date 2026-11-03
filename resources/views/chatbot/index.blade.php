@@ -38,16 +38,25 @@
     #cb-table td.cb-cell:hover .cb-edit, #cb-table td.cb-cell:focus-within .cb-edit, #cb-table .cb-edit:focus { opacity: 1; }
     @media (hover: none), (max-width: 639px) { #cb-table .cb-edit { opacity: 1; } }
     #cb-table thead th { position: sticky; top: 0; z-index: 20; }
+    /* Ang mga naka-freeze na column ay may tiyak na lapad (min = max), kaya hindi lumalapad sa mahabang pangalan o select
+       at hindi kumikitid: ang left ng bawat isa ay ang kabuuan ng lapad ng mga nauna, kaya hindi natatakpan ang kasunod. */
+    #cb-table { --cb-w1: 8rem; --cb-w2: 11rem; --cb-w3: 10rem; --cb-w4: 14rem; }
+    #cb-table .stick-1 { width: var(--cb-w1); min-width: var(--cb-w1); max-width: var(--cb-w1); }
+    #cb-table .stick-2 { width: var(--cb-w2); min-width: var(--cb-w2); max-width: var(--cb-w2); }
+    #cb-table .stick-3 { width: var(--cb-w3); min-width: var(--cb-w3); max-width: var(--cb-w3); }
+    #cb-table .stick-4 { width: var(--cb-w4); min-width: var(--cb-w4); max-width: var(--cb-w4); }
+    #cb-table .stick-1, #cb-table .stick-2, #cb-table .stick-3, #cb-table .stick-4 { box-sizing: border-box; overflow-wrap: anywhere; }
     #cb-table .stick-1 { position: sticky; left: 0; z-index: 10; }
     #cb-table thead .stick-1, #cb-table thead .stick-2, #cb-table thead .stick-3, #cb-table thead .stick-4 { z-index: 30; }
     @media (min-width: 640px) {
-        #cb-table .stick-2 { position: sticky; left: 12rem; z-index: 10; }
-        #cb-table .stick-3 { position: sticky; left: 18rem; z-index: 10; box-shadow: 1px 0 0 #e2e8f0; }
+        #cb-table { --cb-w1: 12rem; }
+        #cb-table .stick-2 { position: sticky; left: var(--cb-w1); z-index: 10; }
+        #cb-table .stick-3 { position: sticky; left: calc(var(--cb-w1) + var(--cb-w2)); z-index: 10; box-shadow: 1px 0 0 #e2e8f0; }
     }
     /* Desktop: ang Check ay naka-freeze din (maikling cell); ang buong listahan ay lumalabas sa hover o pindot. */
     @media (min-width: 1024px) {
         #cb-table .stick-3 { box-shadow: none; }
-        #cb-table .stick-4 { position: sticky; left: 28rem; z-index: 11; width: 14rem; max-width: 14rem; box-shadow: 1px 0 0 #e2e8f0; }
+        #cb-table .stick-4 { position: sticky; left: calc(var(--cb-w1) + var(--cb-w2) + var(--cb-w3)); z-index: 11; box-shadow: 1px 0 0 #e2e8f0; }
         #cb-table .cb-chk-pop { display: none; position: absolute; left: 0.5rem; top: 100%; z-index: 40; width: 20rem; max-width: calc(100vw - 2rem); }
         #cb-table td.stick-4:hover .cb-chk-pop, #cb-table .cb-chk.cb-chk-open .cb-chk-pop, #cb-table .cb-chk:focus-within .cb-chk-pop { display: block; }
         /* Ang bukas na cell ay nasa ibabaw ng mga sticky na cell ng susunod na row. */
@@ -59,6 +68,11 @@
        sa kaliwa at kasing-lapad ng kahon (--cbw), kaya nababasa kahit naka-scroll pakanan o sa phone. */
     #cb-table tr.ag-sub > td { background: #f8fafc; }
     #cb-table .ag-pin { position: sticky; left: 0; width: calc(var(--cbw, 100vw) - 2px); max-width: 64rem; box-sizing: border-box; }
+    /* Ang pagpapangkat: makapal na guhit sa pagitan ng mga page, manipis at mas maputla sa pagitan ng mga ad group ng
+       isang page, at ang mga sub-row ay nakausog na may guhit sa kaliwa, kaya kita kung kaninong page sila. */
+    #cb-table tbody tr:not(.ag-sub):not(:first-child) > td { border-top: 2px solid #94a3b8; }
+    #cb-table tr.ag-sub[data-ag-group] > td { border-top: 1px solid #cbd5e1; }
+    #cb-table tr.ag-sub > td.stick-1, #cb-table tr.ag-sub .ag-pin { padding-left: 1.75rem; box-shadow: inset 3px 0 0 #cbd5e1; }
 </style>
 @endpush
 
@@ -469,6 +483,7 @@
         if (!res.ok) { notice('Could not load the pages (' + res.status + ').', 'text-red-600'); return; }
         const data = await res.json();
         columns = data.columns; rows = RowCache.merge(rows, data.rows); flows = data.flows || []; gatewayReady = !!data.gateway_ready; gatewayApps = data.gateway_apps || {}; bots = data.bots || []; aiSite = data.ai_site || null;
+        fillBulkVia();
         // Ang naka-cache na Check ay kasama sa data; ang wala pa ay kinukuha pagkatapos ng render (checkQueue).
         checks.clear();
         for (const r of rows) if (r.check) checks.set(r.page, r.check);
@@ -599,10 +614,10 @@
         if (key === headKey && table.tHead) return;
         headKey = key;
         const head = el('tr', {}, [
-            el('th', {class: 'stick-1 w-32 min-w-[8rem] sm:w-48 sm:min-w-[12rem] border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500'}, [el('input', {type: 'checkbox', id: 'sel-all', class: 'mr-1 align-middle', 'aria-label': 'Select every page in the list', title: 'Select all in the list'}), 'Page', filterButton('page')]),
-            el('th', {class: 'stick-2 min-w-[6rem] w-24 border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500'}, ['Active', filterButton('active'), ' Bot', filterButton('bot')]),
-            el('th', {class: 'stick-3 min-w-[10rem] w-40 border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500'}, ['Flow', filterButton('flow')]),
-            el('th', {class: 'stick-4 min-w-[12rem] border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500', title: 'Values the flow uses, image links, Seq pairs and unknown variables'}, ['Check', filterButton('check')]),
+            el('th', {class: 'stick-1 border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500'}, [el('input', {type: 'checkbox', id: 'sel-all', class: 'mr-1 align-middle', 'aria-label': 'Select every page in the list', title: 'Select all in the list'}), 'Page', filterButton('page')]),
+            el('th', {class: 'stick-2 border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500'}, ['Active', filterButton('active'), ' Bot', filterButton('bot')]),
+            el('th', {class: 'stick-3 border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500'}, ['Flow', filterButton('flow')]),
+            el('th', {class: 'stick-4 border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500', title: 'Values the flow uses, image links, Seq pairs and unknown variables'}, ['Check', filterButton('check')]),
             el('th', {class: 'min-w-[7rem] border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500', title: 'Bots that are fully connected'}, ['Connected', filterButton('connected')]),
             el('th', {class: 'min-w-[5rem] border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500', text: 'Chats today'}),
             el('th', {class: 'min-w-[8rem] border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500', text: 'Last chat'}),
@@ -1232,7 +1247,7 @@
         ]);
         paintSwitch(b, r.active);
         if (url.activeUrl) b.addEventListener('click', () => toggle(r, b)); else b.disabled = true; // CEO lang ang makakapag-switch
-        td.append(b, providerSelect(r), gatewaySelect(r), gatewayAppSelect(r), aiButton(r));
+        td.append(b, repliesViaSelect(r), gatewaySelect(r), aiButton(r));
         if (r.ai_load) td.append(aiLoadNote(r.ai_load));
         if (r.auto_switched) td.append(autoSwitchNote(r.auto_switched));
         const err = errors.get(r.page);
@@ -1399,18 +1414,27 @@
         $('bulk-apply').disabled = !sel.length || !url.providerUrl;
         $('bulk-apply').textContent = sel.length ? 'Apply to ' + sel.length + ' selected' : 'Apply to selected';
     }
+    // Ang mga pili ng bulk "Replies via": gaya ng sa row (Botcake, saka Bot N kada address, o Forbeast kapag isa lang).
+    function fillBulkVia() {
+        const s = $('bulk-provider'), was = s.value;
+        const routes = viaRoutes().map(([v, t]) => el('option', {value: v, text: t}));
+        s.replaceChildren(el('option', {value: 'botcake', text: 'Botcake'}), ...(routes.length ? routes : [el('option', {value: 'gateway', text: 'Forbeast'})]));
+        s.value = [...s.options].some(o => o.value === was) ? was : 'botcake';
+    }
     $('bulk-apply').addEventListener('click', async () => {
-        const names = [...picked].filter(p => rows.some(r => r.page === p)), want = $('bulk-provider').value;
+        const names = [...picked].filter(p => rows.some(r => r.page === p)), choice = $('bulk-provider').value;
+        const [want, wantApp] = choice.split(':');
         if (!names.length) return;
         // Gateway: ang bawat page ay may gumaganang token sa sarili nitong gateway (Forbeast o Incepxionbot).
         const notReady = want === 'gateway' ? names.filter(p => { const r = rows.find(x => x.page === p); return !(r?.gateways || []).includes(r?.gateway); }) : [];
         if (notReady.length) { notice(NEEDS_TOKEN + ': ' + notReady.join(', '), 'text-red-600'); return; }
-        const label = want === 'gateway' ? [...new Set(names.map(p => provLabel(rows.find(x => x.page === p) || {}, 'gateway')))].join(' / ') : 'Botcake';
+        const label = wantApp ? $('bulk-provider').selectedOptions[0].textContent
+            : want === 'gateway' ? [...new Set(names.map(p => provLabel(rows.find(x => x.page === p) || {}, 'gateway')))].join(' / ') : 'Botcake';
         if (!confirm('Send and receive the chats of these ' + names.length + ' page' + (names.length === 1 ? '' : 's') + ' through ' + label + '?\n\n' + names.join('\n'))) return;
         $('bulk-apply').disabled = true;
         try {
-            const {ok, data} = await post(url.providerUrl, {page_names: names, provider: want});
-            if (ok) { rows.forEach(r => { if (names.includes(r.page)) { r.provider = data.provider; r.auto_switched = null; } }); picked.clear(); notice(names.length + ' page' + (names.length === 1 ? '' : 's') + ' now reply via ' + label + '.', 'text-green-700'); }
+            const {ok, data} = await post(url.providerUrl, {page_names: names, provider: want, ...(wantApp ? {gateway_app: wantApp} : {})});
+            if (ok) { rows.forEach(r => { if (names.includes(r.page)) { r.provider = data.provider; if (data.gateway_app) r.gateway_app = data.gateway_app; r.auto_switched = null; } }); picked.clear(); notice(names.length + ' page' + (names.length === 1 ? '' : 's') + ' now reply via ' + label + '.', 'text-green-700'); }
             else notice(data.error || data.message || 'Not changed.', 'text-red-600');
         } catch (e) { notice('No connection: not changed.', 'text-red-600'); }
         render();
@@ -1425,25 +1449,38 @@
         ]);
     }
 
-    // Ang Bot ng page (kung saan dumadaan ang chat at sagot): ang mga kumpletong koneksyon lang (Connected), kasama ang
-    // kasalukuyan. Isa lang: text, walang select. Ang gateway (Forbeast o Incepxionbot, ang aktibo ng page) ay kailangan
-    // ding naka-set up (GATEWAY_URL, INCEPXIONBOT_URL).
-    function providerSelect(r) {
-        const current = r.provider || 'botcake';
-        const options = ['botcake', 'gateway'].filter(p => p === current || ((r.connected || []).includes(provLabel(r, p)) && (p !== 'gateway' || gatewayReady)));
-        if (options.length < 2) return el('div', {class: 'mt-1 text-xs text-slate-600', title: 'Replies via', text: 'Bot: ' + provLabel(r, current)});
-        const sel = el('select', {class: 'mt-1 block w-full max-w-[9rem] rounded border border-slate-300 px-1 py-0.5 text-xs', 'aria-label': 'Bot of ' + r.page, title: 'Replies via'},
-            [el('option', {value: 'botcake', text: 'Botcake'}), el('option', {value: 'gateway', text: 'Forbeast'})].filter(o => options.includes(o.value)));
-        // Ang gateway option ay ang pangalan ng aktibong gateway ng page (Forbeast o Incepxionbot).
-        for (const o of sel.options) if (o.value === 'gateway') o.textContent = provLabel(r, 'gateway');
+    // Ang mga address ng Forbeast gateway bilang pili: [value, label] = ['gateway:<key>', 'Bot N (<pangalan>)'], ayon sa
+    // GATEWAY_URL saka GATEWAY_URLS. Isa lang ang address: walang listahan (ang pili ay "Forbeast" gaya ng dati).
+    function viaRoutes() {
+        const keys = Object.keys(gatewayApps || {});
+        return keys.length < 2 ? [] : keys.map((k, i) => ['gateway:' + k, 'Bot ' + (i + 1) + ' (' + gatewayApps[k] + ')']);
+    }
+
+    // Ang "Replies via" ng page (kung saan dumadaan ang chat at sagot), iisang pili: Botcake, o isang address ng gateway
+    // (Bot N), na isinusulat nang sabay (chatbot.provider at chatbot.gateway_app). Ang mga kumpletong koneksyon lang
+    // (Connected), kasama ang kasalukuyan; isa lang: text, walang select. Ang gateway (Forbeast o Incepxionbot, ang aktibo
+    // ng page) ay kailangan ding naka-set up (GATEWAY_URL, INCEPXIONBOT_URL). Ang mga address ay sa Forbeast gateway lang.
+    function repliesViaSelect(r) {
+        const provider = r.provider || 'botcake';
+        const routes = (r.gateway || 'forbeast') === 'forbeast' && url.providerUrl ? viaRoutes() : [];
+        const route = routes.some(([v]) => v === 'gateway:' + r.gateway_app) ? r.gateway_app : 'forbeast';
+        const current = provider === 'gateway' && routes.length ? 'gateway:' + route : provider;
+        const gatewayOk = (r.connected || []).includes(provLabel(r, 'gateway')) && gatewayReady;
+        const all = [['botcake', 'Botcake'], ...(routes.length ? routes : [['gateway', provLabel(r, 'gateway')]])];
+        const options = all.filter(([v]) => v === current || (v === 'botcake' ? (r.connected || []).includes(provLabel(r, 'botcake')) : gatewayOk));
+        const labelOf = v => (all.find(o => o[0] === v) || [v, v])[1];
+        if (options.length < 2) return el('div', {class: 'mt-1 text-xs text-slate-600', title: 'Replies via', text: 'Bot: ' + labelOf(current)});
+        const sel = el('select', {class: 'mt-1 block w-full max-w-[9rem] rounded border border-slate-300 px-1 py-0.5 text-xs', 'aria-label': 'Replies via of ' + r.page, title: 'Replies via'},
+            options.map(([v, t]) => el('option', {value: v, text: t})));
         sel.value = current;
         sel.addEventListener('change', async () => {
             const want = sel.value;
-            if (!confirm('Switch ' + r.page + ' from ' + provLabel(r, current) + ' to ' + provLabel(r, want) + '?')) { sel.value = current; return; }
+            if (!confirm('Switch ' + r.page + ' from ' + labelOf(current) + ' to ' + labelOf(want) + '?')) { sel.value = current; return; }
+            const [wantProvider, wantApp] = want.split(':');
             sel.disabled = true;
             try {
-                const {ok, data} = await post(url.providerUrl, {page_name: r.page, provider: want});
-                if (ok) { r.provider = data.provider; r.auto_switched = null; errors.delete(r.page); } else errors.set(r.page, data.error || data.message || 'Not changed.');
+                const {ok, data} = await post(url.providerUrl, {page_name: r.page, provider: wantProvider, ...(wantApp ? {gateway_app: wantApp} : {})});
+                if (ok) { r.provider = data.provider; if (data.gateway_app) r.gateway_app = data.gateway_app; r.auto_switched = null; errors.delete(r.page); } else errors.set(r.page, data.error || data.message || 'Not changed.');
             } catch (e) { errors.set(r.page, 'No connection: not changed.'); }
             redraw(r.page);
         });
@@ -1466,28 +1503,6 @@
             try {
                 const {ok, data} = await post(url.gatewayUrl, {page_name: r.page, gateway: want});
                 if (ok) { r.gateway = data.gateway; r.auto_switched = null; errors.delete(r.page); } else errors.set(r.page, data.error || data.message || 'Not changed.');
-            } catch (e) { errors.set(r.page, 'No connection: not changed.'); }
-            redraw(r.page);
-        });
-        return sel;
-    }
-
-    // Aling address ng Forbeast gateway ang tinatawag para sa page (ang Meta app ng address na iyon): kapag higit sa isa
-    // ang naka-configure (GATEWAY_URLS) at Forbeast ang gateway ng page.
-    function gatewayAppSelect(r) {
-        const keys = Object.keys(gatewayApps || {});
-        if (keys.length < 2 || (r.gateway || 'forbeast') !== 'forbeast' || !url.gatewayAppUrl) return document.createTextNode('');
-        const current = keys.includes(r.gateway_app) ? r.gateway_app : 'forbeast';
-        const sel = el('select', {class: 'mt-1 block w-full max-w-[9rem] rounded border border-slate-300 px-1 py-0.5 text-xs', 'aria-label': 'Gateway address of ' + r.page, title: 'Gateway address (Meta app)'},
-            keys.map(k => el('option', {value: k, text: 'App: ' + gatewayApps[k]})));
-        sel.value = current;
-        sel.addEventListener('change', async () => {
-            const want = sel.value;
-            if (!confirm('Send the replies of ' + r.page + ' through the ' + gatewayApps[want] + ' address instead of ' + gatewayApps[current] + '?')) { sel.value = current; return; }
-            sel.disabled = true;
-            try {
-                const {ok, data} = await post(url.gatewayAppUrl, {page_name: r.page, gateway_app: want});
-                if (ok) { r.gateway_app = data.gateway_app; errors.delete(r.page); } else errors.set(r.page, data.error || data.message || 'Not changed.');
             } catch (e) { errors.set(r.page, 'No connection: not changed.'); }
             redraw(r.page);
         });
