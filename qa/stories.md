@@ -4182,6 +4182,18 @@ Tests (`tests/Feature/Item/`): `StockFromFirstStockInTest`, `NexusStockHistoryTe
 | Case | Type | Given / When / Then | Test | Last run |
 |------|------|---------------------|------|----------|
 | S-222.9.1 | happy | After a successful `nexus:sync-stock`, the stock inputs for the default key are computed and stored, so the next page call runs no shipped, returned or nexus_stock_ins query | `test_after_a_successful_sync_the_next_page_call_runs_no_stock_query` | 2026-11-03 passed |
-| S-222.9.2 | happy | `stock:warm` (every 10 minutes) recomputes and stores the key before its 15-minute TTL lapses | `test_the_warm_command_refreshes_the_key_before_the_ttl`, `test_stock_warm_is_scheduled_every_10_minutes_and_does_nothing_without_nexus` | 2026-11-03 passed |
+| S-222.9.2 | happy | `stock:warm` (every 10 minutes, from :05) recomputes and stores the key before its 15-minute TTL lapses | `test_the_warm_command_refreshes_the_key_before_the_ttl`, `test_stock_warm_is_scheduled_every_10_minutes_and_does_nothing_without_nexus` | 2026-11-03 passed |
 | S-222.9.3 | negative | A failed warm leaves the old value in place | `test_a_failed_warm_leaves_the_old_value_in_place` | 2026-11-03 passed |
 | S-222.9.4 | edge | A warm never computes while a page request holds the key's lock; it reports "busy" | `test_a_warm_never_computes_while_a_page_request_holds_the_lock` | 2026-11-03 passed |
+
+### S-222.10 Review fixes: Suppliers tab, cheap returned, per-day cache (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-222.10.1 | negative | On the Suppliers tab (and the old table) a Not in Nexus item shows "Not in Nexus" in Stock, not "0"; DOI, order-by and Qty to order are muted with the Not in Nexus tooltip | `test_B1_the_suppliers_tab_shows_not_in_nexus_and_mutes_doi_order_by_and_qty` | 2026-11-03 passed |
+| S-222.10.2 | edge | The returned main query is a plain `status = Returned AND signingtime` range (no `IS NULL OR`); the unsigned and future counts are their own query, global for all items and any date, and labelled so (`flags_scope`) | `test_the_returned_main_query_is_a_plain_signingtime_range_and_the_flags_are_a_separate_global_count`, `StockCacheTest` | 2026-11-03 passed |
+| S-222.10.3 | edge | The flags count is cached an hour; the warm refreshes it only once it is older than 45 minutes | `test_the_flags_count_is_cached_for_an_hour_and_the_warm_refreshes_it_only_after_45_minutes` | 2026-11-03 passed |
+| S-222.10.4 | happy | Shipped and returned for closed days (before yesterday, Manila) come from a 26-hour cache per day per source; only yesterday and today are queried live; a closed day is recomputed after its TTL | `test_closed_days_come_from_a_26_hour_per_day_cache_and_only_yesterday_and_today_are_live` | 2026-11-03 passed |
+| S-222.10.5 | happy | The 02:40 `nexus:sync-stock --days=7` refreshes the last 7 closed days; older closed days wait for their TTL (a late status change shows within one day) | `test_the_nightly_daily_pass_refreshes_the_last_7_closed_days_and_older_days_wait_for_their_ttl` | 2026-11-03 passed |
+| S-222.10.6 | edge | A regular `stock:warm` with the closed days cached runs only the two live queries; it is scheduled `5-59/10`, off the hourly sync at :10 | `test_a_regular_warm_only_runs_the_live_queries_once_the_closed_days_are_cached`, `StockWarmTest` | 2026-11-03 passed |
+| S-222.10.7 | negative | When no Nexus name matches at all, items show "Nexus not synced yet" or "No Nexus name matches", not "Not in Nexus" on every item | `NexusStockReadTest` (B, 6.5, 2.8, 3.2/3.4, 8.6), `test_no_matches_at_all_says_not_synced_or_no_matches_…` | 2026-11-03 passed |
+| S-222.10.8 | edge | When "Nexus boxes not yet released" shows next to Not in Nexus, the tooltip explains it (stocked in before the history start, or a lot never scanned at Stock In) | `test_no_matches_at_all_says_not_synced_or_no_matches_…` | 2026-11-03 passed |

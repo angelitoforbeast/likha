@@ -42,6 +42,7 @@ cold queries are bounded by the earliest **matched** first stock-in day, and Not
 | `tests/Feature/Item/ReturnedQueryPerfTest.php` | Per-item measurement (lower bound 09-13) next to the spec 220 queries on the same data. |
 | `tests/Feature/Item/SuppliersGroupTest.php` | Page pins re-pinned for the new view strings. |
 | `app/Console/Commands/StockWarm.php`, `routes/console.php`, `ItemStockService::warmInputs()`, `NexusStockSync` | The prewarm (below): `stock:warm` every 10 minutes and after each successful sync. `tests/Feature/Item/StockWarmTest.php`. |
+| `resources/views/item/_agg_cells.blade.php`, `JntReturnedSource::flagsSql()/flags()`, `ItemStockService::moves()/closedDays()/returnedFlags()`, `StockWarm --closed-days`, `StockReturnedCompare` | The review fixes (section "Review fixes"). `tests/Feature/Item/StockDayCacheTest.php`. |
 | `qa/stories.md`, `docs/plans/…`, `docs/specs/…` | Slice 222, the plan, this result. |
 
 ### 220 tests that changed
@@ -179,7 +180,8 @@ The slower cold load is taken off the page: the stock inputs are computed in the
   `--accept-empty`) the same warm runs at once, because the key changes with `nexus_stock_last_synced_at` (and history
   or an accepted day changes the data). A failed warm never fails the sync.
 - **The warmed key** is the one the page uses: `item_stock:stockin:v2:{host}:{last synced, YmdHis}:{today}` and
-  `item_stock:moves:v2:{host}:{earliest matched first stock-in}:{returned source}:{last synced}:{today}`, with
+  (since the review fixes below) the live key `item_stock:live:v3:…` plus any missing closed-day keys
+  `item_stock:day:v1:…` (this replaced `item_stock:moves:v2:…`), with
   `{host}` = the host of `APP_URL`. The inputs do not depend on the page's start or end date, so every /item/stock call
   on that host uses this one key; a request on another host name (for example `www.` when `APP_URL` has none) would
   still compute its own.
@@ -191,11 +193,104 @@ The slower cold load is taken off the page: the stock inputs are computed in the
   missing) exits 1 and the page still gets the old value with no stock query; a warm while a page holds the lock
   reports "busy" and does not replace the value; the schedule entry; no Nexus = nothing warmed.
 
+## Review fixes (after the live EXPLAIN)
+
+Live Likha (MySQL 8.0.46), before these fixes: returned 11.4 s cold / 1.66 s warm (idx_from_jnts_status, 405,323
+rows, signingtime kept 43,373); shipped 2.0–2.2 s (range on idx_from_jnts_submission_time, 92k rows); cold
+/item/stock about 14 s.
+
+| # | Fix | Test |
+|---|---|---|
+| 1 (B1) | `_agg_cells.blade.php` (Suppliers tab and the old table) knows Not in Nexus: the Stock cell shows the `ilNoStock()` text instead of `num(null)` = "0"; DOI, order-by and Qty to order are muted with the tooltip; the qty cell gets "Not in Nexus: stock 0 ang gamit". | `StockSourceViewTest::test_B1_the_suppliers_tab_shows_not_in_nexus_and_mutes_doi_order_by_and_qty` (renders the layout with `_table_suppliers`) |
+| 2 | The returned main query is now a plain `fj.status = ? AND fj.signingtime >= ? AND fj.signingtime <= ?` (no `IS NULL OR`). The unsigned and future counts are a separate query, `JntReturnedSource::flagsSql()` (two COUNTs). **Index case:** `idx_from_jnts_signing_status (signingtime, status)` is already in the repo, in `2026_01_23_221803_alter_from_jnts_time_to_datetime_and_add_indexes.php`, so no migration was added. | `StockDayCacheTest::test_the_returned_main_query_is_a_plain_signingtime_range_and_the_flags_are_a_separate_global_count`; `StockCacheTest` (returned queries have no `signingtime is null`); `ReturnedStockTest` (flags via `flags()`) |
+| 3 | Per-day cache for closed days (before yesterday, Manila), 26 h TTL (93,600 s), per day per source: `item_stock:day:v1:{host}:shipped:{day}` (by first-submission day) and `item_stock:day:v1:{host}:returned:{source}:{day}` (by signing day). Missing closed days are computed with one range query per source and stored together, under the lock `item_stock:day:v1:{host}:{source}:lock`. Only yesterday and today are live, in `item_stock:live:v3:{host}:{live from}:{source}:{last synced}:{today}` (15 min). The 02:40 `nexus:sync-stock --days=7` run now also recomputes the last 7 closed days (`warmInputs(7)`, or `stock:warm --closed-days=N` by hand). `stock:warm` moved off :10 to `5-59/10` (:05, :15, …), so it doesn't collide with the hourly sync. | `StockDayCacheTest`: closed days from the 26 h cache with only yesterday/today live (shipped query bound 11-02 00:00 to 11-03 23:59); the nightly pass refreshes 10-30 but not 10-15; a regular warm runs only the two live queries; `StockWarmTest` (schedule `5-59/10 * * * *`) |
+| 4 | When no Nexus name matches at all, items show "Nexus not synced yet" (never synced) or "No Nexus name matches" (synced, nothing bridged), not "Not in Nexus". Per item `stock_unknown` = `not_synced` / `no_matches`; `stock_meta.nexus.match_state` = `ok` / `not_synced` / `no_matches`; `not_in_nexus` only when `ok`. | `NexusStockReadTest` (B, 6.5, 2.8, 3.2/3.4, 8.6 assert `stock_unknown`); `StockSourceViewTest::test_no_matches_at_all_says_not_synced_or_no_matches_…` |
+| 5 | The Not in Nexus tooltip, when "Nexus boxes not yet released: N" shows too, adds: "Nexus still shows boxes of it: they were stocked in before the history start, or a lot was never scanned at Stock In." | same view test (string and the `S.nexus_remaining != null` condition) |
+| 6 | The unsigned and future flags stay global and are labelled so: `stock_meta.returned.flags_scope` = "all items, any date (not per item start)", and `stock:returned-compare` prints "(all items)". Cached 1 h in `item_stock:flags:v1:{host}:{source}:{today}`; the warm refreshes it once it is older than 45 min. | `StockDayCacheTest::…flags_are_a_separate_global_count` (a pre-start return counts) and `…flags_count_is_cached_for_an_hour_and_the_warm_refreshes_it_only_after_45_minutes` |
+
+**Accepted staleness.** A closed day is not recomputed until its 26 h TTL ends, apart from the nightly refresh of the
+last 7 closed days. So when an old waybill changes later (a status flips to Returned, or a signingtime gets filled in
+for a day before yesterday), it shows up within one day: at the next 02:40 refresh for days in the last week, or when
+that day's key expires for older days. Today and yesterday are always live.
+
+**Docker timings with the index present** (same throwaway `mysql:8.4`, same 947,600 / 1,036,454 rows; medians of 5,
+run 7):
+
+| Query / call | Now | Before this round (same harness) |
+|---|---|---|
+| Returned, full range from 09-13 (plain range) | 655.5 ms (spec 220's query, same run: 848.2) | 2,862–4,121 ms |
+| Returned, live part only (11-02..now) | 30.3 ms | — |
+| Shipped, from 09-13 (with the upper bound) | 2,048.9 ms (spec 220's, same run: 1,382.5) | 1,627–1,837 ms |
+| Shipped, live part only (11-02..11-03) | 83.3 ms | — |
+| Flags (two global COUNTs) | 2,537.7 ms, at most once an hour | (inside the returned query) |
+| /item/stock cold (cache flushed: every closed day, flags, stock-in) | 10,173.8 ms | 6,834–7,484 ms |
+| /item/stock warm (inputs cached) | 3,510.1 ms (the PO path, no cache, same run: 3,702.3) | 1,893–2,074 ms |
+| `stock:warm`, closed days cached | 3,499.5 ms | (was a full cold build every 10 min) |
+| Nightly warm (last 7 closed days recomputed) | 3,319.3 ms | — |
+
+This laptop was slow in this run (the unchanged PO path is 3.7 s vs 2.9 s before), so compare within a column. Cold
+is slower than before because it now also pays the flags query and fills every closed day; it happens once per 26 h
+per day, not every 10 minutes. The regular warm runs only the two live queries (about 110 ms of SQL); the rest of its
+time is the /item build itself. On Docker the optimizer still picks `idx_from_jnts_status` for the plain range
+(filtered 25 %); live MySQL 8.0.46 already range-scans `idx_from_jnts_submission_time` for shipped and should do the
+same with `idx_from_jnts_signing_status` for returned, which needs the EXPLAIN below to confirm.
+
+EXPLAIN (Docker MySQL 8.4), final statements:
+
+```
+returned: 1 fj ref idx_from_jnts_status rows=383502 filtered=25.3 Using where; Using temporary
+          1 n  ref from_jnts_waybill_number_index rows=1 Not exists; Using index
+          1 mo ref macro_output_waybill_index rows=1
+flags:    2 fj ref   idx_from_jnts_signing_status rows=4600  (unsigned)
+          4 fj range idx_from_jnts_signingtime    rows=24704 (future)
+shipped:  1 fj ALL rows=944128 filtered=36.9 Using where; Using temporary
+          1 b  ref from_jnts_waybill_number_index rows=1 Not exists
+          1 mo ref macro_output_waybill_index rows=1
+```
+
+For a read-only `EXPLAIN` on Likha (replace the dates; the cold query runs once per missing closed-day range):
+
+```sql
+EXPLAIN
+SELECT mo.`ITEM_NAME` AS item_name, DATE(fj.signingtime) AS day, COUNT(*) AS returned_cnt
+FROM from_jnts fj JOIN macro_output mo ON mo.waybill = fj.waybill_number
+WHERE fj.status = 'Returned' AND fj.signingtime >= '2026-09-13 00:00:00' AND fj.signingtime <= '2026-11-01 23:59:59'
+  AND NOT EXISTS (SELECT 1 FROM from_jnts n WHERE n.waybill_number = fj.waybill_number AND n.id > fj.id)
+  AND (mo.`STATUS` IS NULL OR LOWER(REPLACE(REPLACE(TRIM(mo.`STATUS`), ' ', ''), '_', '')) NOT IN ('cannotproceed', 'odz'))
+GROUP BY mo.`ITEM_NAME`, DATE(fj.signingtime);
+
+EXPLAIN
+SELECT
+ (SELECT COUNT(*) FROM from_jnts fj JOIN macro_output mo ON mo.waybill = fj.waybill_number
+   WHERE fj.signingtime IS NULL AND fj.status = 'Returned'
+     AND NOT EXISTS (SELECT 1 FROM from_jnts n WHERE n.waybill_number = fj.waybill_number AND n.id > fj.id)
+     AND (mo.`STATUS` IS NULL OR LOWER(REPLACE(REPLACE(TRIM(mo.`STATUS`), ' ', ''), '_', '')) NOT IN ('cannotproceed', 'odz'))) AS unsigned_cnt,
+ (SELECT COUNT(*) FROM from_jnts fj JOIN macro_output mo ON mo.waybill = fj.waybill_number
+   WHERE fj.signingtime > '2026-11-03 10:10:00' AND fj.status = 'Returned'
+     AND NOT EXISTS (SELECT 1 FROM from_jnts n WHERE n.waybill_number = fj.waybill_number AND n.id > fj.id)
+     AND (mo.`STATUS` IS NULL OR LOWER(REPLACE(REPLACE(TRIM(mo.`STATUS`), ' ', ''), '_', '')) NOT IN ('cannotproceed', 'odz'))) AS future_cnt;
+
+EXPLAIN
+SELECT mo.`ITEM_NAME` AS item_name, DATE(f.submission_time) AS day, COUNT(*) AS cnt
+FROM macro_output mo
+JOIN (SELECT fj.waybill_number, fj.submission_time FROM from_jnts fj
+      WHERE fj.submission_time >= '2026-09-13 00:00:00' AND fj.submission_time <= '2026-11-01 23:59:59'
+        AND NOT EXISTS (SELECT 1 FROM from_jnts b WHERE b.waybill_number = fj.waybill_number
+                          AND (b.submission_time < fj.submission_time OR (b.submission_time = fj.submission_time AND b.id < fj.id)))) f
+  ON f.waybill_number = mo.waybill
+WHERE (mo.`STATUS` IS NULL OR LOWER(REPLACE(REPLACE(TRIM(mo.`STATUS`), ' ', ''), '_', '')) NOT IN ('cannotproceed', 'odz'))
+GROUP BY mo.`ITEM_NAME`, DATE(f.submission_time);
+```
+
 ## Deploy steps (Likha; Incepxion needs only step 1)
 
-1. Deploy the code. **No migration.** `php artisan config:cache` if the server caches config. No supervisor change.
-   **Scheduler:** one new entry, `stock:warm` every 10 minutes (Manila), next to the existing `nexus:sync-stock`
-   hourly at :10 and `nexus:sync-stock --days=7` daily at 02:40; all run under the existing `schedule:run` cron.
+1. Deploy the code. **No migration** (`idx_from_jnts_signing_status` is already applied on prod and in the repo).
+   `php artisan config:cache` if the server caches config. No supervisor change.
+   **Scheduler:** one new entry, `stock:warm` every 10 minutes from :05 (`5-59/10`, Manila), next to the existing
+   `nexus:sync-stock` hourly at :10 and `nexus:sync-stock --days=7` daily at 02:40 (which now also refreshes the last
+   7 closed days of the stock cache); all run under the existing `schedule:run` cron. After deploy the first page or
+   warm fills every closed day once (about 10 s on Docker); run `php artisan stock:warm` by hand right after deploy
+   so no page pays it.
    Check that `APP_URL` is the host the owner opens /item on (e.g. `https://likhaaitech.com`).
 2. One-time backfill, by hand: `php artisan nexus:sync-stock --history`. About 9 range calls (2026-01-01 to 10-01),
    newest first, a line per range; Nexus allows 60 calls an hour. If it prints "Not complete", run it again later; it
@@ -219,11 +314,12 @@ which only sums stock-in from `item_stock_start`; `nexus_stock_history_done_from
 
 ## Open risks
 
-1. **Cold /item/stock is slower** (synthetic: returned ~3 s vs 220's ~0.7 s; live estimate 2.5–4 s). With the prewarm,
-   pages almost never pay it: only a request on a host other than `APP_URL`'s, the minute right after a sync before
-   its warm finishes, or a lost scheduler would. The cost moves to the background (one cold computation every
-   10 minutes). A real fix needs fewer candidate rows (for example a stored "first returned day" per waybill) and is
-   not in this spec.
+1. **Cold /item/stock is still slow** (Docker 10.2 s; live was about 14 s before the per-day cache). It is now paid
+   once: closed days stay 26 h, the 10-minute warm only queries yesterday and today, and the flags once an hour. A page
+   pays it only right after deploy (before the first warm), after a cache flush, on a host other than `APP_URL`'s, or
+   if the scheduler stops. Whether live uses `idx_from_jnts_signing_status` for the plain returned range is not yet
+   confirmed; the EXPLAIN above checks it.
+5. **Late status changes on closed days** show up within one day (see "Accepted staleness").
 2. **History completeness**: an item stocked in before `history_from` would get a late start; the scan says Nexus began
    in September, so 2026-01-01 has margin.
 3. **Late returns of parcels shipped before an item's start** add pieces that were never subtracted (the owner's choice,
