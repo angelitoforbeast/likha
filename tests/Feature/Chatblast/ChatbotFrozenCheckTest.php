@@ -27,12 +27,12 @@ class ChatbotFrozenCheckTest extends ChatblastTestCase
     {
         $html = $this->get('/chatbot/pages')->assertOk()->getContent();
 
-        foreach (['@media (min-width: 1024px)', '#cb-table .stick-4 { position: sticky; left: 28rem;', "matchMedia('(min-width: 1024px)')",
+        foreach (['@media (min-width: 1024px)', '#cb-table .stick-4 { position: sticky; left: calc(var(--cb-w1) + var(--cb-w2) + var(--cb-w3));', "matchMedia('(min-width: 1024px)')",
             "'stick-4 ", 'cb-chk-pop', "'aria-expanded'", '#cb-table td.stick-4:hover .cb-chk-pop', '.cb-chk:focus-within .cb-chk-pop'] as $part) {
             $this->assertStringContainsString($part, $html);
         }
         // Ang 640-1023 px: Page, Active at Flow lang ang naka-freeze (ang anino ay nasa Flow).
-        $this->assertStringContainsString('#cb-table .stick-3 { position: sticky; left: 18rem; z-index: 10; box-shadow: 1px 0 0 #e2e8f0; }', $html);
+        $this->assertStringContainsString('#cb-table .stick-3 { position: sticky; left: calc(var(--cb-w1) + var(--cb-w2)); z-index: 10; box-shadow: 1px 0 0 #e2e8f0; }', $html);
 
         $node = (new ExecutableFinder())->find('node');
         if ($node === null) $this->markTestSkipped('Node is not installed.');

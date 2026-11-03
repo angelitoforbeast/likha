@@ -4255,3 +4255,37 @@ Tests (`tests/Feature/Item/`): `StockFromFirstStockInTest`, `NexusStockHistoryTe
 | S-224.1.3 | negative | Given a page on Botcake (or a chat Botcake delivered), it stays "Botcake" even with an address set | `test_S_224_1_3_botcake_stays_botcake_even_with_an_address` | pass |
 | S-224.1.4 | edge | Given no `GATEWAY_URLS`, a page set to `incepxion` is still "Forbeast"; the incepxionbot gateway keeps "Incepxionbot" | `test_S_224_1_4_without_gateway_urls_the_label_is_todays` | pass |
 | S-224.1.5 | happy | The variable's help text names the address ("Incepxion") | `test_S_224_1_5_the_variable_help_names_the_address` | pass |
+
+## Spec 225: one "Replies via" choice, sticky columns that keep their width, CPP rows per ad group
+
+### S-225.1 One "Replies via" dropdown (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-225.1.1 | happy | Given two gateway addresses, choosing Bot 2 writes `chatbot.provider=gateway` and `chatbot.gateway_app=incepxion` in one save, both with the user | `test_S_225_1_1_bot_2_sets_the_provider_and_the_address_in_one_save_with_the_user` | pass |
+| S-225.1.2 | happy | Choosing Botcake keeps the address | `test_S_225_1_2_botcake_keeps_the_address` | pass |
+| S-225.1.3 | negative | An unknown address or a page not on the list writes nothing for any page | `test_S_225_1_3_a_bad_address_writes_nothing_for_any_page` | pass |
+| S-225.1.4 | happy | The bulk Apply sets provider and address for every selected page | `test_S_225_1_4_the_bulk_apply_sets_both_for_every_selected_page` | pass |
+| S-225.1.5 | edge | With one address the choice is Botcake / Forbeast as before; an address is refused | `test_S_225_1_5_with_one_address_the_choice_is_botcake_or_forbeast_as_before` | pass |
+| S-225.1.6 | happy | The screen has one Replies via select (Bot N labels) and no "App:" select | `test_S_225_1_6_the_screen_has_one_replies_via_select_and_no_app_select` | pass |
+
+### S-225.2 Pinned columns keep their width (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-225.2.1 | happy | Each pinned column has one width (min = max) and long text wraps inside it | `test_S_225_2_1_each_pinned_column_has_one_fixed_width` | pass |
+| S-225.2.2 | happy | Each left offset is the sum of the widths before it | `test_S_225_2_2_each_left_offset_is_the_sum_of_the_widths_before_it` | pass |
+| S-225.2.3 | edge | At 1366 and 1920 px, at rest and scrolled, with a long page and flow name, the pinned cells keep 192/176/160/224 px and touch without overlap | browser check (result file) | pass |
+
+### S-225.3 CPP rows per ad group (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-225.3.1 | happy | An ad-based page with two ad groups shows the page row, 2 group rows, "Not in a group" and "Unknown ad"; they add up to the page row | `test_S_225_3_1_two_ad_groups_and_the_rest_add_up_to_the_page_row` | pass |
+| S-225.3.2 | negative | A page-based page (even with groups saved) has no group rows | `test_S_225_3_2_a_page_based_page_has_no_group_rows` | pass |
+| S-225.3.3 | edge | A group with spend and no orders has no CPP (as the page row) | `test_S_225_3_3_a_group_with_spend_and_no_orders_has_no_cpp` | pass |
+| S-225.3.4 | edge | Ad set and campaign IDs in a group take their ads; the ad itself wins | `test_S_225_3_4_ad_set_and_campaign_ids_in_a_group_take_their_ads_and_the_ad_itself_wins` | pass |
+| S-225.3.5 | happy | The rows are drawn under the page, escaped, and left out of Copy Table | `test_S_225_3_5_the_page_draws_the_group_rows_under_the_page_and_keeps_them_out_of_the_copy` | pass |
+
+### S-225.4 Pages and their ad groups read as blocks (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-225.4.1 | happy | On /chatbot/pages: 2px darker line between pages, 1px lighter line between ad groups, sub-rows indented with a left bar on a faint background | `test_S_225_4_1_pages_ad_groups_and_their_rows_read_as_one_block` | pass |
+| S-225.4.2 | happy | The CPP group rows follow the same rule | `test_S_225_4_2_the_cpp_group_rows_follow_the_same_grouping_rule` | pass |
