@@ -4177,3 +4177,11 @@ Tests (`tests/Feature/Item/`): `StockFromFirstStockInTest`, `NexusStockHistoryTe
 |------|------|---------------------|------|----------|
 | S-222.8.1 | edge | Shipped and returned are one grouped query each, by item and day, bounded by the earliest **matched** first stock-in day (an unmatched Nexus name never lowers it) and filtered by each item's start in PHP; a warm call runs neither | `test_S_222_8_1_one_grouped_query_each_bounded_by_the_earliest_matched_first_day`, `StockCacheTest` | 2026-11-03 passed |
 | S-222.8.2 | edge | The cold time on production-like MySQL volume is reported next to the spec 220 queries on the same data | `ReturnedQueryPerfTest` (opt-in), numbers in the 222 result | 2026-11-03 measured |
+
+### S-222.9 Prewarm (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-222.9.1 | happy | After a successful `nexus:sync-stock`, the stock inputs for the default key are computed and stored, so the next page call runs no shipped, returned or nexus_stock_ins query | `test_after_a_successful_sync_the_next_page_call_runs_no_stock_query` | 2026-11-03 passed |
+| S-222.9.2 | happy | `stock:warm` (every 10 minutes) recomputes and stores the key before its 15-minute TTL lapses | `test_the_warm_command_refreshes_the_key_before_the_ttl`, `test_stock_warm_is_scheduled_every_10_minutes_and_does_nothing_without_nexus` | 2026-11-03 passed |
+| S-222.9.3 | negative | A failed warm leaves the old value in place | `test_a_failed_warm_leaves_the_old_value_in_place` | 2026-11-03 passed |
+| S-222.9.4 | edge | A warm never computes while a page request holds the key's lock; it reports "busy" | `test_a_warm_never_computes_while_a_page_request_holds_the_lock` | 2026-11-03 passed |

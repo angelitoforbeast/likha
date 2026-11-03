@@ -41,6 +41,7 @@ cold queries are bounded by the earliest **matched** first stock-in day, and Not
 | `tests/Feature/Item/NexusStockReadTest.php`, `ReturnedStockTest.php`, `StockCacheTest.php`, `StockSourceViewTest.php` | Updated for the per-item start (below). |
 | `tests/Feature/Item/ReturnedQueryPerfTest.php` | Per-item measurement (lower bound 09-13) next to the spec 220 queries on the same data. |
 | `tests/Feature/Item/SuppliersGroupTest.php` | Page pins re-pinned for the new view strings. |
+| `app/Console/Commands/StockWarm.php`, `routes/console.php`, `ItemStockService::warmInputs()`, `NexusStockSync` | The prewarm (below): `stock:warm` every 10 minutes and after each successful sync. `tests/Feature/Item/StockWarmTest.php`. |
 | `qa/stories.md`, `docs/plans/…`, `docs/specs/…` | Slice 222, the plan, this result. |
 
 ### 220 tests that changed
@@ -166,16 +167,41 @@ GROUP BY mo.`ITEM_NAME`, DATE(f.submission_time);
 | `NEXUS_STOCK_HISTORY_FROM` → `services.nexus.history_from` | env | 2026-01-01 | Earliest day `--history` asks. A Jan–Nov API scan found nothing before mini flashlight (09-13). |
 | `nexus_stock_history_done_from` | app_settings | — | First day of the last finished history range; `--history` continues before it. |
 
-All slice 220 keys are unchanged.
+All slice 220 keys are unchanged. `APP_URL` matters for the prewarm: its host is the host part of the warmed key.
+
+## Prewarm (added after the build)
+
+The slower cold load is taken off the page: the stock inputs are computed in the background.
+
+- `stock:warm` (new command), scheduled every 10 minutes in Manila, `withoutOverlapping(10)`, `runInBackground`. It
+  recomputes and stores the inputs even when they are still cached, so the 15-minute TTL never lapses.
+- At the end of every successful `nexus:sync-stock` run (hourly, the daily pass, `--from`, `--history`,
+  `--accept-empty`) the same warm runs at once, because the key changes with `nexus_stock_last_synced_at` (and history
+  or an accepted day changes the data). A failed warm never fails the sync.
+- **The warmed key** is the one the page uses: `item_stock:stockin:v2:{host}:{last synced, YmdHis}:{today}` and
+  `item_stock:moves:v2:{host}:{earliest matched first stock-in}:{returned source}:{last synced}:{today}`, with
+  `{host}` = the host of `APP_URL`. The inputs do not depend on the page's start or end date, so every /item/stock call
+  on that host uses this one key; a request on another host name (for example `www.` when `APP_URL` has none) would
+  still compute its own.
+- The warm uses the page's stampede lock: if a page request is already computing a key, the warm waits up to
+  `cold_wait` and then leaves it (reported as "busy"); it never computes alongside it. A warm that fails (an exception
+  while computing) changes nothing in the cache, so the old value stays until its TTL.
+- Tests (`StockWarmTest`): after a successful sync the next page call runs no shipped, returned or nexus_stock_ins
+  query; a warm at 10:20 keeps a key made at 10:10 alive at 10:33 with the new numbers; a failed warm (from_jnts
+  missing) exits 1 and the page still gets the old value with no stock query; a warm while a page holds the lock
+  reports "busy" and does not replace the value; the schedule entry; no Nexus = nothing warmed.
 
 ## Deploy steps (Likha; Incepxion needs only step 1)
 
-1. Deploy the code. **No migration.** `php artisan config:cache` if the server caches config. No supervisor or
-   schedule change.
+1. Deploy the code. **No migration.** `php artisan config:cache` if the server caches config. No supervisor change.
+   **Scheduler:** one new entry, `stock:warm` every 10 minutes (Manila), next to the existing `nexus:sync-stock`
+   hourly at :10 and `nexus:sync-stock --days=7` daily at 02:40; all run under the existing `schedule:run` cron.
+   Check that `APP_URL` is the host the owner opens /item on (e.g. `https://likhaaitech.com`).
 2. One-time backfill, by hand: `php artisan nexus:sync-stock --history`. About 9 range calls (2026-01-01 to 10-01),
    newest first, a line per range; Nexus allows 60 calls an hour. If it prints "Not complete", run it again later; it
-   continues from the last finished range. When done it prints "Nexus history complete".
-3. Open /item and do the owner checks.
+   continues from the last finished range. When done it prints "Nexus history complete", then "Warmed the /item stock
+   inputs …".
+3. Open /item and do the owner checks. `php artisan stock:warm` by hand shows the warmed keys and how long it took.
 
 ## Rollback
 
@@ -193,9 +219,11 @@ which only sums stock-in from `item_stock_start`; `nexus_stock_history_done_from
 
 ## Open risks
 
-1. **Cold /item/stock is slower** (synthetic: returned ~3 s vs 220's ~0.7 s; live estimate 2.5–4 s), once per
-   15 minutes per key; warm calls are faster than the PO path. A real fix needs fewer candidate rows (for example a
-   stored "first returned day" per waybill) and is not in this spec.
+1. **Cold /item/stock is slower** (synthetic: returned ~3 s vs 220's ~0.7 s; live estimate 2.5–4 s). With the prewarm,
+   pages almost never pay it: only a request on a host other than `APP_URL`'s, the minute right after a sync before
+   its warm finishes, or a lost scheduler would. The cost moves to the background (one cold computation every
+   10 minutes). A real fix needs fewer candidate rows (for example a stored "first returned day" per waybill) and is
+   not in this spec.
 2. **History completeness**: an item stocked in before `history_from` would get a late start; the scan says Nexus began
    in September, so 2026-01-01 has margin.
 3. **Late returns of parcels shipped before an item's start** add pieces that were never subtracted (the owner's choice,
