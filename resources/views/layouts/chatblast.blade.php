@@ -110,11 +110,37 @@
                     <div class="font-semibold">{{ $p['page'] }}</div>
                     <ul class="space-y-0.5 pl-1">
                         @foreach($p['lines'] as $l)
-                            <li data-level="{{ $l['level'] }}">{{ \App\Services\Chatbot\ProblemsPanel::LEVELS[$l['level']] }} {{ $l['text'] }} @foreach($l['links'] as [$label, $href]) <a href="{{ $href }}" class="text-blue-700 underline hover:text-blue-900">{{ $label }}</a>@endforeach</li>
+                            <li data-level="{{ $l['level'] }}" data-kind="{{ $l['kind'] ?? '' }}">{{ \App\Services\Chatbot\ProblemsPanel::LEVELS[$l['level']] }} {{ $l['text'] }} @foreach($l['links'] as [$label, $href]) <a href="{{ $href }}" class="text-blue-700 underline hover:text-blue-900">{{ $label }}</a>@endforeach
+                                @if(isset($l['ack']))
+                                    <span class="text-xs text-amber-700" data-ack-back>({{ $l['ack']['status'] === 'done' ? 'Done' : 'Acknowledged' }} by {{ $l['ack']['by'] }} {{ $l['ack']['at'] }}: "{{ $l['ack']['note'] }}"; {{ $l['ack']['back'] }})</span>
+                                @endif
+                                @if(!empty($l['kind']))
+                                    <span data-ack-controls><button type="button" class="cb-ack ml-1 rounded border border-slate-300 px-1.5 text-xs text-slate-700 hover:bg-slate-100" data-status="ack" data-page="{{ $p['page'] }}" data-kind="{{ $l['kind'] }}" data-level="{{ $l['level'] }}">Acknowledge</button>
+                                    <button type="button" class="cb-ack rounded border border-slate-300 px-1.5 text-xs text-slate-700 hover:bg-slate-100" data-status="done" data-page="{{ $p['page'] }}" data-kind="{{ $l['kind'] }}" data-level="{{ $l['level'] }}">Done</button></span>
+                                @endif
+                            </li>
                         @endforeach
                     </ul>
                 </li>
             @endforeach
+            @if(!empty($cbProblems['acked']))
+                <li class="pt-2" data-acked>
+                    <details>
+                        <summary class="cursor-pointer text-xs font-semibold text-slate-600">Acknowledged and done ({{ array_sum(array_map(fn ($a) => count($a['lines']), $cbProblems['acked'])) }})</summary>
+                        <ul class="mt-1 space-y-1 pl-1 text-xs text-slate-600">
+                            @foreach($cbProblems['acked'] as $a)
+                                @foreach($a['lines'] as $l)
+                                    <li data-kind="{{ $l['kind'] }}">
+                                        <span class="font-semibold">{{ $a['page'] }}</span>: {{ $l['text'] }}
+                                        <span class="block pl-3">{{ $l['ack']['status'] === 'done' ? '✅ Done' : '👀 Acknowledged' }} by {{ $l['ack']['by'] }}, {{ $l['ack']['at'] }}@if($l['ack']['until']) · until {{ $l['ack']['until'] }}@endif: "{{ $l['ack']['note'] }}"
+                                            <button type="button" class="cb-ack ml-1 underline" data-status="clear" data-page="{{ $a['page'] }}" data-kind="{{ $l['kind'] }}">Undo</button></span>
+                                    </li>
+                                @endforeach
+                            @endforeach
+                        </ul>
+                    </details>
+                </li>
+            @endif
             {{-- Ang "bago" ay mula sa talaan ng Likha lang, kaya sinasabi rito kung ano ang kasama (kapag may linya ng doble). --}}
             @if($cbProblems['doubles'] ?? false)
                 <li class="pt-1 text-xs text-slate-500" data-help="doubles">Main flow double: a new customer (first message to the page in Likha's records, in the last {{ \App\Services\Chatbot\ChatEchoes::HEALTH_MINUTES }} min) answered by both CBB (Chatbot Builder or Botcake) and the Likha bot's main flow. A customer already known to Chatbot Builder but new to Likha counts as new. Leftover: every other double reply, e.g. old customers still in a CBB sequence or loop; not urgent.</li>
@@ -152,6 +178,28 @@
             const open = list.hidden;
             show(open);
             try { localStorage.setItem('cb-problems-open', open ? '1' : '0'); } catch (e) {}
+        });
+        // Acknowledge / Done / Undo ng isang linya: note (kailangan), at sa Acknowledge, hanggang kailan (blangko = 1 araw).
+        list.addEventListener('click', async e => {
+            const b = e.target.closest('.cb-ack');
+            if (!b) return;
+            const status = b.dataset.status;
+            let note = '', until = '';
+            if (status !== 'clear') {
+                note = (prompt(status === 'done' ? 'Done: what was fixed?' : 'Acknowledge: who is on it, or why it can wait?') || '').trim();
+                if (!note) return;
+                if (status === 'ack') {
+                    until = (prompt('Hide until (YYYY-MM-DD), or leave blank for 1 day. It comes back sooner if it gets worse.') || '').trim();
+                }
+            }
+            b.disabled = true;
+            try {
+                const res = await fetch(@json(route('chatbot.problems.ack')), {method: 'POST', headers: {'Content-Type': 'application/json', 'Accept': 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content}, body: JSON.stringify({page: b.dataset.page, kind: b.dataset.kind, status, note, until, level: b.dataset.level || ''})});
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) { alert(data.error || data.message || 'Not saved.'); b.disabled = false; return; }
+                location.reload();
+            } catch (err) { alert('No connection: not saved.'); b.disabled = false; }
         });
     })();
 </script>

@@ -66,6 +66,8 @@ class ProblemsPanelTest extends ChatblastTestCase
         $clean = fn ($s) => trim(preg_replace('/\s+/', ' ', html_entity_decode(strip_tags($s))));
         preg_match('#<button[^>]*>(.*?)</button>#s', $m[1], $b);
         $pages = [];
+        // Ang mga button ng Acknowledge/Done (at ang tanda ng bumalik na ack) ay hindi bahagi ng text ng linya.
+        $m[1] = (string) preg_replace('#<span data-ack-(controls|back)[^>]*>.*?</span>#s', '', $m[1]);
         preg_match_all('#<li data-page="([^"]*)" data-level="(\w+)"[^>]*>(.*?)</ul>\s*</li>#s', $m[1], $rows, PREG_SET_ORDER);
         foreach ($rows as [, $page, $level, $body]) {
             preg_match_all('#<li data-level="(\w+)"[^>]*>(.*?)</li>#s', $body, $lines, PREG_SET_ORDER);
@@ -228,5 +230,77 @@ class ProblemsPanelTest extends ChatblastTestCase
         $this->assertMatchesRegularExpression('#class="[^"]*\btruncate\b[^"]*"#', $p['button'], 'one line, cut with … when too long');
         $this->assertMatchesRegularExpression('#<ol id="cb-problems-list" class="[^"]*\bmax-h-\[60vh\][^"]*\boverflow-y-auto\b#', $p['html']);
         $this->assertStringContainsString('break-words', $p['html']);
+    }
+
+    /** Ang kind at level ng unang linya ng isang page sa banner. */
+    private function firstKind(string $page): array
+    {
+        $html = $this->get('/chatbot/inbox')->getContent();
+        preg_match('#data-status="ack" data-page="' . preg_quote($page, '#') . '" data-kind="([0-9a-f]{12})" data-level="(\w+)"#', $html, $m);
+
+        return [$m[1] ?? null, $m[2] ?? null];
+    }
+
+    public function test_acknowledge_with_a_note_hides_a_line_until_it_gets_worse_and_records_who(): void
+    {
+        $user = $this->user();
+        $this->actingAs($user);
+        $this->check('Page Dos', ['2 flows named UPDATE SHIPPING STATUS 2026']);
+        $this->assertSame('⚠ 1 page with problems (1 urgent)', $this->panel()['line']);
+        [$kind, $level] = $this->firstKind('Page Dos');
+        $this->assertNotNull($kind);
+
+        // Walang note: hindi tinatanggap.
+        $this->postJson('/chatbot/problems/ack', ['page' => 'Page Dos', 'kind' => $kind, 'status' => 'ack', 'note' => ''])->assertStatus(422);
+        $this->postJson('/chatbot/problems/ack', ['page' => 'Not Listed', 'kind' => $kind, 'status' => 'ack', 'note' => 'x'])->assertStatus(422);
+        $this->postJson('/chatbot/problems/ack', ['page' => 'Page Dos', 'kind' => $kind, 'status' => 'ack', 'note' => 'Franz is fixing the flow names', 'level' => $level])->assertOk();
+
+        $p = $this->panel();
+        $this->assertSame('⚠ 0 pages with problems (0 urgent)', $p['line']);
+        $this->assertStringContainsString('Acknowledged and done (1)', $p['html']);
+        $this->assertStringContainsString('Franz is fixing the flow names', $p['html']);
+        $row = \App\Models\PageSetting::where('provider', 'chatbot')->where('key', 'problem_ack.' . $kind)->where('active', true)->sole();
+        $this->assertSame($user->id, (int) $row->created_by, 'who acknowledged it is on the row');
+
+        // Pagkalipas ng 1 araw (walang piniling petsa): bumabalik, may tanda kung sino ang nag-ack.
+        $this->travel(25)->hours();
+        Cache::flush();
+        $back = $this->get('/chatbot/inbox')->getContent();
+        $this->assertStringContainsString('the acknowledgement ended', $back);
+
+        // Undo: tinatanggal ang ack.
+        $this->postJson('/chatbot/problems/ack', ['page' => 'Page Dos', 'kind' => $kind, 'status' => 'clear'])->assertOk();
+        $this->assertNull(app(\App\Services\Chatbot\ProblemAcks::class)->state('Page Dos', $kind, 'orange'));
+    }
+
+    public function test_done_hides_a_line_for_30_minutes_and_it_comes_back_marked_when_still_there(): void
+    {
+        $this->actingAs($this->user());
+        foreach (['11:20:00', '11:30:00', '11:40:00'] as $t) $this->reply('1001', '7001', '2026-10-27 ' . $t, 'failed', self::RESTRICTED);
+        [$kind, $level] = $this->firstKind('Page Uno');
+        $this->postJson('/chatbot/problems/ack', ['page' => 'Page Uno', 'kind' => $kind, 'status' => 'done', 'note' => 'ads paused', 'level' => $level])->assertOk();
+        $this->assertSame('⚠ 0 pages with problems (0 urgent)', $this->panel()['line']);
+
+        $this->travel(31)->minutes();
+        Cache::flush();
+        foreach (['12:20:00'] as $t) $this->reply('1001', '7001', '2026-10-27 ' . $t, 'failed', self::RESTRICTED);
+        $html = $this->get('/chatbot/inbox')->getContent();
+        $this->assertStringContainsString('still happening after it was marked done', $html);
+        $this->assertStringContainsString('"ads paused"', $html);
+    }
+
+    public function test_the_kind_ignores_counts_and_times_and_an_ack_until_a_date_or_a_worse_level_returns_it(): void
+    {
+        $a = \App\Services\Chatbot\ProblemAcks::kind('Page restricted by Facebook: 57 of 58 sends failed since 16:08');
+        $this->assertSame($a, \App\Services\Chatbot\ProblemAcks::kind('Page restricted by Facebook: 60 of 61 sends failed since 16:40'));
+        $this->assertNotSame($a, \App\Services\Chatbot\ProblemAcks::kind('Moved to Botcake at 15:16: Meta connection error'));
+
+        $acks = app(\App\Services\Chatbot\ProblemAcks::class);
+        $user = $this->user();
+        $this->assertSame(['ok' => false, 'error' => 'Pick a time in the future.'], $acks->set('Page Uno', $a, 'ack', 'until restriction ends', '2026-10-01', 'orange', $user));
+        $this->assertTrue($acks->set('Page Uno', $a, 'ack', 'restricted until Dec 1', '2026-12-01', 'orange', $user)['ok']);
+        $this->assertTrue($acks->state('Page Uno', $a, 'orange')['hidden']);
+        $this->assertSame('2026-12-01 23:59', $acks->state('Page Uno', $a, 'orange')['until']);
+        $this->assertSame(['hidden' => false, 'back' => 'got worse since it was acknowledged'], array_intersect_key($acks->state('Page Uno', $a, 'red'), ['hidden' => 1, 'back' => 1]));
     }
 }
