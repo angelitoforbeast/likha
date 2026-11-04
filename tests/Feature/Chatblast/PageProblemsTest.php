@@ -74,7 +74,7 @@ class PageProblemsTest extends ChatblastTestCase
     private function banner(string $html): ?string
     {
         return preg_match('#<div[^>]*data-alert="problems"[^>]*>(.*?)</ol>\s*</div>#s', $html, $m)
-            ? trim(preg_replace('/\s+/', ' ', strip_tags(preg_replace('#<span aria-hidden="true">.*?</span>#', '', $m[1])))) : null;
+            ? trim(preg_replace('/\s+/', ' ', strip_tags(preg_replace(['#<span aria-hidden="true">.*?</span>#', '#<span data-ack-(controls|back)[^>]*>.*?</span>#s'], '', $m[1])))) : null;
     }
 
     public function test_S_169_1_a_restricted_page_is_red_and_the_banner_names_it_with_the_since_time(): void
