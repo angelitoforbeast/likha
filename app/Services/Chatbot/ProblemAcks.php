@@ -13,7 +13,8 @@ use Throwable;
  *
  * - ack: "nakita na, inaayos": wala sa listahan hanggang `until` (1 araw kung walang pinili), o hanggang lumala ang kulay
  *   (hal. naging pula ang dating amber).
- * - done: "ayos na": wala sa listahan nang DONE_GRACE_MINUTES; kapag nandiyan pa rin pagkatapos, bumabalik na may tanda.
+ * - done: "ayos na": nagsisimula sa zero ang bilang mula sa Done; bumabalik lang kapag nangyari ulit pagkatapos nito (ang
+ *   estado gaya ng setup na kulang: pagkalipas ng DONE_GRACE_MINUTES kung kulang pa rin).
  * Ang kind ay ang linya na walang numero at oras (pareho ang "57 of 58 since 16:08" at "60 of 61 since 16:40").
  */
 class ProblemAcks
@@ -39,7 +40,7 @@ class ProblemAcks
      * Ang ack ng linya ngayon, o null kapag wala.
      * @return array{status: string, note: string, by: string, at: string, until: ?string, hidden: bool, back: ?string}|null
      */
-    public function state(string $page, string $kind, string $level): ?array
+    public function state(string $page, string $kind, string $level, ?string $since = null, ?int $window = null): ?array
     {
         $raw = $this->settings->get($page, self::PROVIDER, self::PREFIX . $kind);
         if ($raw === null || $raw === '') return null;
@@ -55,7 +56,22 @@ class ProblemAcks
         $worse = isset($a['level'], $rank[$a['level']], $rank[$level]) && $rank[$level] < $rank[$a['level']];
         $back = null;
         if ($a['status'] === 'done') {
-            if (now()->gt($at->copy()->addMinutes(self::DONE_GRACE_MINUTES))) $back = 'still happening after it was marked done';
+            // Done: nagsisimula sa zero ang bilang mula sa Done. Ang linyang may simula ($since: ang unang pumalya, ang oras
+            // ng lipat) ay bumabalik lang kapag nagsimula ito pagkatapos ng Done; ang may window (huling N minuto) kapag ang
+            // buong window ay pagkatapos na ng Done; ang estado (hal. setup na kulang) pagkalipas ng DONE_GRACE_MINUTES.
+            $sinceAt = null;
+            try {
+                $sinceAt = $since !== null && $since !== '' ? Carbon::parse($since) : null;
+            } catch (Throwable) {
+                $sinceAt = null;
+            }
+            if ($sinceAt !== null) {
+                if ($sinceAt->gt($at)) $back = 'new since it was marked done';
+            } elseif ($window !== null && $window > 0) {
+                if (now()->gt($at->copy()->addMinutes($window))) $back = 'new since it was marked done';
+            } elseif (now()->gt($at->copy()->addMinutes(self::DONE_GRACE_MINUTES))) {
+                $back = 'still happening after it was marked done';
+            }
         } elseif ($worse) {
             $back = 'got worse since it was acknowledged';
         } elseif ($until !== null && now()->gt($until)) {

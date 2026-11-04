@@ -79,7 +79,7 @@ class ProblemsPanel
             $kind = ProblemAcks::kind($l['text']);
             $line = ['level' => $l['level'], 'text' => $l['text'], 'links' => $l['links'], 'kind' => $kind];
             // Acknowledged o Done: wala sa listahan ng problema (nasa "Acknowledged"), hanggang bumalik ayon sa ProblemAcks.
-            $ack = $this->safely(fn () => $acks->state($l['page'], $kind, $l['level']), null);
+            $ack = $this->safely(fn () => $acks->state($l['page'], $kind, $l['level'], $l['since'] ?? null, $l['window'] ?? null), null);
             if ($ack !== null && $ack['hidden']) {
                 $acked[$key] ??= ['page' => $l['page'], 'lines' => []];
                 $acked[$key]['lines'][] = $line + ['ack' => $ack];
@@ -113,9 +113,13 @@ class ProblemsPanel
         }
     }
 
-    private static function line(string $page, string $level, string $text, array $links): array
+    /**
+     * $since: kailan nagsimula ang bilang ng linya (ang unang pumalyang padala, ang oras ng lipat); $window: ilang minuto ang
+     * sinusukat nito (hal. ang huling 60). Para sa Done (ProblemAcks): ang bilang ay nagsisimula sa zero mula sa Done.
+     */
+    private static function line(string $page, string $level, string $text, array $links, ?string $since = null, ?int $window = null): array
     {
-        return ['page' => $page, 'level' => $level, 'text' => $text, 'links' => $links];
+        return ['page' => $page, 'level' => $level, 'text' => $text, 'links' => $links, 'since' => $since, 'window' => $window];
     }
 
     private static function name(string $pageId): string
@@ -151,7 +155,7 @@ class ProblemsPanel
             if (($p['send_light'] ?? null) === null) continue;
             $out[] = self::line($p['page'], $p['send_light'] === 'red' ? 'red' : 'orange',
                 $p['send_reason'] . ': ' . ($p['failed'] - $p['unreachable']) . ' of ' . $p['sends'] . ' sends failed since ' . self::hhmm($p['send_since']),
-                [self::health($p['page_id'], 'page-problems'), self::inbox($p['page_id'])]);
+                [self::health($p['page_id'], 'page-problems'), self::inbox($p['page_id'])], (string) $p['send_since']);
         }
 
         return $out;
@@ -169,7 +173,7 @@ class ProblemsPanel
         foreach (app(ChatEchoes::class)->health()['pages'] as $e) {
             if ($e['unanswered'] >= ChatEchoes::limit('unanswered_customers')) {
                 $out[] = self::line($e['page'], 'red', $e['unanswered'] . ' customers not answered in ' . ChatEchoes::limit('unanswered_minutes') . ' min',
-                    [['Inbox', $e['examples'][0]['inbox'] ?? self::inbox($e['page_id'])[1]], self::health($e['page_id'], 'who-answered')]);
+                    [['Inbox', $e['examples'][0]['inbox'] ?? self::inbox($e['page_id'])[1]], self::health($e['page_id'], 'who-answered')], null, (int) ChatEchoes::limit('unanswered_minutes'));
             }
             $numbers = ' (new customers: ' . $e['new_customers'] . ', answered by CBB: ' . $e['cbb_new'] . ')';
             $window = ' in the last ' . ChatEchoes::HEALTH_MINUTES . ' min';
@@ -177,12 +181,12 @@ class ProblemsPanel
                 $links = [];
                 foreach ($e['main_examples'] as $i => $x) $links[] = ['Example ' . ($i + 1), $x['inbox']];
                 $out[] = self::line($e['page'], 'orange', 'Main flow double: ' . $e['main_doubles'] . ' new ' . ($e['main_doubles'] === 1 ? 'customer' : 'customers')
-                    . ' answered by both CBB and the Likha bot' . $window . $numbers, [...$links, self::health($e['page_id'], 'who-answered')]);
+                    . ' answered by both CBB and the Likha bot' . $window . $numbers, [...$links, self::health($e['page_id'], 'who-answered')], null, ChatEchoes::HEALTH_MINUTES);
             }
             if ($e['leftovers'] > 0) {
                 $out[] = self::line($e['page'], 'white', $e['leftovers'] . ' leftover CBB ' . ($e['leftovers'] === 1 ? 'reply' : 'replies')
                     . ' to old customers (sequence/loop)' . $window . ($e['main_doubles'] > 0 ? '' : $numbers),
-                    [['Inbox', $e['leftover_examples'][0]['inbox'] ?? self::inbox($e['page_id'])[1]], self::health($e['page_id'], 'who-answered')]);
+                    [['Inbox', $e['leftover_examples'][0]['inbox'] ?? self::inbox($e['page_id'])[1]], self::health($e['page_id'], 'who-answered')], null, ChatEchoes::HEALTH_MINUTES);
             }
         }
 
@@ -209,7 +213,7 @@ class ProblemsPanel
             $seen[$this->settings->pageKey($page)][$result] = true;
             $why = preg_replace('/^held:\s*/i', '', ForbeastWatch::reason($e));
             $out[] = self::line($page, 'orange', $label . ' at ' . $s->created_at->timezone('Asia/Manila')->format('H:i') . ($why !== '' ? ': ' . $why : ''),
-                [['History', '/chatbot/pages?changes=' . urlencode($page) . '&field=' . ForbeastWatch::KEY]]);
+                [['History', '/chatbot/pages?changes=' . urlencode($page) . '&field=' . ForbeastWatch::KEY]], $s->created_at->format('Y-m-d H:i:s'));
         }
 
         return $out;
@@ -232,7 +236,7 @@ class ProblemsPanel
             $u = $usual[$id] ?? null;
             if ($m < (int) $c['slow_seconds'] && !($u > 0 && $m >= (float) $c['slow_factor'] * $u)) continue;
             $out[] = self::line(self::name((string) $id), 'orange', 'Slow: median first reply ' . $m . ' s in the last hour'
-                . ($u !== null ? ' (usual ' . $u . ' s at this hour)' : ''), [self::speed((string) $id)]);
+                . ($u !== null ? ' (usual ' . $u . ' s at this hour)' : ''), [self::speed((string) $id)], null, 60);
         }
 
         return $out;
@@ -256,7 +260,7 @@ class ProblemsPanel
             if ($perHour < (int) $c['no_chats_per_hour'] || isset($recent[$id]) || BotcakeMock::isTestId($id)) continue;
             $name = BotcakeChat::pageMap()[$id] ?? null;
             if ($name === null || $guard->botOff($name)) continue;
-            $out[] = self::line($name, 'white', 'No chats in the last ' . $minutes . ' min (usually ' . $perHour . ' an hour)', [self::inbox($id), self::speed($id)]);
+            $out[] = self::line($name, 'white', 'No chats in the last ' . $minutes . ' min (usually ' . $perHour . ' an hour)', [self::inbox($id), self::speed($id)], null, $minutes);
         }
 
         return $out;

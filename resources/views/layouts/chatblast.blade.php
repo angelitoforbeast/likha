@@ -168,7 +168,7 @@
                     <input id="cb-ack-date" type="date" class="rounded border border-slate-300 px-1 py-0.5 text-xs" hidden>
                     <span class="text-slate-500">It comes back sooner if it gets worse.</span>
                 </div>
-                <div id="cb-ack-done-help" class="mt-1 text-slate-500" hidden>Hidden for 30 minutes; it comes back marked if the problem is still found.</div>
+                <div id="cb-ack-done-help" class="mt-1 text-slate-500" hidden>The count starts again from zero now: it comes back only if it happens again after this. A setup that is still incomplete comes back after 30 minutes.</div>
                 <div class="mt-2 flex gap-2"><button type="button" id="cb-ack-save" class="rounded bg-slate-800 px-2 py-0.5 text-white">Save</button><button type="button" id="cb-ack-cancel" class="rounded border border-slate-300 px-2 py-0.5">Cancel</button><span id="cb-ack-error" class="text-red-600"></span></div>
             </div>
         </div>
