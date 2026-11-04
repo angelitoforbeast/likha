@@ -114,12 +114,13 @@ class BotcakeCustomerMatcher
             }
         }
 
-        // Ang may PSID na pero walang ad id (hal. PSID mula sa lumang sheet, na walang ad id): kunin ang ad_id ng API
-        // customer ng parehong page at PSID. Kailangan ito ng per-ad na report. Plain SELECT muna ng mga id (walang lock),
+        // Ang may PSID na pero walang ad id (hal. PSID mula sa lumang sheet, o customer na wala pa sa API): kunin ang ad_id ng API
+        // customer, o ng record ng chat (chat_verify, ang ad ng pinanggalingang chat) kapag wala sa API; ang API ang nauuna. Ang
+        // ad ay ng parehong page at PSID. Kailangan ito ng per-ad na report. Plain SELECT muna ng mga id (walang lock),
         // saka UPDATE ayon sa id, hanggang 1000 bawat isa: hindi nila-lock ng UPDATE ang lahat ng bagong order ng page.
         // Ang PSID ay hindi ginagalaw, at ang may ad id na ay hindi pinapalitan (sinusuri sa mismong UPDATE).
         if ($hasAdCol) {
-            $adSql = "SELECT bp.ad_id FROM botcake_psids bp WHERE bp.source = 'api' AND LOWER($trim(bp.page)) = ?"
+            $adSql = "SELECT bp.ad_id FROM botcake_psids bp WHERE bp.source IN ('api', 'chat_verify') AND LOWER($trim(bp.page)) = ?"
                 . " AND bp.psid = macro_output.botcake_psid AND bp.ad_id IS NOT NULL AND bp.ad_id <> ''";
             $emptyAd = "(botcake_ad_id IS NULL OR botcake_ad_id = '')";
 
@@ -133,7 +134,7 @@ class BotcakeCustomerMatcher
                 ->chunkById(1000, function ($orders) use (&$out, $adSql, $emptyAd, $key) {
                     $ids = $orders->pluck('id')->all();
                     $out['ad_filled'] += DB::update(
-                        "UPDATE macro_output SET botcake_ad_id = ($adSql ORDER BY bp.id DESC LIMIT 1)"
+                        "UPDATE macro_output SET botcake_ad_id = ($adSql ORDER BY (bp.source = 'api') DESC, bp.id DESC LIMIT 1)"
                         . ' WHERE id IN (' . implode(',', array_fill(0, count($ids), '?')) . ") AND $emptyAd AND EXISTS ($adSql)",
                         array_merge([$key], $ids, [$key])
                     );
