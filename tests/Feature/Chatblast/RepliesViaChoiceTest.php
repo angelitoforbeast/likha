@@ -4,6 +4,7 @@ namespace Tests\Feature\Chatblast;
 
 use App\Models\PageSetting;
 use App\Services\Chatbot\ChatbotProvider;
+use App\Services\Chatbot\ForbeastPageSetup;
 use App\Services\Chatbot\Gateways;
 use App\Services\PageSettings;
 use Illuminate\Support\Facades\Artisan;
@@ -121,5 +122,27 @@ class RepliesViaChoiceTest extends ChatblastTestCase
         $this->assertStringNotContainsString("'App: '", $html);
         $this->assertStringContainsString("'Bot ' + (i + 1) + ' (' + gatewayApps[k] + ')'", $html, 'Bot N (<address>) labels');
         $this->assertStringContainsString('gateway_app: wantApp', $html, 'the bulk apply sends the address too');
+        $this->assertStringContainsString("const routeOk = v => !r.route_apps || r.route_apps[v.split(':')[1]] === 'ok';", $html, 'Bot N only where the page has a working token for that app');
+    }
+
+    public function test_bot_n_is_offered_and_saved_only_where_the_page_has_a_working_token_for_that_app(): void
+    {
+        $this->actingAs($this->user());
+        // The Forbeast page check (GET /v1/pages/{id}) now names the page's token per Meta app.
+        Http::swap(new \Illuminate\Http\Client\Factory());
+        Http::fake(fn () => Http::response(['id' => '1001', 'name' => 'Page Uno', 'connected' => true, 'can_send' => true,
+            'webhook' => ['url' => Gateways::eventsUrl('forbeast')], 'apps' => ['forbeast' => 'reconnect_needed', 'incepxion' => 'ok', 'Bad Key!' => 'ok', 'other' => 'weird']]));
+        app(ForbeastPageSetup::class)->retest('Page Uno');
+        $this->assertSame(['forbeast' => 'reconnect_needed', 'incepxion' => 'ok', 'other' => null], app(ForbeastPageSetup::class)->apps('Page Uno'));
+
+        $row = collect($this->getJson('/chatbot/data')->assertOk()->json('rows'))->firstWhere('page', 'Page Uno');
+        $this->assertSame('ok', $row['route_apps']['incepxion']);
+
+        // Bot 1 (Forbeast): the page's token there needs a reconnect, so it is refused; Bot 2 is saved.
+        $this->postJson('/chatbot/provider', ['page_name' => 'Page Uno', 'provider' => 'gateway', 'gateway_app' => 'forbeast'])
+            ->assertStatus(422)->assertJsonFragment(['error' => 'Forbeast is not connected for: Page Uno']);
+        $this->postJson('/chatbot/provider', ['page_name' => 'Page Uno', 'provider' => 'gateway', 'gateway_app' => 'incepxion'])->assertOk();
+        // A page never checked against the new Forbeast (no apps saved): as before.
+        $this->postJson('/chatbot/provider', ['page_name' => 'Page Dos', 'provider' => 'gateway', 'gateway_app' => 'forbeast'])->assertOk();
     }
 }

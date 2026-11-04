@@ -1467,7 +1467,10 @@
         const current = provider === 'gateway' && routes.length ? 'gateway:' + route : provider;
         const gatewayOk = (r.connected || []).includes(provLabel(r, 'gateway')) && gatewayReady;
         const all = [['botcake', 'Botcake'], ...(routes.length ? routes : [['gateway', provLabel(r, 'gateway')]])];
-        const options = all.filter(([v]) => v === current || (v === 'botcake' ? (r.connected || []).includes(provLabel(r, 'botcake')) : gatewayOk));
+        // Bot N: kapag alam na ng Forbeast ang token ng page kada Meta app (route_apps), ang may gumaganang token lang ("ok");
+        // hindi pa alam (lumang Forbeast, hindi pa nasusuri): gaya ng dati.
+        const routeOk = v => !r.route_apps || r.route_apps[v.split(':')[1]] === 'ok';
+        const options = all.filter(([v]) => v === current || (v === 'botcake' ? (r.connected || []).includes(provLabel(r, 'botcake')) : gatewayOk && (!v.startsWith('gateway:') || routeOk(v))));
         const labelOf = v => (all.find(o => o[0] === v) || [v, v])[1];
         if (options.length < 2) return el('div', {class: 'mt-1 text-xs text-slate-600', title: 'Replies via', text: 'Bot: ' + labelOf(current)});
         const sel = el('select', {class: 'mt-1 block w-full max-w-[9rem] rounded border border-slate-300 px-1 py-0.5 text-xs', 'aria-label': 'Replies via of ' + r.page, title: 'Replies via'},

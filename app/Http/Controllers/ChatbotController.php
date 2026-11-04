@@ -160,7 +160,9 @@ class ChatbotController extends Controller
                 'auto_switched' => ForbeastWatch::note($autoSwitch, $providerRow, $provider, $gatewayRow),
                 // Aling gateway ang sumasagot kapag gateway ang provider, at ang mapipili (naka-set up at gumagana ang token ng page).
                 'gateway' => Gateways::active($page), 'gateways' => Gateways::readyFor($page),
-            ] + ($apps !== null ? ['gateway_app' => Gateways::route($page)] : []) + [ // ang address ng forbeast gateway ng page (chatbot.gateway_app)
+            ] + ($apps !== null ? ['gateway_app' => Gateways::route($page),
+                // Ang token ng page kada Meta app (address) ayon sa huling check ng Forbeast; null = hindi pa alam.
+                'route_apps' => $forbeast->apps($page)] : []) + [ // ang address ng forbeast gateway ng page (chatbot.gateway_app)
                 'flow_text' => $linked === null && $text !== null && $text !== '' ? $text : null,
                 'flow_code' => $linked !== null ? ($flowCodes[$flowId] ?? null) : null,
                 // Ang mga value na huling isinulat mula sa Forbeast (ang "via Forbeast" ng cell).
@@ -361,6 +363,17 @@ class ChatbotController extends Controller
             if (count($routes) < 2) return response()->json(['error' => 'Only one gateway address is set up.'], 422);
             if (!array_key_exists($route, $routes)) {
                 return response()->json(['error' => 'Pick ' . implode(' or ', array_map(fn ($k) => Gateways::routeLabel($k), array_keys($routes))) . '.'], 422);
+            }
+            // Ang page na alam nang walang gumaganang token sa Meta app ng address na ito ay hindi malilipat doon (ang
+            // kasalukuyang pili ay pwedeng i-save ulit). Hindi pa alam (walang naitabing check): gaya ng dati.
+            $notOk = array_filter($pages, function ($p) use ($route, $provider) {
+                $apps = app(ForbeastPageSetup::class)->apps($p);
+                $same = ChatbotProvider::name($p) === $provider && Gateways::route($p) === $route;
+
+                return $apps !== null && ($apps[$route] ?? null) !== 'ok' && !$same;
+            });
+            if ($notOk) {
+                return response()->json(['error' => Gateways::routeLabel($route) . ' is not connected for: ' . implode(', ', array_slice(array_values($notOk), 0, 10))], 422);
             }
         }
         $status = DB::transaction(fn () => array_map(function ($page) use ($provider, $route) {

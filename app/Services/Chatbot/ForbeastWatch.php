@@ -359,6 +359,12 @@ class ForbeastWatch
             $res = null;
         }
         if ($res !== null && $res->successful()) {
+            // Ang token ng page kada Meta app (Bot N sa "Replies via"): itinatabi kapag nagbago, para ang mga pili ay totoo.
+            try {
+                app(ForbeastPageSetup::class)->on($gw)->keepApps($page, ForbeastPageSetup::appStatuses($res));
+            } catch (Throwable $e) {
+                report($e);
+            }
             // Ang inbound_lag_seconds (bagong Forbeast lang): ang tagal ng mensahe sa gateway bago ipasa. Wala = hindi alam.
             $lag = $res->json('inbound_lag_seconds');
             $lag = is_numeric($lag) ? max(0, (int) $lag) : null;

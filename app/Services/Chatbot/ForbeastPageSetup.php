@@ -65,6 +65,7 @@ class ForbeastPageSetup
         }
         $name = trim((string) ($res->json('name') ?? ''));
         $this->keepScopes($page, self::scopes($res));
+        $this->keepApps($page, self::appStatuses($res));
         // Ang pangalan ng page sa Facebook na ibinalik na ng gateway: itinatabi, walang dagdag na tawag.
         app(FacebookName::class)->fromProbe($page, $pageId, ['status' => 'ok', 'name' => $name, 'id' => is_scalar($res->json('id')) ? (string) $res->json('id') : null], $this->gateway);
 
@@ -98,7 +99,7 @@ class ForbeastPageSetup
         $str = fn ($v, int $max) => is_scalar($v) && trim((string) $v) !== '' ? mb_substr(trim((string) $v), 0, $max) : null;
 
         return ['status' => 'ok', 'name' => $str($res->json('name'), 255), 'id' => $str($res->json('id'), 64), 'permissions' => self::scopes($res),
-            'webhook' => $str($res->json('webhook.url'), 500), 'error' => null];
+            'apps' => self::appStatuses($res), 'webhook' => $str($res->json('webhook.url'), 500), 'error' => null];
     }
 
     /**
@@ -111,7 +112,10 @@ class ForbeastPageSetup
         $pageId = trim((string) $this->settings->get($page, 'botcake', 'page_id'));
         $p = $this->probe($pageId, $this->token($page), $page);
         if ($p['status'] === 'skipped') return 'skipped';
-        if ($p['status'] === 'ok') $this->keepScopes($page, $p['permissions']);
+        if ($p['status'] === 'ok') {
+            $this->keepScopes($page, $p['permissions']);
+            $this->keepApps($page, $p['apps'] ?? null);
+        }
         // Nabasa ang page (kahit nasa ibang site ang webhook): ang pangalan nito sa Facebook, kapag ito ring page ID.
         app(FacebookName::class)->fromProbe($page, $pageId, $p, $this->gateway);
         $ours = Gateways::eventsUrl($this->gateway);
@@ -228,6 +232,40 @@ class ForbeastPageSetup
         }
         $this->settings->pageQuery($page)->where('provider', $this->gateway)->where('key', 'permissions')->where('active', true)
             ->get()->each(fn ($s) => $this->settings->deactivate($s));
+    }
+
+    /**
+     * Ang token ng page kada Meta app ng gateway (ang "apps" ng page check: {key: ok | reconnect_needed | null}), o null
+     * kapag wala ang field (ang lumang gateway): hindi alam. Untrusted: maiikling key at kilalang status lang.
+     * @return array<string, ?string>|null
+     */
+    public static function appStatuses(Response $res): ?array
+    {
+        $apps = $res->json('apps');
+        if (!is_array($apps)) return null;
+        $out = [];
+        foreach (array_slice($apps, 0, 10, true) as $key => $status) {
+            if (!is_string($key) || !preg_match('/^[a-z0-9_]{1,30}$/', $key)) continue;
+            $out[$key] = in_array($status, ['ok', 'reconnect_needed'], true) ? $status : null;
+        }
+        ksort($out);
+
+        return $out;
+    }
+
+    /** Itinatabi ang "apps" sa <gateway>.apps (JSON) ng page; isinusulat lang kapag nagbago. null (hindi alam): walang galaw. */
+    public function keepApps(string $page, ?array $apps): void
+    {
+        if ($apps === null) return;
+        $this->settings->set($page, $this->gateway, 'apps', json_encode($apps), false, null, true);
+    }
+
+    /** @return array<string, ?string>|null ang naitabing token ng page kada Meta app ng gateway; null = hindi pa alam */
+    public function apps(string $page): ?array
+    {
+        $v = json_decode((string) $this->settings->get($page, $this->gateway, 'apps'), true);
+
+        return is_array($v) ? $v : null;
     }
 
     private function why(?Response $res): string
