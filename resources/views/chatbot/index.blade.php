@@ -521,11 +521,18 @@
     // Ang gateway ng page (chatbot.gateway): ang "gateway" na provider ay ang pangalan ng aktibong gateway ng row.
     const GATEWAY_LABEL = {forbeast: 'Forbeast', incepxionbot: 'Incepxionbot'};
     const provLabel = (r, p) => p === 'gateway' ? (GATEWAY_LABEL[r.gateway] || PROVIDER_LABEL.gateway) : PROVIDER_LABEL.botcake;
+    // Ang Bot ng page gaya ng "Replies via": Botcake, o Bot N (<address>) kapag higit sa isa ang address ng gateway.
+    const botLabel = r => {
+        if (r.provider !== 'gateway') return PROVIDER_LABEL.botcake;
+        const routes = (r.gateway || 'forbeast') === 'forbeast' ? viaRoutes() : [];
+        const hit = routes.find(([v]) => v === 'gateway:' + (r.gateway_app || 'forbeast'));
+        return hit ? hit[1] : provLabel(r, 'gateway');
+    };
     const checkKind = r => { const c = checks.get(r.page); return !c || !c.status ? 'Not checked' : (c.status === 'none' ? 'No flow' : (c.status !== 'ok' ? 'x' : (c.warnings?.length ? 'warn' : 'ok'))); };
     const FILTERS = {
         page: {label: 'Page', values: r => [r.page]},
         active: {label: 'Active', values: r => [r.active ? 'On' : 'Off']},
-        bot: {label: 'Bot', values: r => [provLabel(r, r.provider)]},
+        bot: {label: 'Bot', values: r => [botLabel(r)]},
         connected: {label: 'Connected', values: r => (r.connected || []).length ? r.connected : ['None']},
         flow: {label: 'Flow', values: r => [r.cells.flow || 'No flow']},
         check: {label: 'Check', values: r => [checkKind(r)]},

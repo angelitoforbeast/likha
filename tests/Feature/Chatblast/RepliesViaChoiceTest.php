@@ -123,6 +123,7 @@ class RepliesViaChoiceTest extends ChatblastTestCase
         $this->assertStringContainsString("'Bot ' + (i + 1) + ' (' + gatewayApps[k] + ')'", $html, 'Bot N (<address>) labels');
         $this->assertStringContainsString('gateway_app: wantApp', $html, 'the bulk apply sends the address too');
         $this->assertStringContainsString("const routeOk = v => !r.route_apps || r.route_apps[v.split(':')[1]] === 'ok';", $html, 'Bot N only where the page has a working token for that app');
+        $this->assertStringContainsString("bot: {label: 'Bot', values: r => [botLabel(r)]},", $html, 'the Bot filter lists Bot N per address, as Replies via names it');
     }
 
     public function test_bot_n_is_offered_and_saved_only_where_the_page_has_a_working_token_for_that_app(): void
