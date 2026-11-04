@@ -16,6 +16,9 @@ use Illuminate\Support\Facades\Cache;
  */
 class ChatbotProblemAckController extends Controller
 {
+    /** Ang pinakamatagal na Acknowledge: 90 araw, gaya ng ProblemAcks. */
+    private const MAX_MINUTES = 90 * 24 * 60;
+
     public function __construct(private PageSettings $settings, private ProblemAcks $acks)
     {
     }
@@ -28,13 +31,14 @@ class ChatbotProblemAckController extends Controller
             'status' => ['required', 'in:ack,done,clear'],
             'note' => ['nullable', 'string', 'max:' . ProblemAcks::MAX_NOTE],
             'until' => ['nullable', 'string', 'max:20'],
+            'minutes' => ['nullable', 'integer', 'min:1', 'max:' . self::MAX_MINUTES],
             'level' => ['nullable', 'string', 'max:10'],
         ]);
         // Ang page ay dapat nasa listahan ng chatbot (hindi gumagawa ng bagong page sa settings).
         $known = in_array($this->settings->pageKey($data['page']), array_map(fn ($p) => $this->settings->pageKey($p), BotcakeChat::pageMap()), true);
         if (!$known) return response()->json(['error' => 'This page is not on the chatbot list.'], 422);
 
-        $res = $this->acks->set($data['page'], $data['kind'], $data['status'], (string) ($data['note'] ?? ''), $data['until'] ?? null,
+        $res = $this->acks->set($data['page'], $data['kind'], $data['status'], (string) ($data['note'] ?? ''), $this->until($data),
             (string) ($data['level'] ?? 'white'), $request->user());
         if (!$res['ok']) return response()->json(['error' => $res['error']], 422);
         Cache::forget(ProblemsPanel::CACHE);
@@ -54,13 +58,15 @@ class ChatbotProblemAckController extends Controller
             'status' => ['required', 'in:ack,done'],
             'note' => ['required', 'string', 'max:' . ProblemAcks::MAX_NOTE],
             'until' => ['nullable', 'string', 'max:20'],
+            'minutes' => ['nullable', 'integer', 'min:1', 'max:' . self::MAX_MINUTES],
         ]);
+        $until = $this->until($data);
         $panel = app(ProblemsPanel::class)->panel();
         $done = 0;
         foreach ($panel['pages'] ?? [] as $p) {
             foreach ($p['lines'] as $l) {
                 if (empty($l['kind'])) continue;
-                $res = $this->acks->set($p['page'], $l['kind'], $data['status'], $data['note'], $data['until'] ?? null, $l['level'], $request->user());
+                $res = $this->acks->set($p['page'], $l['kind'], $data['status'], $data['note'], $until, $l['level'], $request->user());
                 if (!$res['ok']) return response()->json(['error' => $res['error'], 'saved' => $done], 422);
                 $done++;
             }
@@ -68,5 +74,16 @@ class ChatbotProblemAckController extends Controller
         Cache::forget(ProblemsPanel::CACHE);
 
         return response()->json(['ok' => true, 'saved' => $done]);
+    }
+
+    /**
+     * Hanggang kailan ang Acknowledge: "minutes" mula ngayon (1 minuto, 15 minuto, 1 oras, 1 araw...), binibilang ng server
+     * kaya hindi naaapektuhan ng orasan ng browser; o "until": isang petsa, o petsa at oras ("Y-m-d H:i").
+     */
+    private function until(array $data): ?string
+    {
+        if (!empty($data['minutes'])) return now()->addMinutes((int) $data['minutes'])->format('Y-m-d H:i:s');
+
+        return $data['until'] ?? null;
     }
 }
