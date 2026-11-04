@@ -431,6 +431,12 @@ class ChatbotSequences
                 $this->event($sub->page_id, $sub->psid, ['op' => 'paused', 'reason' => 'page off', 'name' => $seq->name]);
                 return 'paused';
             }
+            // Pinagbawalan ng Meta na mag-message ang page (#2022): walang follow-up hanggang matapos (PageRestriction).
+            if ($until = app(PageRestriction::class)->until($sub->page_id)) {
+                $release(['next_send_at' => $until]);
+                $this->event($sub->page_id, $sub->psid, ['op' => 'held', 'reason' => 'page restricted (#2022) until ' . $until->format('Y-m-d H:i')] + $detail);
+                return 'held';
+            }
             $fields = new CustomerFields($sub->page_id, $sub->psid);
             if ($fields->get(CustomerFields::BOT_PAUSED) === '1') {
                 $release(['next_send_at' => now()->addMinutes(self::HOLD_MINUTES)]);

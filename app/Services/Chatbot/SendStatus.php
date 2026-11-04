@@ -44,6 +44,7 @@ class SendStatus
         if (DB::table('chatbot_replies')->where('id', $reply->id)->whereNull('confirmed_status')->update($set) !== 1) return 'send_status_repeat';
         // Walang naihatid sa customer: kung ang padala ay ang tanong na hinihintay pa ang sagot, itatanong ulit.
         if ($status === 'failed' || ($status === 'partial' && $s['sent_count'] === 0)) $this->unsent($reply);
+        app(PageRestriction::class)->note((int) $reply->page_id, $status === 'failed' ? 'failed' : 'sent', $set['error'] ?? null);
 
         return 'send_status';
     }

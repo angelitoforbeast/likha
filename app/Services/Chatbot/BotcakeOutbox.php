@@ -135,6 +135,8 @@ class BotcakeOutbox implements Outbox
         ] + ($raw !== null && ChatbotReply::hasRaw() ? ['raw' => $raw] : []) + ChatbotTags::columns($tags) + ChatbotReply::viaColumn($via) + ChatbotReply::routeColumn($via, $route)
             + ($kind === 'send' ? ChatbotReply::confirmColumns($clientRef, $via, $status, $now) : []));
         ChatbotTags::storeRows($reply, $tags);
+        // Ang #2022 ng page (PageRestriction). Ang "sent" ng gateway ay tinanggap pa lang, kaya ang send_status ang bibilang nito.
+        if ($kind === 'send' && ($status === 'failed' || !in_array($via, Gateways::ALL, true))) app(PageRestriction::class)->note($pageId, $status, $error);
 
         return ['status' => $status, 'error' => $error];
     }
