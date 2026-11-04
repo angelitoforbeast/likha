@@ -158,6 +158,7 @@ class CppAdGroupRowsTest extends ChatblastTestCase
         $this->assertStringContainsString('onclick="copySummaryOfAds()"', $html, 'Copy Table: one row per page');
         $this->assertStringContainsString('onclick="copySummaryOfAds(true)"', $html, 'a second button copies the ad group rows too');
         $this->assertStringContainsString('Copy with ad groups', $html);
+        $this->assertStringContainsString('if (s.sumSpent === 0 && s.sumOrders === 0) return;', $html, 'a group with no spend and no orders is not drawn; one with orders is');
         $this->assertStringContainsString('esc(g.label)', $html, 'group names are escaped');
         $this->assertStringNotContainsString('<b>MOBILE</b>', $html);
     }

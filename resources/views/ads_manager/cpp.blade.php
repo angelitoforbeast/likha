@@ -548,8 +548,10 @@
             `;
 
             // Ad-based na page: isang row kada ad group sa ilalim (hindi kasama sa TOTAL at sa Copy Table).
+            // Ang ad group na walang spend at walang order sa mga petsang ito ay hindi ipinapakita; may order, kasama kahit ₱0.
             (adGroupRows[page] || []).forEach(g => {
               const s = rowSums(g.cells, filteredDates, data);
+              if (s.sumSpent === 0 && s.sumOrders === 0) return;
               const gCpp  = s.sumOrders > 0 ? s.sumSpent / s.sumOrders : null;
               const gCpi  = s.wCPI  > 0 ? s.sumSpent / s.wCPI  : null;
               const gCpm  = s.wImps > 0 ? s.sumSpent / s.wImps : null;
