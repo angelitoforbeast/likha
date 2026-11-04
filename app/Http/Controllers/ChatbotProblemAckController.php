@@ -41,4 +41,32 @@ class ChatbotProblemAckController extends Controller
 
         return response()->json(['ok' => true]);
     }
+
+    /**
+     * Acknowledge all o Done all: ang lahat ng linyang nakikita ngayon sa banner, iisang note (at tagal, sa Acknowledge).
+     * CEO lang. Ang bawat linya ay sariling row, kaya bumabalik pa rin ang bawat isa ayon sa sarili nitong panuntunan.
+     */
+    public function storeAll(Request $request): JsonResponse
+    {
+        $role = preg_replace('/\s+/u', ' ', trim((string) ($request->user()?->employeeProfile?->role ?? $request->user()?->role ?? '')));
+        if ($role !== 'CEO') return response()->json(['error' => 'Only the CEO can acknowledge or mark all done.'], 403);
+        $data = $request->validate([
+            'status' => ['required', 'in:ack,done'],
+            'note' => ['required', 'string', 'max:' . ProblemAcks::MAX_NOTE],
+            'until' => ['nullable', 'string', 'max:20'],
+        ]);
+        $panel = app(ProblemsPanel::class)->panel();
+        $done = 0;
+        foreach ($panel['pages'] ?? [] as $p) {
+            foreach ($p['lines'] as $l) {
+                if (empty($l['kind'])) continue;
+                $res = $this->acks->set($p['page'], $l['kind'], $data['status'], $data['note'], $data['until'] ?? null, $l['level'], $request->user());
+                if (!$res['ok']) return response()->json(['error' => $res['error'], 'saved' => $done], 422);
+                $done++;
+            }
+        }
+        Cache::forget(ProblemsPanel::CACHE);
+
+        return response()->json(['ok' => true, 'saved' => $done]);
+    }
 }

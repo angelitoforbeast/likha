@@ -47,7 +47,7 @@ class QuietSetupTest extends ChatblastTestCase
     private function banner(): ?array
     {
         $html = $this->get('/chatbot/inbox')->assertOk()->getContent();
-        if (!preg_match('#<div[^>]*data-alert="problems"[^>]*>(.*?)</ol>\s*</div>#s', $html, $m)) return null;
+        if (!preg_match('#<div[^>]*data-alert="problems"[^>]*>(.*?)</ol>#s', $html, $m)) return null;
         // Ang mga button ng Acknowledge/Done ay hindi bahagi ng text ng linya.
         $m[1] = (string) preg_replace('#<span data-ack-(controls|back)[^>]*>.*?</span>#s', '', $m[1]);
         $clean = fn ($s) => trim(preg_replace('/\s+/', ' ', html_entity_decode(strip_tags($s))));

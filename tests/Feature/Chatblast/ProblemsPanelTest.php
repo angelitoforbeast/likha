@@ -62,7 +62,7 @@ class ProblemsPanelTest extends ChatblastTestCase
     private function panel(string $url = '/chatbot/inbox'): ?array
     {
         $html = $this->get($url)->assertOk()->getContent();
-        if (!preg_match('#<div[^>]*data-alert="problems"[^>]*>(.*?)</ol>\s*</div>#s', $html, $m)) return null;
+        if (!preg_match('#<div[^>]*data-alert="problems"[^>]*>(.*?)</ol>#s', $html, $m)) return null;
         $clean = fn ($s) => trim(preg_replace('/\s+/', ' ', html_entity_decode(strip_tags($s))));
         preg_match('#<button[^>]*>(.*?)</button>#s', $m[1], $b);
         $pages = [];
@@ -302,5 +302,28 @@ class ProblemsPanelTest extends ChatblastTestCase
         $this->assertTrue($acks->state('Page Uno', $a, 'orange')['hidden']);
         $this->assertSame('2026-12-01 23:59', $acks->state('Page Uno', $a, 'orange')['until']);
         $this->assertSame(['hidden' => false, 'back' => 'got worse since it was acknowledged'], array_intersect_key($acks->state('Page Uno', $a, 'red'), ['hidden' => 1, 'back' => 1]));
+    }
+
+    public function test_the_ceo_acknowledges_or_marks_all_done_with_one_note_and_no_one_else_can(): void
+    {
+        $this->check('Page Dos', ['2 flows named UPDATE SHIPPING STATUS 2026']);
+        foreach (['11:20:00', '11:30:00', '11:40:00'] as $t) $this->reply('1001', '7001', '2026-10-27 ' . $t, 'failed', self::RESTRICTED);
+        $this->actingAs($this->user());
+        $html = $this->get('/chatbot/inbox')->getContent();
+        $this->assertStringContainsString('Acknowledge all</button>', $html);
+        $this->assertStringContainsString('Done all</button>', $html);
+        $this->assertStringContainsString('id="cb-ack-form"', $html, 'one form with the note and how long');
+        $this->assertStringNotContainsString('prompt(', $html, 'no browser prompts');
+
+        $this->postJson('/chatbot/problems/ack-all', ['status' => 'ack', 'note' => ''])->assertStatus(422);
+        $this->postJson('/chatbot/problems/ack-all', ['status' => 'ack', 'note' => 'all seen, fixing tomorrow', 'until' => '2026-10-30'])
+            ->assertOk()->assertJson(['saved' => 2]);
+        Cache::flush();
+        $p = $this->panel();
+        $this->assertSame('⚠ 0 pages with problems (0 urgent)', $p['line']);
+        $this->assertStringContainsString('Acknowledged and done (2)', $p['html']);
+
+        $this->actingAs($this->user('Marketing', 'mkt@example.test'));
+        $this->postJson('/chatbot/problems/ack-all', ['status' => 'done', 'note' => 'x'])->assertForbidden();
     }
 }

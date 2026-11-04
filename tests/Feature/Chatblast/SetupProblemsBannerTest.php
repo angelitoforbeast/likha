@@ -44,7 +44,7 @@ class SetupProblemsBannerTest extends ChatblastTestCase
     /** Ang banner ng mga problema (spec 184, pumalit sa banner na ito) bilang text, o null. */
     private function banner(string $html): ?string
     {
-        return preg_match('#<div[^>]*data-alert="problems"[^>]*>(.*?)</ol>\s*</div>#s', $html, $m)
+        return preg_match('#<div[^>]*data-alert="problems"[^>]*>(.*?)</ol>#s', $html, $m)
             ? trim(preg_replace('/\s+/', ' ', strip_tags(preg_replace(['#<span aria-hidden="true">.*?</span>#', '#<span data-ack-(controls|back)[^>]*>.*?</span>#s'], '', $m[1])))) : null;
     }
 
