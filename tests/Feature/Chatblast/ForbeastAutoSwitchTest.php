@@ -463,6 +463,29 @@ class ForbeastAutoSwitchTest extends ChatblastTestCase
         $this->assertCount(2, $this->events());
     }
 
+    public function test_a_page_whose_bot_n_app_has_no_working_token_moves_to_botcake_on_the_health_check(): void
+    {
+        $app2 = 'https://incepxion.example.test/api';
+        config(['services.gateway.urls' => 'incepxion=' . $app2]);
+        app(PageSettings::class)->set('Page Uno', ForbeastPageSetup::PROVIDER, 'token', 'fbp_page_uno_token', true, null, true);
+        app(PageSettings::class)->set('Page Uno', 'chatbot', 'gateway_app', 'incepxion', false, null, true);
+        $page = fn (?string $incepxion) => Http::response(['id' => '1001', 'connected' => true, 'can_send' => true, 'apps' => ['forbeast' => 'ok', 'incepxion' => $incepxion]]);
+
+        // May token ang page sa app ng Bot 2: walang lipat.
+        Http::fake([$app2 . '/v1/pages/1001' => $page('ok')]);
+        $this->artisan('chatbot:forbeast-watch')->assertSuccessful();
+        $this->assertSame('gateway', $this->provider());
+
+        // Nawala ang token (kailangang i-reconnect): lipat sa Botcake, may dahilan sa talaan.
+        Http::swap(new \Illuminate\Http\Client\Factory());
+        Http::fake([$app2 . '/v1/pages/1001' => $page('reconnect_needed')]);
+        $this->artisan('chatbot:forbeast-watch')->assertSuccessful();
+        $this->assertSame('botcake', $this->provider());
+        $e = $this->events()[0];
+        $this->assertSame(['switched', 'botcake', 'connection_error'], [$e['result'], $e['to'], $e['condition']]);
+        $this->assertStringContainsString('Incepxion is not connected for this page (reconnect_needed)', $e['error']);
+    }
+
     public function test_S_117_6_customer_side_errors_never_count(): void
     {
         Http::fake([self::GW_SEND => Http::sequence()
