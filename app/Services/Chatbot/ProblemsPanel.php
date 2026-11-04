@@ -72,12 +72,25 @@ class ProblemsPanel
 
         $rank = array_flip(array_keys(self::LEVELS));
         $pages = [];
+        $acked = [];
+        $acks = app(ProblemAcks::class);
         foreach ($lines as $l) {
             $key = $this->settings->pageKey($l['page']);
+            $kind = ProblemAcks::kind($l['text']);
+            $line = ['level' => $l['level'], 'text' => $l['text'], 'links' => $l['links'], 'kind' => $kind];
+            // Acknowledged o Done: wala sa listahan ng problema (nasa "Acknowledged"), hanggang bumalik ayon sa ProblemAcks.
+            $ack = $this->safely(fn () => $acks->state($l['page'], $kind, $l['level']), null);
+            if ($ack !== null && $ack['hidden']) {
+                $acked[$key] ??= ['page' => $l['page'], 'lines' => []];
+                $acked[$key]['lines'][] = $line + ['ack' => $ack];
+                continue;
+            }
+            if ($ack !== null) $line['ack'] = $ack; // bumalik: ipinapakita kung sino ang nag-ack, kailan at bakit bumalik
             $pages[$key] ??= ['page' => $l['page'], 'level' => 'white', 'lines' => []];
-            $pages[$key]['lines'][] = ['level' => $l['level'], 'text' => $l['text'], 'links' => $l['links']];
+            $pages[$key]['lines'][] = $line;
             if ($rank[$l['level']] < $rank[$pages[$key]['level']]) $pages[$key]['level'] = $l['level'];
         }
+        if (!$pages && !$acked) return null;
         $count = fn ($p, $level) => count(array_filter($p['lines'], fn ($l) => $l['level'] === $level));
         foreach ($pages as &$p) usort($p['lines'], fn ($a, $b) => $rank[$a['level']] <=> $rank[$b['level']]);
         unset($p);
@@ -87,7 +100,7 @@ class ProblemsPanel
 
         // doubles: may linya ng dobleng sagot (ang hindi pula sa echo), para lumabas lang ang paliwanag ng "bago" kapag kailangan.
         return ['pages' => $pages, 'urgent' => count(array_filter($pages, fn ($p) => $p['level'] !== 'white')),
-            'doubles' => (bool) array_filter($echoes, fn ($l) => $l['level'] !== 'red')];
+            'doubles' => (bool) array_filter($echoes, fn ($l) => $l['level'] !== 'red'), 'acked' => array_values($acked)];
     }
 
     private function safely(callable $fn, mixed $fallback): mixed

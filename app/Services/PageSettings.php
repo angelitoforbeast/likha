@@ -70,7 +70,8 @@ class PageSettings
 
     public static function isSystemKey(string $full): bool
     {
-        return in_array($full, self::SYSTEM_KEYS, true) || self::isDetailKey($full);
+        // Ang ack ng isang problema (Chatbot\ProblemAcks): sa banner lang isinusulat, hindi sa page settings.
+        return in_array($full, self::SYSTEM_KEYS, true) || self::isDetailKey($full) || str_starts_with($full, 'chatbot.problem_ack.');
     }
 
     public static function isDetailKey(string $full): bool
