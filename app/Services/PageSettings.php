@@ -27,7 +27,7 @@ class PageSettings
         'incepxionbot.token_status', 'incepxionbot.webhook_secret', 'incepxionbot.permissions', 'chatbot.gateway', 'botcake.chat_block',
         'chatbot.ai_provider', 'chatbot.ai_fallback', 'chatbot.ai_local_model', 'chatbot.ai_local_timeout', 'chatbot.ai_local_concurrency',
         'chatbot.ai_breaker_failures', 'chatbot.ai_breaker_seconds', 'chatbot.ai_local_reasoning_effort', 'facebook.name', 'facebook.name_checked',
-        'chatbot.ai_anthropic_model', 'chatbot.ai_deepseek_model'];
+        'chatbot.ai_anthropic_model', 'chatbot.ai_deepseek_model', 'chatbot.restricted_until', 'chatbot.restricted_by', 'forbeast.apps', 'incepxionbot.apps'];
 
     /**
      * Ang chatbot key na mukhang key (api_key, ai_key, …): hindi tinatanggap mula sa page, dahil ang mga key ng AI ay nasa

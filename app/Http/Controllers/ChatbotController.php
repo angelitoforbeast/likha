@@ -117,6 +117,9 @@ class ChatbotController extends Controller
         $adGroups = app(\App\Services\Chatbot\AdGroups::class);
         // Ang naitalang pangalan sa Facebook at ang mga row na may parehong page ID (dalawang query, walang tawag sa labas).
         $facebook = app(FacebookName::class)->overview();
+        // Ang mga address ng forbeast gateway (GATEWAY_URLS): ipinapakita lang kapag higit sa isa, kaya pareho ang JSON kung wala.
+        $routes = Gateways::routes();
+        $apps = count($routes) > 1 ? array_combine(array_keys($routes), array_map(fn ($k) => Gateways::routeLabel($k), array_keys($routes))) : null;
 
         $rows = [];
         foreach ($pages as $page) {
@@ -157,6 +160,9 @@ class ChatbotController extends Controller
                 'auto_switched' => ForbeastWatch::note($autoSwitch, $providerRow, $provider, $gatewayRow),
                 // Aling gateway ang sumasagot kapag gateway ang provider, at ang mapipili (naka-set up at gumagana ang token ng page).
                 'gateway' => Gateways::active($page), 'gateways' => Gateways::readyFor($page),
+            ] + ($apps !== null ? ['gateway_app' => Gateways::route($page),
+                // Ang token ng page kada Meta app (address) ayon sa huling check ng Forbeast; null = hindi pa alam.
+                'route_apps' => $forbeast->apps($page)] : []) + [ // ang address ng forbeast gateway ng page (chatbot.gateway_app)
                 'flow_text' => $linked === null && $text !== null && $text !== '' ? $text : null,
                 'flow_code' => $linked !== null ? ($flowCodes[$flowId] ?? null) : null,
                 // Ang mga value na huling isinulat mula sa Forbeast (ang "via Forbeast" ng cell).
@@ -186,7 +192,9 @@ class ChatbotController extends Controller
 
         return response()->json(['columns' => $columns, 'rows' => $rows, 'flows' => $this->flowNames(), 'gateway_ready' => ChatbotProvider::gatewayReady(),
             'gateway_labels' => Gateways::LABELS,
-            'bots' => \App\Services\Chatbot\ChatbotConnections::bots(), 'ai_site' => $ai->site()]);
+            'bots' => \App\Services\Chatbot\ChatbotConnections::bots(), 'ai_site' => $ai->site()]
+            // Ang mga address na mapipili (key => pangalan), kapag higit sa isa lang.
+            + ($apps !== null ? ['gateway_apps' => $apps] : []));
     }
 
     /** Auto-save ng isang botfield. Blangko = burahin. Last write wins. */
@@ -347,9 +355,34 @@ class ChatbotController extends Controller
         // Gateway: ang bawat page ay may gumaganang token sa aktibong gateway nito (forbeast, o incepxionbot).
         $missing = $provider === ChatbotProvider::GATEWAY ? array_filter($pages, fn ($p) => !app(ForbeastPageSetup::class)->on(Gateways::active($p))->ready($p)) : [];
         if ($missing) return response()->json(['error' => ForbeastPageSetup::NEEDS_TOKEN . ': ' . implode(', ', array_slice(array_values($missing), 0, 10))], 422);
-        $status = DB::transaction(fn () => array_map(fn ($page) => $this->settings->set($page, ChatbotFields::PROVIDER, 'provider', $provider, false, Auth::id())['status'], $pages));
+        // Ang iisang "Replies via" (Bot N): kasama ang address ng gateway (chatbot.gateway_app) sa parehong save. Ang
+        // Botcake ay hindi gumagalaw sa address.
+        $route = $provider === ChatbotProvider::GATEWAY && $request->filled('gateway_app') ? strtolower($this->str($request, 'gateway_app', 30)) : null;
+        if ($route !== null) {
+            $routes = Gateways::routes();
+            if (count($routes) < 2) return response()->json(['error' => 'Only one gateway address is set up.'], 422);
+            if (!array_key_exists($route, $routes)) {
+                return response()->json(['error' => 'Pick ' . implode(' or ', array_map(fn ($k) => Gateways::routeLabel($k), array_keys($routes))) . '.'], 422);
+            }
+            // Ang page na alam nang walang gumaganang token sa Meta app ng address na ito ay hindi malilipat doon (ang
+            // kasalukuyang pili ay pwedeng i-save ulit). Hindi pa alam (walang naitabing check): gaya ng dati.
+            $notOk = array_filter($pages, function ($p) use ($route, $provider) {
+                $apps = app(ForbeastPageSetup::class)->apps($p);
+                $same = ChatbotProvider::name($p) === $provider && Gateways::route($p) === $route;
 
-        return response()->json(['status' => reset($status), 'provider' => $provider, 'pages' => array_values($pages)]);
+                return $apps !== null && ($apps[$route] ?? null) !== 'ok' && !$same;
+            });
+            if ($notOk) {
+                return response()->json(['error' => Gateways::routeLabel($route) . ' is not connected for: ' . implode(', ', array_slice(array_values($notOk), 0, 10))], 422);
+            }
+        }
+        $status = DB::transaction(fn () => array_map(function ($page) use ($provider, $route) {
+            if ($route !== null) $this->settings->set($page, ChatbotFields::PROVIDER, Gateways::ROUTE_KEY, $route, false, Auth::id(), true);
+
+            return $this->settings->set($page, ChatbotFields::PROVIDER, 'provider', $provider, false, Auth::id())['status'];
+        }, $pages));
+
+        return response()->json(['status' => reset($status), 'provider' => $provider, 'pages' => array_values($pages)] + ($route !== null ? ['gateway_app' => $route] : []));
     }
 
     /**
@@ -378,6 +411,33 @@ class ChatbotController extends Controller
         $status = DB::transaction(fn () => array_map(fn ($page) => $this->settings->set($page, ChatbotFields::PROVIDER, Gateways::KEY, $gateway, false, Auth::id(), true)['status'], $pages));
 
         return response()->json(['status' => reset($status), 'gateway' => $gateway, 'pages' => array_values($pages)]);
+    }
+
+    /**
+     * Aling address ng forbeast gateway ang tinatawag para sa page (chatbot.gateway_app): isa sa GATEWAY_URL at GATEWAY_URLS,
+     * kapag higit sa isa ang naka-configure. Lahat o wala, may history (ang user).
+     */
+    public function gatewayApp(Request $request)
+    {
+        $this->checkAccess();
+        $names = $request->input('page_names');
+        $names = is_array($names) ? array_values($names) : [$request->input('page_name')];
+        $route = strtolower($this->str($request, 'gateway_app', 30));
+        if (count($names) < 1 || count($names) > self::MAX_BULK_PAGES) return response()->json(['error' => 'Pick 1 to ' . self::MAX_BULK_PAGES . ' pages.'], 422);
+        $pages = [];
+        foreach ($names as $name) {
+            $page = is_scalar($name) ? $this->listedPage(mb_substr(trim((string) $name), 0, 255)) : null;
+            if ($page === null) return response()->json(['error' => 'This page is not on the chatbot list.'], 422);
+            $pages[$page] = $page;
+        }
+        $routes = Gateways::routes();
+        if (count($routes) < 2) return response()->json(['error' => 'Only one gateway address is set up.'], 422);
+        if (!array_key_exists($route, $routes)) {
+            return response()->json(['error' => 'Pick ' . implode(' or ', array_map(fn ($k) => Gateways::routeLabel($k), array_keys($routes))) . '.'], 422);
+        }
+        $status = DB::transaction(fn () => array_map(fn ($page) => $this->settings->set($page, ChatbotFields::PROVIDER, Gateways::ROUTE_KEY, $route, false, Auth::id(), true)['status'], $pages));
+
+        return response()->json(['status' => reset($status), 'gateway_app' => $route, 'pages' => array_values($pages)]);
     }
 
     /**
@@ -563,7 +623,7 @@ class ChatbotController extends Controller
             'last_input' => '', 'full_name' => self::SAMPLE_NAME, 'first_name' => explode(' ', self::SAMPLE_NAME)[0], 'psid' => 'SAMPLE',
             'page_id' => (string) $this->settings->get($page, 'botcake', 'page_id'), 'page_name' => $page,
             'current_date' => now('Asia/Manila')->toDateString(), 'last_interaction' => now('Asia/Manila')->format('Y-m-d H:i'),
-            'replies_via' => ChatbotProvider::viaLabel(ChatbotProvider::via($page, null)),
+            'replies_via' => ChatbotProvider::repliesVia($page, ChatbotProvider::via($page, null)),
         ];
         $base = ChatbotVars::merge($bot, $run);
         $labels = array_column($this->fields->columns(), 'label', 'key');

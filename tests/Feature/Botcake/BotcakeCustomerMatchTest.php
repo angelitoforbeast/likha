@@ -135,6 +135,24 @@ class BotcakeCustomerMatchTest extends BotcakeApiTestCase
         $this->assertArrayHasKey('ad_filled', $m->matchPagesWithTokens());
     }
 
+    public function test_a_customer_not_yet_in_the_api_gets_the_ad_id_of_its_chat_record_and_the_api_wins_when_both_have_one(): void
+    {
+        $chat = fn (string $psid, ?string $ad) => BotcakePsid::create(['page' => 'Page Uno', 'fb_name' => 'Chat ' . $psid, 'psid' => $psid,
+            'status' => 'available', 'source' => 'chat_verify', 'ad_id' => $ad, 'ad_ids' => $ad ? [$ad] : []]);
+        $chat('psid-c', '120250000000000077');                       // nag-chat ngayon, wala pa sa API
+        $chat('psid-b', '120250000000000088');                       // nasa chat at API
+        $this->available('psid-b', 'Both Here', [], 'Page Uno', 'available', '120250000000000011');
+        $withPsid = fn (string $psid) => tap($this->order('Page Uno', 'Buyer', null, $psid),
+            fn ($o) => \Illuminate\Support\Facades\DB::table('macro_output')->where('id', $o->id)->update(['botcake_ad_id' => null]));
+        $fromChat = $withPsid('psid-c');
+        $both = $withPsid('psid-b');
+
+        app(BotcakeCustomerMatcher::class)->matchPage('Page Uno');
+
+        $this->assertSame('120250000000000077', $fromChat->fresh()->botcake_ad_id, 'the chat record has the ad');
+        $this->assertSame('120250000000000011', $both->fresh()->botcake_ad_id, 'the API record comes first');
+    }
+
     public function test_a_psid_from_the_sheet_import_leaves_the_ad_id_empty(): void
     {
         $this->available('psid-a', 'Ana Cruz', [], 'Page Uno', 'available', '120250000000000001');

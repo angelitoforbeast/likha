@@ -4,6 +4,7 @@ namespace App\Services\Chatbot;
 
 use App\Models\PageSetting;
 use App\Services\BotcakeClient;
+use App\Services\ChatbotFields;
 use App\Services\PageSettings;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Response;
@@ -52,7 +53,7 @@ class ForbeastPageSetup
      */
     public function connect(string $page, ?int $userId = null): array
     {
-        $url = $this->baseUrl();
+        $url = $this->baseUrl($page);
         $pageId = trim((string) $this->settings->get($page, 'botcake', 'page_id'));
         $token = $this->token($page);
         if ($url === '' || $pageId === '' || $token === '') return ['status' => 'skipped', 'name' => null, 'error' => null, 'written' => []];
@@ -65,8 +66,14 @@ class ForbeastPageSetup
         }
         $name = trim((string) ($res->json('name') ?? ''));
         $this->keepScopes($page, self::scopes($res));
+        $apps = self::appStatuses($res);
+        $this->keepApps($page, $apps);
         // Ang pangalan ng page sa Facebook na ibinalik na ng gateway: itinatabi, walang dagdag na tawag.
         app(FacebookName::class)->fromProbe($page, $pageId, ['status' => 'ok', 'name' => $name, 'id' => is_scalar($res->json('id')) ? (string) $res->json('id') : null], $this->gateway);
+        // Ang webhook ay isinusulat sa address ng Meta app na may token ang page: ang page na naka-connect lang sa ibang
+        // app (hal. Bot 2) ay tinatanggihan sa address ng Bot 1 (409). Kapag alam ng gateway ang token kada app at walang
+        // gumaganang token sa kasalukuyang address, ang address na meron ang ginagamit at itinatala bilang address ng page.
+        $base = $this->routeWithToken($page, $apps, $pageId) ?? $base;
 
         $secret = Str::random(64);
         $hook = $this->call(fn () => $this->http($token)->put($base . '/webhook',
@@ -85,9 +92,9 @@ class ForbeastPageSetup
      * @return array{status: string, name: ?string, id: ?string, webhook: ?string, error: ?string, permissions?: ?array} status = ok | invalid | error | skipped;
      *   permissions (ok lang): ang scopes ng token, null kapag walang field
      */
-    public function probe(string $pageId, string $token): array
+    public function probe(string $pageId, string $token, ?string $page = null): array
     {
-        $url = $this->baseUrl();
+        $url = $this->baseUrl($page);
         if ($url === '' || $pageId === '' || $token === '') return ['status' => 'skipped', 'name' => null, 'id' => null, 'webhook' => null, 'error' => Gateways::label($this->gateway) . ' is not set up yet.'];
 
         $res = $this->call(fn () => $this->http($token)->get($url . '/v1/pages/' . rawurlencode($pageId)));
@@ -98,7 +105,7 @@ class ForbeastPageSetup
         $str = fn ($v, int $max) => is_scalar($v) && trim((string) $v) !== '' ? mb_substr(trim((string) $v), 0, $max) : null;
 
         return ['status' => 'ok', 'name' => $str($res->json('name'), 255), 'id' => $str($res->json('id'), 64), 'permissions' => self::scopes($res),
-            'webhook' => $str($res->json('webhook.url'), 500), 'error' => null];
+            'apps' => self::appStatuses($res), 'webhook' => $str($res->json('webhook.url'), 500), 'error' => null];
     }
 
     /**
@@ -109,9 +116,12 @@ class ForbeastPageSetup
     public function retest(string $page, ?int $userId = null): string
     {
         $pageId = trim((string) $this->settings->get($page, 'botcake', 'page_id'));
-        $p = $this->probe($pageId, $this->token($page));
+        $p = $this->probe($pageId, $this->token($page), $page);
         if ($p['status'] === 'skipped') return 'skipped';
-        if ($p['status'] === 'ok') $this->keepScopes($page, $p['permissions']);
+        if ($p['status'] === 'ok') {
+            $this->keepScopes($page, $p['permissions']);
+            $this->keepApps($page, $p['apps'] ?? null);
+        }
         // Nabasa ang page (kahit nasa ibang site ang webhook): ang pangalan nito sa Facebook, kapag ito ring page ID.
         app(FacebookName::class)->fromProbe($page, $pageId, $p, $this->gateway);
         $ours = Gateways::eventsUrl($this->gateway);
@@ -126,7 +136,7 @@ class ForbeastPageSetup
     /** DELETE ng webhook (subok lang: ang pagkabigo ay hindi humaharang), saka tinatanggal ang token, secret at status. */
     public function disconnect(string $page, ?int $userId = null): void
     {
-        $url = $this->baseUrl();
+        $url = $this->baseUrl($page);
         $pageId = trim((string) $this->settings->get($page, 'botcake', 'page_id'));
         $token = $this->token($page);
         if ($url !== '' && $pageId !== '' && $token !== '') {
@@ -171,14 +181,37 @@ class ForbeastPageSetup
         return str_starts_with((string) $this->settings->get($page, $this->gateway, 'token_status'), 'ok');
     }
 
-    private function baseUrl(): string
+    /** Ang URL ng gateway; may $page: ang address ng page (chatbot.gateway_app), gaya ng padala. */
+    /**
+     * Ang /v1/pages/{id} ng address na may gumaganang token ang page, kapag ang kasalukuyang address ng page ay wala; null
+     * kapag ayos na ang kasalukuyan, hindi alam ($apps null), iisa ang address, o walang address na may token.
+     */
+    private function routeWithToken(string $page, ?array $apps, string $pageId): ?string
     {
-        return Gateways::url($this->gateway);
+        $routes = Gateways::routes();
+        if ($this->gateway !== Gateways::FORBEAST || $apps === null || count($routes) < 2) return null;
+        $current = Gateways::route($page);
+        if (($apps[$current] ?? null) === 'ok') return null;
+        foreach (array_keys($routes) as $key) {
+            if (($apps[$key] ?? null) !== 'ok') continue;
+            $this->settings->set($page, ChatbotFields::PROVIDER, Gateways::ROUTE_KEY, $key, false, null, true);
+
+            return $routes[$key] . '/v1/pages/' . rawurlencode($pageId);
+        }
+
+        return null;
+    }
+
+    private function baseUrl(?string $page = null): string
+    {
+        if ($page === null || Gateways::url($this->gateway) === '') return Gateways::url($this->gateway);
+
+        return Gateways::pageUrl($this->gateway, $page);
     }
 
     private function http(string $token)
     {
-        return Http::withToken($token)->acceptJson()->connectTimeout(5)->timeout(self::TIMEOUT);
+        return Http::withToken($token)->acceptJson()->withOptions(Gateways::httpOptions())->connectTimeout(5)->timeout(self::TIMEOUT);
     }
 
     /** null = walang sagot. */
@@ -225,6 +258,40 @@ class ForbeastPageSetup
         }
         $this->settings->pageQuery($page)->where('provider', $this->gateway)->where('key', 'permissions')->where('active', true)
             ->get()->each(fn ($s) => $this->settings->deactivate($s));
+    }
+
+    /**
+     * Ang token ng page kada Meta app ng gateway (ang "apps" ng page check: {key: ok | reconnect_needed | null}), o null
+     * kapag wala ang field (ang lumang gateway): hindi alam. Untrusted: maiikling key at kilalang status lang.
+     * @return array<string, ?string>|null
+     */
+    public static function appStatuses(Response $res): ?array
+    {
+        $apps = $res->json('apps');
+        if (!is_array($apps)) return null;
+        $out = [];
+        foreach (array_slice($apps, 0, 10, true) as $key => $status) {
+            if (!is_string($key) || !preg_match('/^[a-z0-9_]{1,30}$/', $key)) continue;
+            $out[$key] = in_array($status, ['ok', 'reconnect_needed'], true) ? $status : null;
+        }
+        ksort($out);
+
+        return $out;
+    }
+
+    /** Itinatabi ang "apps" sa <gateway>.apps (JSON) ng page; isinusulat lang kapag nagbago. null (hindi alam): walang galaw. */
+    public function keepApps(string $page, ?array $apps): void
+    {
+        if ($apps === null) return;
+        $this->settings->set($page, $this->gateway, 'apps', json_encode($apps), false, null, true);
+    }
+
+    /** @return array<string, ?string>|null ang naitabing token ng page kada Meta app ng gateway; null = hindi pa alam */
+    public function apps(string $page): ?array
+    {
+        $v = json_decode((string) $this->settings->get($page, $this->gateway, 'apps'), true);
+
+        return is_array($v) ? $v : null;
     }
 
     private function why(?Response $res): string

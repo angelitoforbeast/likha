@@ -1557,3 +1557,9 @@ Minor review findings, accepted (none is on a new untrusted path, and no page us
 - **"Add to group" in Manage in Edit now defaults to the top (running) group**, not the first one made. Reason: follows the new running-first order; the select still lists every group.
 - **No test of the skip continuation (`/chatbot/test/skip`) with an ad.** Reason: it calls the same `testAd()` as the send, which is tested.
 - **Rows far from the view are light stand-ins, so the browser's find-in-page sees only the rows near the view** (page names are always there). Reason: the speed fix of S-217.1; the Search filter finds pages.
+
+## Gateway address per page (spec 223), accepted for now
+
+- **The watcher's burst hold is per gateway, not per address** (`forbeast-watch:hold:forbeast`): a burst of no answer on one address also holds the pages on the other address of the same gateway. Reason: the hold only delays a move by `hold_minutes`; a per-address hold changes the burst keys, the held rows and the screens that read them, which is more than this spec needs. Suggestion: key the burst and the hold by `Gateways::route()` when the failover spec lands.
+- **A comment reply answered with 409 `app_not_connected` shows the gateway's code** (`Forbeast said "app_not_connected: …"`), not the send wording. Reason: the spec asks the wording for sends; comment replies already show the gateway's code.
+- **Spec 194's second gateway (`incepxionbot`, `INCEPXIONBOT_*`) and this spec's address (`chatbot.gateway_app`) can both reach incepxionbot.com.** Reason: the first is a separate gateway (own key, tokens, webhook, automatic switch), the second the same gateway on another address (same key and token). Suggestion: once every page runs through the shared gateway, retire one of the two.

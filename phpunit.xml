@@ -34,5 +34,8 @@
         <env name="GATEWAY_TYPING" value="false"/>
         <!-- Ang Speed screen ay nagbabasa sa Forbeast kapag naka-link: walang site key sa tests, para walang totoong tawag kahit naka-link ang .env; ang test ang nagli-link (config). -->
         <env name="FORBEAST_SITE_KEY" value=""/>
+        <!-- Isang address lang ng gateway at walang IPv4-only sa tests: ang test ang nagse-set (config). -->
+        <env name="GATEWAY_URLS" value=""/>
+        <env name="GATEWAY_FORCE_IPV4" value="false"/>
     </php>
 </phpunit>

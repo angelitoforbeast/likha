@@ -29,7 +29,7 @@ class GatewayTyping
             $gw = Gateways::active($pageName);
             $c = Gateways::config($gw);
             if (!$c['typing']) return;
-            $url = $c['url'];
+            $url = $c['url'] !== '' ? Gateways::pageUrl($gw, $pageName) : ''; // ang address ng page
             $key = app(ForbeastPageSetup::class)->on($gw)->token($pageName);
             if ($key === '') $key = $c['key'];
             if ($url === '' || $key === '') return;
@@ -54,7 +54,7 @@ class GatewayTyping
     /** Ang tawag mismo (ang path at body ng Forbeast 028 ay dito lang). true = 2xx. */
     private static function call(string $url, string $key, string $pageId, string $psid): bool
     {
-        return Http::withToken($key)->acceptJson()->connectTimeout(self::TIMEOUT)->timeout(self::TIMEOUT)
+        return Http::withToken($key)->acceptJson()->withOptions(Gateways::httpOptions())->connectTimeout(self::TIMEOUT)->timeout(self::TIMEOUT)
             ->post($url . '/v1/pages/' . rawurlencode($pageId) . '/typing', ['psid' => $psid])->successful();
     }
 

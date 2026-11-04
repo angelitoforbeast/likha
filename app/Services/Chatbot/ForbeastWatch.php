@@ -145,6 +145,22 @@ class ForbeastWatch
     }
 
     /**
+     * Ang huling resulta ng padala mula sa Meta (send_status ng gateway). Tinatanggap muna ng gateway ang padala (afterSend
+     * ay "sent"), saka pa lang sumasagot ang Meta: ang palya ng koneksyon ng page roon (token na binawi #190, permiso #200,
+     * rate limit) ay lipat agad, gaya ng palya sa mismong padala. Ang dahilan sa customer (#551, #10) ay hindi binibilang;
+     * ang #2022 (page na pinagbawalan ng Meta) ay pareho sa ibang daan, kaya hawak ang follow-up (PageRestriction), walang lipat.
+     */
+    public function afterResult(int|string $pageId, ?string $gateway, ?int $code, ?int $sub): void
+    {
+        $page = BotcakeChat::pageMap()[(string) $pageId] ?? null;
+        if ($page === null || $gateway === null || !Gateways::valid($gateway)) return;
+        if (ChatbotProvider::name($page) !== ChatbotProvider::GATEWAY || $gateway !== Gateways::active($page)) return;
+        if ($code === null || in_array($code, self::CUSTOMER_CODES, true) || in_array($sub, self::CUSTOMER_SUBCODES, true)) return;
+        if ($code === 2022 || !in_array($code, self::CONNECTION_CODES, true)) return;
+        $this->switch($page, 'connection_error', Gateways::label($gateway) . ' send failed at Meta (Meta #' . $code . ')', [], [], $gateway);
+    }
+
+    /**
      * Ang walang sagot ng page sa burst ng gateway (ang mga page na walang sagot sa huling burst_seconds). Ang page na umabot
      * sa bilang ng no_answer ($reached) habang burst_pages o higit pa ang nasa burst: hold ang gateway nang hold_minutes (isang
      * "held" event) sa halip na lipat, dahil ang sabay-sabay na walang sagot ay sira sa daan, hindi sa page. Ang hold na
@@ -327,7 +343,7 @@ class ForbeastWatch
     {
         $gw = $gateway ?? Gateways::active($page);
         $own = $gw === Gateways::active($page);
-        $url = Gateways::url($gw);
+        $url = Gateways::url($gw) !== '' ? Gateways::pageUrl($gw, $page) : ''; // ang address ng page
         $pageId = trim((string) $this->settings->get($page, 'botcake', 'page_id'));
         // Sariling token lang ng page: ang system key (GATEWAY_KEY, fbs_) ay 404 sa /v1/pages/{id}, kaya hindi ito sukatan.
         $key = app(ForbeastPageSetup::class)->on($gw)->token($page);
@@ -335,7 +351,7 @@ class ForbeastWatch
         $l = Gateways::label($gw);
 
         try {
-            $res = Http::withToken($key)->acceptJson()->connectTimeout(3)->timeout(5)->get($url . '/v1/pages/' . rawurlencode($pageId));
+            $res = Http::withToken($key)->acceptJson()->withOptions(Gateways::httpOptions())->connectTimeout(3)->timeout(5)->get($url . '/v1/pages/' . rawurlencode($pageId));
         } catch (ConnectionException) {
             $res = null;
         } catch (Throwable $e) {
@@ -343,6 +359,12 @@ class ForbeastWatch
             $res = null;
         }
         if ($res !== null && $res->successful()) {
+            // Ang token ng page kada Meta app (Bot N sa "Replies via"): itinatabi kapag nagbago, para ang mga pili ay totoo.
+            try {
+                app(ForbeastPageSetup::class)->on($gw)->keepApps($page, ForbeastPageSetup::appStatuses($res));
+            } catch (Throwable $e) {
+                report($e);
+            }
             // Ang inbound_lag_seconds (bagong Forbeast lang): ang tagal ng mensahe sa gateway bago ipasa. Wala = hindi alam.
             $lag = $res->json('inbound_lag_seconds');
             $lag = is_numeric($lag) ? max(0, (int) $lag) : null;

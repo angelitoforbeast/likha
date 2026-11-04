@@ -280,9 +280,10 @@ class Inbox
         foreach ($echo->sortBy('id') as $e) {
             $d = json_decode((string) $e->detail, true) ?: [];
             $at = Carbon::parse($e->created_at);
-            $label = ChatEchoes::label($d['sender'] ?? null);
+            // Ang echo mula sa ibang address ng forbeast gateway (GATEWAY_APP_IDS) ay forbeast din, may label ng address.
+            [$sender, $label] = ChatEchoes::who($d);
             // Ang sagot ng Likha ay sa daan nito (via forbeast o botcake = ang app ng echo); ang lumang row na walang via: alinman.
-            $fits = fn ($o) => abs($o[0] - $at->getTimestamp()) <= self::ECHO_MATCH_SECONDS && ($o[2] === null || $o[2] === ($d['sender'] ?? null))
+            $fits = fn ($o) => abs($o[0] - $at->getTimestamp()) <= self::ECHO_MATCH_SECONDS && ($o[2] === null || $o[2] === $sender)
                 && (in_array($d['hash'] ?? '', $o[1], true) || (($d['text'] ?? '') === '[Image]' && in_array('image', $o[1], true)));
             $i = collect($outs)->filter($fits)->keys()->first();
             if ($i !== null) {
@@ -340,7 +341,9 @@ class Inbox
             $items[] = $base + ['side' => 'out', 'messages' => $messages, 'manual' => $r->kind === 'manual',
                 'by' => $r->kind === 'manual' ? ($users[$r->user_id] ?? 'You') : 'Bot',
                 // Ang bot na nagdala (via); ang lumang row na wala nito: ang via ng Results (tags), kung mayroon.
-                'via' => $r->via ?? (is_array($r->tags) ? ($r->tags['via'] ?? null) : null)];
+                'via' => $r->via ?? (is_array($r->tags) ? ($r->tags['via'] ?? null) : null)]
+                // Ang address na dinaanan (hal. "Incepxion") kapag hindi ang default.
+                + ChatbotProvider::viaLabelColumn($r->via, $r->route);
         }
         $flows = $ev->isEmpty() ? [] : ChatbotFlow::whereIn('id', $ev->pluck('flow_id')->filter()->unique()->values())->pluck('name', 'id')->all();
         foreach ($ev as $e) {

@@ -295,7 +295,8 @@
     // Ang bot na naghatid o nagdala ng bawat mensahe (via); wala = lumang row na hindi tiyak.
     const VIA = {botcake: 'Botcake', forbeast: 'Forbeast'};
     VIA.incepxionbot = 'Incepxionbot'; // ang pangalawang gateway
-    const viaText = x => x.via && VIA[x.via] ? 'via ' + VIA[x.via] : '';
+    // via_label: ang address na dinaanan ng sagot (hal. Incepxion) kapag hindi ang default.
+    const viaText = x => x.via_label ? 'via ' + x.via_label : (x.via && VIA[x.via] ? 'via ' + VIA[x.via] : '');
     function bubble(x) {
         const time = el('div', {class: 'ib-time mt-0.5 text-[10px] text-slate-500', text: clock(x.at) + (x.side === 'in' && viaText(x) ? ' · ' + viaText(x) : '')});
         if (x.side === 'system' || x.side === 'event') {

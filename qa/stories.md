@@ -4200,3 +4200,141 @@ Tests (`tests/Feature/Item/`): `StockFromFirstStockInTest`, `NexusStockHistoryTe
 | S-222.10.9 | negative | The nightly closed-day refresh is its own entry, `stock:warm --closed-days=7` daily at 02:55 Manila (withoutOverlapping); a failed Nexus daily pass does not skip it, and `nexus:sync-stock --days=7` no longer refreshes closed days (it still warms after success) | `test_the_closed_day_refresh_has_its_own_daily_schedule_at_0255_separate_from_the_nexus_pass`, `test_the_nightly_closed_day_warm_refreshes_the_last_7_closed_days_even_when_nexus_fails`, `test_the_nexus_daily_pass_no_longer_refreshes_closed_days_but_still_warms_after_success` | 2026-11-03 passed |
 | S-222.10.10 | negative | On the Suppliers tab a Not in Nexus item's DOI shows "—" with the tooltip, never "kulang N araw" | `test_B1_the_suppliers_tab_shows_not_in_nexus_and_mutes_doi_order_by_and_qty` | 2026-11-03 passed |
 | S-222.10.11 | edge | The closed-range returned query has `FORCE INDEX (idx_from_jnts_signing_status)` only on MySQL with the index present (information_schema checked once, cached 24 h); no hint when the check says no, when information_schema cannot be read, or on sqlite; results are identical either way | `StockIndexHintTest`, `ReturnedQueryPerfTest` (opt-in, MySQL: identical rows) | 2026-11-03 passed |
+
+## Spec 223: gateway address per page, and why a send got no answer
+
+### S-223.1 Gateway addresses are config (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-223.1.1 | happy | Given `GATEWAY_URLS="incepxion=https://…/api"`, the addresses are `forbeast` = `GATEWAY_URL` and `incepxion`, with the path prefix kept and the trailing `/` dropped | `test_S_223_1_the_addresses_come_from_config_and_without_a_list_nothing_changes` | pass |
+| S-223.1.2 | negative | Bad entries (upper case key, non-http URL, no `=`) are skipped; a `forbeast=` entry never replaces `GATEWAY_URL` | same | pass |
+| S-223.1.3 | edge | Given no `GATEWAY_URLS`, a page set to `incepxion` still sends to `GATEWAY_URL` (today's behaviour) | same | pass |
+
+### S-223.2 A page's route (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-223.2.1 | happy | A page without `chatbot.gateway_app` sends to the default URL | `test_S_223_2_a_page_on_incepxion_makes_every_page_call_there_and_a_page_without_the_setting_uses_the_default` | pass |
+| S-223.2.2 | happy | A page set to `incepxion` sends, types, replies to comments (public and private), is health-checked and retested on the incepxion URL, with the same page token; site calls and the gateway choice keep the default | same | pass |
+| S-223.2.3 | negative | An unknown key uses the default URL and logs one warning | `test_S_223_2b_an_unknown_key_uses_the_default_and_warns_once` | pass |
+| S-223.2.4 | edge | Changing or clearing the setting takes effect on the next call | `test_S_223_2c_changing_the_setting_takes_effect_on_the_next_call` | pass |
+| S-223.2.5 | happy | A sequence send (sequence pool) of a page set to `incepxion` goes to the incepxion URL | `test_S_223_2d_and_6c_a_sequence_send_uses_the_page_address_ipv4_only_and_records_why_it_got_no_answer` | pass |
+
+### S-223.3 409 app_not_connected (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-223.3.1 | negative | A 409 `app_not_connected` is a failed send "This page is not connected to the incepxion Meta app on the gateway (HTTP 409)", one call, no other address | `test_S_223_3_a_409_app_not_connected_is_an_answer_with_a_clear_reason_and_no_retry` | pass |
+| S-223.3.2 | edge | Three of them do not trip the watcher's "no answer" (the page stays on the gateway, no auto-switch row); other 409s read as before | same | pass |
+
+### S-223.4 Choose it on the page (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-223.4.1 | happy | With two addresses the Pages data lists them by name and the row's address; saving one records the user | `test_S_223_4_the_pages_screen_shows_and_sets_the_address_only_with_more_than_one` | pass |
+| S-223.4.2 | negative | An unknown key or an unlisted page is 422 and changes nothing | same | pass |
+| S-223.4.3 | edge | With one address nothing is listed and saving is 422 | same | pass |
+
+### S-223.5 The watcher and the move back (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-223.5.1 | happy | A page on `incepxion` whose sends get no answer moves to Botcake, comes back after 30 healthy minutes with `chatbot.gateway_app` unchanged, and its next send goes to the incepxion URL | `test_S_223_5_the_move_to_botcake_and_back_keeps_the_address` | pass |
+
+### S-223.6 Why a send got no answer (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-223.6.1 | happy | A ConnectionException records "Gateway did not answer (HTTP 0) · cURL error 28: … · connect 0.01 s, total 10.00 s" and one log line with errno, host, route and times, never the token or the message text | `test_S_223_6_a_send_without_an_answer_records_the_curl_error_and_times_never_the_token_or_text` | pass |
+| S-223.6.2 | edge | Without handler context the cURL part of the message is used, without the URL | same | pass |
+| S-223.6.3 | happy | `GATEWAY_FORCE_IPV4` on: sends, typing, comment replies and health checks are IPv4 only; off by default | `test_S_223_6b_force_ipv4_makes_the_gateway_calls_ipv4_only` | pass |
+| S-223.6.4 | happy | The sequence pool records the same detail and is IPv4 only with the switch | `test_S_223_2d_and_6c_a_sequence_send_uses_the_page_address_ipv4_only_and_records_why_it_got_no_answer` | pass |
+
+## Spec 224: show the address a reply really went through
+
+### S-224.1 The flow variable (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-224.1.1 | happy | Given a page on the Forbeast gateway with no address, `{{replies_via}}` is "Forbeast" (with a gateway chat and without a chat) | `test_S_224_1_1_a_page_on_forbeast_without_an_address_is_forbeast` | pass |
+| S-224.1.2 | happy | Given a page on the Forbeast gateway with `gateway_app=incepxion`, `{{replies_via}}` is "Incepxion" | `test_S_224_1_2_a_page_on_the_incepxion_address_is_incepxion` | pass |
+| S-224.1.3 | negative | Given a page on Botcake (or a chat Botcake delivered), it stays "Botcake" even with an address set | `test_S_224_1_3_botcake_stays_botcake_even_with_an_address` | pass |
+| S-224.1.4 | edge | Given no `GATEWAY_URLS`, a page set to `incepxion` is still "Forbeast"; the incepxionbot gateway keeps "Incepxionbot" | `test_S_224_1_4_without_gateway_urls_the_label_is_todays` | pass |
+| S-224.1.5 | happy | The variable's help text names the address ("Incepxion") | `test_S_224_1_5_the_variable_help_names_the_address` | pass |
+
+### S-224.2 Each reply records its address (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-224.2.1 | happy | A flow send through the Forbeast gateway stores `route` = the address called (`forbeast` by default, `incepxion` when set); a Botcake send and a sheet row store null; `via` is unchanged | `test_S_224_2_1_a_flow_send_records_the_address_it_went_through` | pass |
+| S-224.2.2 | happy | A manual Inbox reply on a page set to `incepxion` stores `via=forbeast`, `route=incepxion` | `test_S_224_2_2_an_inbox_reply_records_the_address` | pass |
+| S-224.2.3 | negative | Only a `forbeast` send stores an address (Botcake and the incepxionbot gateway store null); a row written without one stays null = default | `test_S_224_2_3_only_a_forbeast_send_stores_an_address_and_old_rows_stay_null` | pass |
+| S-224.2.4 | happy | A sequence send (sequence pool) of a page set to `incepxion` stores `route=incepxion` | `test_S_224_2_4_a_sequence_send_records_the_address_it_went_through` | pass |
+| S-224.2.5 | edge | The address is saved on the ticket before the call, so a send finished by the sweep after a crash still stores it | `test_S_224_2_5_a_sequence_send_finished_after_a_crash_keeps_the_address_from_the_call` | pass |
+| S-224.2.6 | edge | A sequence send on the default address stores `forbeast`; a Botcake sequence send stores null and its ticket result has no `route` key | `test_S_224_2_6_a_sequence_send_on_the_default_address_records_forbeast_and_a_botcake_one_records_nothing` | pass |
+| S-224.2.7 | happy | The migration adds `route` VARCHAR(30) NULL with `ALGORITHM=INSTANT` on MySQL (fails rather than copying the table), is idempotent and has a down | `test_S_224_2_7_the_migration_adds_a_nullable_column_instantly_and_has_a_down` | pass |
+
+### S-224.3 The Inbox and other "via" labels (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-224.3.1 | happy | The Inbox thread shows "via Incepxion" for a reply whose recorded address is incepxion; the default address, Botcake and old rows keep today's label and data (no `via_label`) | `test_S_224_3_1_the_inbox_says_via_incepxion_only_for_a_reply_that_went_there` | pass |
+| S-224.3.2 | happy | A manual Inbox reply through incepxion comes back labelled "Incepxion" | `test_S_224_3_2_a_manual_inbox_reply_through_incepxion_comes_back_labelled` | pass |
+| S-224.3.3 | happy | The Replies screen (list and detail) shows "Incepxion" for that reply; the via filter is unchanged | `test_S_224_3_3_the_replies_screen_labels_the_address_too` | pass |
+
+## Spec 226: the Incepxion app's echoes are the bot's own replies
+
+### S-226.1 An echo from a gateway address's app is the bot's (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-226.1.1 | happy | Given `GATEWAY_APP_IDS="incepxion=2067128400607287"`, an echo from that app folds into the matching reply (sender "Bot (Incepxion)", stored `sender=forbeast`, `route=incepxion`); an echo from 1115162827653315 still folds as "Bot (Forbeast)"; no "Other app" bubble | `test_S_226_1_1_an_incepxion_echo_folds_into_the_bot_reply_and_a_forbeast_echo_is_unchanged` | pass |
+| S-226.1.2 | negative | Given `GATEWAY_APP_IDS` unset, the same echo is today's: stored `other`, its own "Other app" bubble | `test_S_226_1_2_without_gateway_app_ids_the_same_echo_is_todays_other_app` | pass |
+| S-226.1.3 | edge | An unmatched echo from that app (typed in a tool) shows as "Bot (Incepxion)"; so does one stored before the setting (read from its app id), and `ChatEchoes::latest` says forbeast / "Bot (Incepxion)" | `test_S_226_1_3_an_unmatched_echo_from_that_app_is_bot_incepxion_and_so_is_one_stored_before_the_setting` | pass |
+| S-226.1.4 | edge | `GATEWAY_APP_IDS` reads like `GATEWAY_URLS`: space or comma separated, `forbeast=` and malformed entries skipped, unset = none | `test_S_226_1_4_gateway_app_ids_reads_like_gateway_urls` | pass |
+
+### S-226.2 Bot Health counts these echoes as the bot's (P2)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-226.2.1 | happy | A Forbeast-app echo and an Incepxion-app echo to one customer within 60 s are not a double; an Incepxion-app echo and a Botcake echo are, labelled "Bot (Incepxion) + Botcake" | `test_S_226_2_1_bot_health_counts_an_incepxion_echo_as_the_bot_not_another_app` | pass |
+## Spec 227: a send confirmation that arrives before its reply row
+
+### S-227.2 Keep and retry (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-227.2.1 | happy | Given a `send_status` whose `client_ref` has no reply yet, it is not counted unknown but sent again in 5 s; when the row appears, the retry confirms it with the gateway's `sent_at` | `test_S_227_2_1_a_send_status_before_its_reply_row_is_applied_when_the_row_appears` | pass |
+| S-227.2.2 | negative | Given the row never appears, it is retried after 5, 15, 40 and 60 s (try 1 to 4), then counted `send_status_unknown` once | `test_S_227_2_2_after_the_last_try_it_is_counted_unknown_and_not_retried_again` | pass |
+| S-227.2.3 | edge | Given the reply is already confirmed, a repeat changes nothing, is counted `send_status_repeat` and is not retried | `test_S_227_2_3_a_repeat_changes_nothing_and_is_not_retried` | pass |
+| S-227.2.4 | edge | Given an event without a `client_ref` and no reply near it, it is unknown at once (no retry) | `test_S_227_2_4_an_event_without_a_client_ref_and_no_match_is_unknown_at_once` | pass |
+| S-227.2.5 | edge | The retried event has no `queued_at` (not read as queue lag) and is otherwise the same event; an event queued by the live release (no `send_try`) is try 0 | `test_S_227_2_5_the_retry_carries_no_queue_time_and_an_event_from_the_live_release_is_try_zero` | pass |
+
+### S-227.3 Heal the last 24 h (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-227.3.1 | happy | Without `--apply`, the command prints the count of unconfirmed gateway replies of the last 24 h (accepted, with a `client_ref`), calls nothing and writes nothing | `test_S_227_3_1_the_dry_run_counts_the_candidates_and_asks_and_writes_nothing` | pass |
+| S-227.3.2 | happy | With `--apply`, each candidate's `client_ref` is posted again with its PSID and messages; a duplicate `sent` or `failed` fills the confirmation like a live event; a duplicate still `sending` is left; counts are printed | `test_S_227_3_2_apply_fills_the_final_state_from_the_duplicate_answer_and_leaves_a_send_still_going` | pass |
+| S-227.3.3 | negative | An answer that is not a duplicate (the gateway queued it as new) stops the run at once, exit 1, nothing more is asked | `test_S_227_3_3_an_answer_that_is_not_a_duplicate_stops_the_run` | pass |
+## Spec 225: one "Replies via" choice, sticky columns that keep their width, CPP rows per ad group
+
+### S-225.1 One "Replies via" dropdown (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-225.1.1 | happy | Given two gateway addresses, choosing Bot 2 writes `chatbot.provider=gateway` and `chatbot.gateway_app=incepxion` in one save, both with the user | `test_S_225_1_1_bot_2_sets_the_provider_and_the_address_in_one_save_with_the_user` | pass |
+| S-225.1.2 | happy | Choosing Botcake keeps the address | `test_S_225_1_2_botcake_keeps_the_address` | pass |
+| S-225.1.3 | negative | An unknown address or a page not on the list writes nothing for any page | `test_S_225_1_3_a_bad_address_writes_nothing_for_any_page` | pass |
+| S-225.1.4 | happy | The bulk Apply sets provider and address for every selected page | `test_S_225_1_4_the_bulk_apply_sets_both_for_every_selected_page` | pass |
+| S-225.1.5 | edge | With one address the choice is Botcake / Forbeast as before; an address is refused | `test_S_225_1_5_with_one_address_the_choice_is_botcake_or_forbeast_as_before` | pass |
+| S-225.1.6 | happy | The screen has one Replies via select (Bot N labels) and no "App:" select | `test_S_225_1_6_the_screen_has_one_replies_via_select_and_no_app_select` | pass |
+
+### S-225.2 Pinned columns keep their width (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-225.2.1 | happy | Each pinned column has one width (min = max) and long text wraps inside it | `test_S_225_2_1_each_pinned_column_has_one_fixed_width` | pass |
+| S-225.2.2 | happy | Each left offset is the sum of the widths before it | `test_S_225_2_2_each_left_offset_is_the_sum_of_the_widths_before_it` | pass |
+| S-225.2.3 | edge | At 1366 and 1920 px, at rest and scrolled, with a long page and flow name, the pinned cells keep 192/176/160/224 px and touch without overlap | browser check (result file) | pass |
+
+### S-225.3 CPP rows per ad group (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-225.3.1 | happy | An ad-based page with two ad groups shows the page row, 2 group rows, "Not in a group" and "Unknown ad"; they add up to the page row | `test_S_225_3_1_two_ad_groups_and_the_rest_add_up_to_the_page_row` | pass |
+| S-225.3.2 | negative | A page-based page (even with groups saved) has no group rows | `test_S_225_3_2_a_page_based_page_has_no_group_rows` | pass |
+| S-225.3.3 | edge | A group with spend and no orders has no CPP (as the page row) | `test_S_225_3_3_a_group_with_spend_and_no_orders_has_no_cpp` | pass |
+| S-225.3.4 | edge | Ad set and campaign IDs in a group take their ads; the ad itself wins | `test_S_225_3_4_ad_set_and_campaign_ids_in_a_group_take_their_ads_and_the_ad_itself_wins` | pass |
+| S-225.3.5 | happy | The rows are drawn under the page, escaped, and left out of Copy Table | `test_S_225_3_5_the_page_draws_the_group_rows_under_the_page_and_keeps_them_out_of_the_copy` | pass |
+
+### S-225.4 Pages and their ad groups read as blocks (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-225.4.1 | happy | On /chatbot/pages: 2px darker line between pages, 1px lighter line between ad groups, sub-rows indented with a left bar on a faint background | `test_S_225_4_1_pages_ad_groups_and_their_rows_read_as_one_block` | pass |
+| S-225.4.2 | happy | The CPP group rows follow the same rule | `test_S_225_4_2_the_cpp_group_rows_follow_the_same_grouping_rule` | pass |

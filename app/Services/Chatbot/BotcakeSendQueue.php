@@ -425,13 +425,13 @@ class BotcakeSendQueue
         return DB::table(self::TABLE)->where('customer', self::chatbotCustomer($pageId, $psid))->whereIn('status', ['pending', 'sending'])->exists();
     }
 
-    /** Ang called() ng sequence: itinatala rin ang daan at ang client_ref, para sa talaan kahit mamatay ang pool pagkatapos ng tawag. */
-    public static function calledSequence(object $row, string $owner, string $via, string $ref): bool
+    /** Ang called() ng sequence: itinatala rin ang daan, ang address (route, sa forbeast) at ang client_ref, para sa talaan kahit mamatay ang pool pagkatapos ng tawag. */
+    public static function calledSequence(object $row, string $owner, string $via, string $ref, ?string $route = null): bool
     {
         // Kasama ang may hawak (active, ang ticket na ito): ang sagot ng customer na naisulat sa pagitan ay humihinto sa padala.
         return DB::table(self::TABLE)->where('id', $row->id)->where('status', 'sending')->where('claimed_by', $owner)->whereNull('called_at')
             ->whereExists(fn ($q) => $q->select(DB::raw(1))->from('chatbot_sequence_subscriptions')->where('send_request_id', $row->request_id)->where('status', 'active'))
-            ->update(['called_at' => now(), 'result' => json_encode(['via' => $via, 'client_ref' => $ref]), 'updated_at' => now()]) === 1;
+            ->update(['called_at' => now(), 'result' => json_encode(['via' => $via, 'client_ref' => $ref] + ($route !== null ? ['route' => $route] : [])), 'updated_at' => now()]) === 1;
     }
 
     /** Ang ticket na kasama ng resume job ng sequence. */
@@ -441,7 +441,7 @@ class BotcakeSendQueue
     }
 
     /**
-     * Ang resulta ng padala ng sequence ($o: status sent | failed | skipped, error, http, raw, via, ref, check) ng ticket na
+     * Ang resulta ng padala ng sequence ($o: status sent | failed | skipped, error, http, raw, via, ref, route, check) ng ticket na
      * hawak pa ng $owner (null = ang pending, para sa sweep): ang talaan (chatbot_replies, gaya ng padalang naghintay; ang
      * skipped ng pagsusuri bago ang tawag, "check", ay walang row), saka ang resume. false = hindi na hawak.
      */
@@ -452,6 +452,7 @@ class BotcakeSendQueue
         else $q->where('status', 'pending');
         $called = isset($o['via'], $o['ref']) ? [] : (array) json_decode((string) DB::table(self::TABLE)->where('id', $row->id)->value('result'), true);
         $o += ['via' => $called['via'] ?? ChatbotProvider::BOTCAKE, 'ref' => $called['client_ref'] ?? null, 'at' => now()->format('Y-m-d H:i:s')];
+        if (!isset($o['route']) && isset($called['route'])) $o['route'] = $called['route'];
         $ok = $q->update(['status' => $o['status'] === 'failed' ? 'failed' : 'done', 'result' => json_encode($o, JSON_UNESCAPED_UNICODE),
             'error' => $o['error'] === null ? null : mb_substr($o['error'], 0, 255), 'http' => $o['http'], 'done_at' => now(), 'updated_at' => now()]);
         if ($ok !== 1) return false;
@@ -459,7 +460,7 @@ class BotcakeSendQueue
             $payload = (array) json_decode((string) $row->payload, true);
             BotcakeOutbox::record((int) $row->page_id, (int) $row->psid, null, $row->flow_id === null ? null : (int) $row->flow_id, (string) $row->node_id, 'send',
                 (array) ($payload['messages'] ?? []), $o['status'], $o['error'], $o['http'], $o['raw'] ?? null, is_array($payload['tags'] ?? null) ? $payload['tags'] : null,
-                $o['via'], $o['ref']);
+                $o['via'], $o['ref'], $o['route'] ?? null);
         }
         ResumeChatbotSequenceSend::dispatch(self::sequenceTicket($row));
 

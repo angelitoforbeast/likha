@@ -91,7 +91,7 @@ class FacebookName
         foreach (Gateways::ALL as $gw) {
             $setup = $this->forbeast->on($gw);
             if (in_array($gw, $skip, true) || $setup->token($page) === '') continue;
-            $p = $setup->probe($pageId, $setup->token($page));
+            $p = $setup->probe($pageId, $setup->token($page), $page);
             if ($this->fromProbe($page, $pageId, $p, $gw)) return ['name' => $p['name'], 'source' => $gw];
         }
 

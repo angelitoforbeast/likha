@@ -4,6 +4,13 @@
   <x-slot name="heading">CPP Summary</x-slot>
 
   <style>
+    /* Ad-based na page: ang mga row ng ad group ay nasa ilalim ng row ng page (nakausog, maputlang background, guhit
+       sa kaliwa); makapal na guhit sa pagitan ng mga page, manipis at mas maputla sa pagitan ng mga ad group. */
+    #summaryOfAdsTable tr.cpp-page-row:not(:first-child) > td { border-top: 2px solid #94a3b8; }
+    #summaryOfAdsTable tr.cpp-ag-row > td { background: #f8fafc; }
+    #summaryOfAdsTable tr.cpp-ag-row > td:first-child { padding-left: 1.75rem; box-shadow: inset 3px 0 0 #cbd5e1; }
+    #summaryOfAdsTable tr.cpp-ag-row + tr.cpp-ag-row > td { border-top: 1px solid #cbd5e1; }
+
     /* ✅ Custom searchable dropdown (Page) */
     .page-dd { position: relative; width: 260px; }
     .page-dd-btn {
@@ -214,6 +221,26 @@
     const allDates  = @json($allDates); // full selected range (start→end)
     const srvStart  = @json($start ?? null);
     const srvEnd    = @json($end ?? null);
+    // Ad-based na page => [{label, kind, cells: {date: cell}}]: ang mga row kada ad group (gaya ng cell ng rawData).
+    const adGroupRows = @json($adGroupRows ?? []);
+    const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+
+    // Ang kabuuan ng isang row sa mga araw: gaya ng row ng page. gate = ang mga cell ng page: ang orders at TCPR ay
+    // binibilang lang sa araw na may gastos ang page (hindi ang group), kaya ang mga row ng group ay nagdaragdag
+    // hanggang sa row ng page.
+    function rowSums(cells, filteredDates, gate) {
+      let sumSpent=0, sumOrders=0, wImps=0, wCPI=0, tcprFail=0;
+      filteredDates.forEach(date => {
+        const r = cells[date] || {};
+        const spentDay = gate ? (gate[date] || {}).spent : r.spent;
+        if (typeof r.spent === 'number') sumSpent += r.spent;
+        if (spentDay && r.orders) sumOrders += r.orders;
+        if (r.spent && r.cpm) wImps += r.spent / r.cpm;
+        if (r.spent && r.cpi) wCPI  += r.spent / r.cpi;
+        if (spentDay && r.tcpr_fail) tcprFail += r.tcpr_fail;
+      });
+      return {sumSpent, sumOrders, wImps, wCPI, tcprFail};
+    }
 
     // --- Elements ---
     const startDateInput   = document.getElementById('startDate');
@@ -451,7 +478,11 @@
           <div class="w-fit max-w-full">
           <div class="flex justify-between items-center gap-6 mb-2">
             <h2 class="font-bold text-lg">${title}</h2>
-            <button onclick="copySummaryOfAds()" class="bg-blue-500 text-white px-3 py-1 rounded text-sm hover:bg-blue-600 shrink-0">Copy Table</button>
+            <div class="flex gap-2 shrink-0">
+              <button onclick="copySummaryOfAds()" class="bg-blue-500 text-white px-3 py-1 rounded text-sm hover:bg-blue-600">Copy Table</button>
+              <button onclick="copySummaryOfAds(true)" class="bg-white text-blue-600 border border-blue-500 px-3 py-1 rounded text-sm hover:bg-blue-50"
+                title="Kasama ang row ng bawat ad group sa ilalim ng page">Copy with ad groups</button>
+            </div>
           </div>
           <table id="summaryOfAdsTable" class="w-full border text-sm mb-6">
             <thead class="bg-gray-200">
@@ -487,15 +518,7 @@
             if (!hasItem) return;
           }
 
-          let sumSpent=0, sumOrders=0, wImps=0, wCPI=0, tcprFail=0;
-          filteredDates.forEach(date => {
-            const r = data[date] || {};
-            if (typeof r.spent === 'number') sumSpent += r.spent;
-            if (r.spent && r.orders) sumOrders += r.orders;
-            if (r.spent && r.cpm) wImps += r.spent / r.cpm;
-            if (r.spent && r.cpi) wCPI  += r.spent / r.cpi;
-            if (r.spent && r.tcpr_fail) tcprFail += r.tcpr_fail;
-          });
+          const {sumSpent, sumOrders, wImps, wCPI, tcprFail} = rowSums(data, filteredDates, null);
 
           if (sumSpent > 0) {
             const cpp  = sumOrders > 0 ? sumSpent / sumOrders : null;
@@ -511,7 +534,7 @@
             const pagePriceContent = modePriceText(pageModeLines);
 
             summaryHtml += `
-              <tr>
+              <tr class="cpp-page-row">
                 <td class="border px-2 py-1">${page}</td>
                 <td class="border px-2 py-1">₱${sumSpent.toFixed(2)}</td>
                 <td class="border px-2 py-1">${sumOrders}</td>
@@ -523,6 +546,33 @@
                 <td class="border px-2 py-1 whitespace-pre align-top text-right">${pagePriceContent}</td>
               </tr>
             `;
+
+            // Ad-based na page: isang row kada ad group sa ilalim (hindi kasama sa TOTAL at sa Copy Table).
+            // Ang ad group na walang spend at walang order sa mga petsang ito ay hindi ipinapakita; may order, kasama kahit ₱0.
+            (adGroupRows[page] || []).forEach(g => {
+              const s = rowSums(g.cells, filteredDates, data);
+              if (s.sumSpent === 0 && s.sumOrders === 0) return;
+              const gCpp  = s.sumOrders > 0 ? s.sumSpent / s.sumOrders : null;
+              const gCpi  = s.wCPI  > 0 ? s.sumSpent / s.wCPI  : null;
+              const gCpm  = s.wImps > 0 ? s.sumSpent / s.wImps : null;
+              const gTcpr = s.sumOrders > 0 ? (s.tcprFail / s.sumOrders) : null;
+              const gPairs = {};
+              filteredDates.forEach(d => { gPairs[d] = ((g.cells[d] || {}).item_pairs) || []; });
+              const gLines = dailyModeLines(gPairs, filteredDates);
+              summaryHtml += `
+                <tr class="cpp-ag-row text-xs" data-ag-kind="${esc(g.kind)}">
+                  <td class="border px-2 py-1">${esc(g.label)}</td>
+                  <td class="border px-2 py-1">₱${s.sumSpent.toFixed(2)}</td>
+                  <td class="border px-2 py-1">${s.sumOrders}</td>
+                  <td class="border px-2 py-1">${gCpp != null ? `₱${gCpp.toFixed(2)}` : '—'}</td>
+                  <td class="border px-2 py-1">${gCpi != null ? `₱${gCpi.toFixed(2)}` : '—'}</td>
+                  <td class="border px-2 py-1">${gCpm != null ? `₱${gCpm.toFixed(2)}` : '—'}</td>
+                  <td class="border px-2 py-1">${gTcpr != null ? tcprBadge(gTcpr * 100) : '—'}</td>
+                  <td class="border px-2 py-1 whitespace-pre align-top">${esc(modeItemsText(gLines))}</td>
+                  <td class="border px-2 py-1 whitespace-pre align-top text-right">${modePriceText(gLines)}</td>
+                </tr>
+              `;
+            });
 
             totalSpent    += sumSpent;
             totalOrders   += sumOrders;
@@ -858,11 +908,12 @@
       renderTables(dates, selectedPages);
     }
 
-    function copySummaryOfAds() {
+    function copySummaryOfAds(withAdGroups = false) {
       const table = document.getElementById('summaryOfAdsTable');
       if (!table) return;
 
-      const rows = Array.from(table.querySelectorAll('tr'));
+      // Copy Table: gaya ng dati (isang row kada page). Copy with ad groups: kasama ang row ng bawat ad group sa ilalim ng page.
+      const rows = Array.from(table.querySelectorAll('tr')).filter(row => withAdGroups || !row.classList.contains('cpp-ag-row'));
       const copiedText = rows.map(row => {
         return Array.from(row.querySelectorAll('th, td'))
           .map(cell => cell.textContent.replace(/₱/g, '').replace(/\n+/g, ', ').trim())

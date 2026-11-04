@@ -13,6 +13,8 @@ use App\Services\Chatbot\ChatbotSequences;
 use App\Services\Chatbot\CustomerFields;
 use App\Services\Chatbot\FlowEngine;
 use App\Services\Chatbot\FlowGraph;
+use App\Services\Chatbot\BotcakeOutbox;
+use App\Services\Chatbot\PageRestriction;
 use App\Services\Chatbot\PageTransfers;
 use App\Services\PageSettings;
 use Carbon\Carbon;
@@ -281,6 +283,75 @@ class ChatbotSequenceEngineTest extends ChatblastTestCase
         $this->assertSame([], $this->sent());
         $this->assertSame(['active', 1, '2026-10-20 11:00', null], [$row->status, (int) $row->current_step, substr($row->next_send_at, 0, 16), $row->dispatched_at]);
         $this->assertSame('Sequence Preorder step 1 held (bot paused)', last($this->events()));
+    }
+
+    private function restriction(): array
+    {
+        $s = app(PageSettings::class);
+
+        return [$s->get('Page Uno', 'chatbot', PageRestriction::UNTIL_KEY), $s->get('Page Uno', 'chatbot', PageRestriction::BY_KEY)];
+    }
+
+    private function reply(string $status, ?string $error = null, ?string $via = null): void
+    {
+        BotcakeOutbox::record(1001, 7001, null, null, 'n2', 'send', [['type' => 'text', 'text' => 'Hi']], $status, $error, 200, null, null, $via);
+    }
+
+    public function test_a_2022_with_a_date_holds_the_page_follow_ups_until_that_date(): void
+    {
+        $this->reply('failed', 'Botcake said "(#2022) You\'re temporarily restricted from messaging users until December 1 at 3:10 AM." (HTTP 200)');
+        $this->assertSame(['2026-12-01 03:10:00', 'date'], $this->restriction());
+
+        $seq = $this->sequence('Preorder', [[0, 'minutes', $this->flow('Seq 1')->id]]);
+        $this->chat();
+        $this->svc()->subscribe($seq->id, 1001, 7001, 'other');
+        $this->tick();
+
+        $row = $this->sub($seq);
+        $this->assertSame([], $this->sent());
+        $this->assertSame(['active', 1, '2026-12-01 03:10'], [$row->status, (int) $row->current_step, substr($row->next_send_at, 0, 16)]);
+        $this->assertSame('Sequence Preorder step 1 held (page restricted (#2022) until 2026-12-01 03:10)', last($this->events()));
+
+        // Ang lumusot na padala bago ang petsa ay hindi nag-aalis; pagkalipas ng petsa, ang unang naipadala ay nag-aalis.
+        $this->reply('sent');
+        $this->assertSame('2026-12-01 03:10:00', $this->restriction()[0]);
+        $this->travelTo('2026-12-01 03:11:00');
+        $this->reply('sent');
+        $this->assertSame([null, null], $this->restriction());
+    }
+
+    public function test_a_2022_without_a_date_holds_30_minutes_and_three_sends_in_a_row_clear_it(): void
+    {
+        $forbeast = 'Forbeast could not send: "sendMessage failed (code 2022, subcode 1404078)" (#2022) subcode 1404078';
+        $this->reply('sent', null, 'forbeast'); // tinanggap pa lang ng gateway: walang epekto
+        $this->reply('failed', $forbeast, 'forbeast');
+        $this->assertSame(['2026-10-20 10:30:00', 'probe'], $this->restriction());
+        $this->assertNotNull(app(PageRestriction::class)->until(1001));
+
+        // Pagkalipas ng 30 minuto: muling susubok ang follow-up.
+        $this->travelTo('2026-10-20 10:31:00');
+        $this->assertNull(app(PageRestriction::class)->until(1001));
+        // Ang bagong #2022 ay hawak ulit; dalawang naipadala ay kulang pa, ang ikatlo ang nag-aalis.
+        $this->reply('failed', $forbeast, 'forbeast');
+        $this->assertSame('2026-10-20 11:01:00', $this->restriction()[0]);
+        $this->reply('sent');
+        $this->reply('sent');
+        $this->assertSame('2026-10-20 11:01:00', $this->restriction()[0]);
+        $this->reply('sent');
+        $this->assertSame([null, null], $this->restriction());
+    }
+
+    public function test_other_errors_do_not_restrict_the_page_and_the_date_is_read_in_its_forms(): void
+    {
+        $this->reply('failed', 'Botcake said "(#551) This person isn\'t available right now." (HTTP 200)');
+        $this->assertSame([null, null], $this->restriction());
+
+        $now = Carbon::parse('2026-12-30 10:00:00');
+        $this->assertSame('2027-01-02 15:05', PageRestriction::untilFrom('restricted from messaging users until January 2 at 3:05 PM.', $now)->format('Y-m-d H:i'));
+        $this->assertSame('2026-12-31 09:00', PageRestriction::untilFrom('until December 31, 2026 at 9:00 AM', $now)->format('Y-m-d H:i'));
+        $this->assertNull(PageRestriction::untilFrom('(#2022) subcode 1404078', $now));
+        // Meta's own text: a narrow no-break space (U+202F) before AM/PM.
+        $this->assertSame('2026-12-01 03:10', PageRestriction::untilFrom("Botcake said \"(#2022) You're temporarily restricted from messaging users until December 1 at 3:10\u{202F}AM.\" (HTTP 200)", Carbon::parse('2026-11-04 17:00'))->format('Y-m-d H:i'));
     }
 
     public function test_S_070_5d_a_missing_or_unpublished_flow_or_a_failed_run_is_an_error_and_the_pointer_moves_on(): void

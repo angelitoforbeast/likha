@@ -17,10 +17,13 @@ use App\Services\Chatbot\CustomerFields;
 use App\Services\Chatbot\FlowGraph;
 use App\Services\Chatbot\FlowRun;
 use App\Services\Chatbot\ForbeastWatch;
+use App\Jobs\HandleGatewayEvent;
 use App\Services\Chatbot\GatewayProvider;
+use App\Services\Chatbot\SendStatus;
 use App\Services\PageSettings;
 use Illuminate\Http\Client\Request as HttpRequest;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 
@@ -168,6 +171,43 @@ class ForbeastAutoSwitchTest extends ChatblastTestCase
         $this->assertSame('botcake', $this->provider());
         $this->assertSame('connection_error', $this->events()[0]['condition']);
         $this->assertStringContainsString('#190', $this->events()[0]['error']);
+    }
+
+    /** Tinanggap ng gateway (202), saka ang resulta ng Meta sa send_status ($code); true kapag lumipat ang page. */
+    private function acceptedThenMeta(?int $code, string $ref): void
+    {
+        DB::table('chatbot_replies')->insert(['page_id' => 1001, 'psid' => (int) self::PSID, 'node_id' => 'n2', 'kind' => 'send', 'status' => 'sent',
+            'http' => 202, 'sent_at' => now()->toDateTimeString(), 'via' => 'forbeast', 'client_ref' => $ref]);
+        app(SendStatus::class)->receive(HandleGatewayEvent::fields(['kind' => 'event', 'event_id' => 9, 'type' => 'send_status', 'page_id' => '1001',
+            'psid' => self::PSID, 'send' => ['public_id' => 'snd_' . $ref, 'client_ref' => $ref, 'status' => 'failed', 'accepted_at' => now()->toIso8601String(),
+                'sent_at' => null, 'message_count' => 1, 'sent_count' => 0, 'error_code' => $code, 'error_subcode' => null, 'error' => 'Meta said #' . $code]]));
+    }
+
+    public function test_a_connection_error_from_meta_after_the_gateway_accepted_switches_at_once(): void
+    {
+        Artisan::call('migrate', ['--path' => [
+            'database/migrations/2026_10_30_098000_add_raw_to_chatbot_replies.php',
+            'database/migrations/2026_10_30_100000_add_results_to_chatbot_replies.php',
+            'database/migrations/2026_11_09_100000_add_via_to_chatbot_replies.php',
+            'database/migrations/2026_11_11_100000_add_real_send_to_chatbot_replies.php',
+        ]]);
+        Http::fake([self::GW_SEND => Http::response(['status' => 'queued'], 202)]);
+        $this->send();
+        $this->assertSame('gateway', $this->provider(), 'ang tinanggap ng gateway ay hindi palya');
+
+        // Ang dahilan sa customer (#551) at ang page na pinagbawalan ng Meta (#2022) ay walang lipat.
+        $this->acceptedThenMeta(551, 'likha-a');
+        $this->acceptedThenMeta(2022, 'likha-b');
+        $this->assertSame('gateway', $this->provider());
+        $this->assertSame([], $this->events());
+
+        // Ang token na binawi (#190) sa resulta ng Meta: lipat agad, gaya ng #190 sa mismong padala.
+        $this->acceptedThenMeta(190, 'likha-c');
+        $this->assertSame('botcake', $this->provider());
+        $events = $this->events();
+        $this->assertCount(1, $events);
+        $this->assertSame(['switched', 'gateway', 'botcake', 'connection_error'], [$events[0]['result'], $events[0]['from'], $events[0]['to'], $events[0]['condition']]);
+        $this->assertStringContainsString('#190', $events[0]['error']);
     }
 
     public function test_S_117_3_three_sends_without_an_answer_switch_the_page(): void

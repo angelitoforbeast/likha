@@ -41,6 +41,12 @@ class ChatbotProvider
         return $provider instanceof GatewayProvider ? ($provider->gateway() ?? self::FORBEAST) : self::BOTCAKE;
     }
 
+    /** Ang address na dinaanan ng padala (GatewayProvider::route); null = Botcake o walang tawag. */
+    public static function routeOf(MessagingProvider $provider): ?string
+    {
+        return $provider instanceof GatewayProvider ? $provider->route() : null;
+    }
+
     /** Ang via ay isa sa mga gateway (hindi Botcake)? */
     public static function isGateway(?string $via): bool
     {
@@ -51,6 +57,32 @@ class ChatbotProvider
     public static function viaLabel(string $via): string
     {
         return Gateways::valid($via) ? Gateways::label($via) : 'Botcake';
+    }
+
+    /**
+     * Ang {{replies_via}} ng page: ang pangalan ng address ng page (Gateways::route, hal. "Incepxion") kapag forbeast ang
+     * nagdadala at hindi default ang address; kung hindi, ang viaLabel. Walang GATEWAY_URLS = laging default ang address.
+     */
+    public static function repliesVia(string $pageName, string $via): string
+    {
+        if ($via === self::FORBEAST && $pageName !== '' && ($route = Gateways::route($pageName)) !== Gateways::FORBEAST) return Gateways::routeLabel($route);
+
+        return self::viaLabel($via);
+    }
+
+    /**
+     * Ang pangalan sa screen ng address ng isang padala (chatbot_replies.route, hal. "Incepxion") kapag forbeast ang nagdala
+     * at hindi default ang address; null = gamitin ang pangalan ng via (gaya ng dati).
+     */
+    public static function routeLabelOf(?string $via, ?string $route): ?string
+    {
+        return $via === self::FORBEAST && $route !== null && $route !== '' && $route !== Gateways::FORBEAST ? Gateways::routeLabel($route) : null;
+    }
+
+    /** Ang via_label ng isang padala para sa JSON ng screen: kasama lang kapag may address na hindi default. */
+    public static function viaLabelColumn(?string $via, ?string $route): array
+    {
+        return ($l = self::routeLabelOf($via, $route)) !== null ? ['via_label' => $l] : [];
     }
 
     /** $once: isang subok lang sa Botcake (web request, hal. ang Inbox). Ang gateway ay pinipili sa bawat padala (ang aktibo). */

@@ -20,6 +20,8 @@ class Gateways
     public const LABELS = [self::FORBEAST => 'Forbeast', self::INCEPXIONBOT => 'Incepxionbot'];
     /** Ang page row ng aktibong gateway (chatbot.gateway). */
     public const KEY = 'gateway';
+    /** Ang page row ng address ng forbeast gateway (chatbot.gateway_app, Gateways::routes). */
+    public const ROUTE_KEY = 'gateway_app';
     /** Ang mga row ng koneksyon ng page sa isang gateway (provider = pangalan ng gateway). */
     public const PAGE_KEYS = ['token', 'webhook_secret', 'token_status', 'permissions'];
 
@@ -98,5 +100,73 @@ class Gateways
     public static function readyFor(string $page): array
     {
         return array_values(array_filter(self::setUpList(), fn ($g) => app(ForbeastPageSetup::class)->on($g)->ready($page)));
+    }
+
+    /**
+     * Ang mga address ng forbeast gateway (iisang gateway, parehong key at token ng page; ang Meta app ay ang sa address na
+     * tinawag): forbeast = GATEWAY_URL, saka ang GATEWAY_URLS ("key=url", hiwalay sa space o comma). Ang forbeast= sa
+     * listahan ay hindi pinapansin (laging GATEWAY_URL ang default); ang maling entry ay nilalaktawan.
+     * @return array<string, string> key => url (walang / sa dulo), forbeast muna
+     */
+    public static function routes(): array
+    {
+        $out = [self::FORBEAST => self::url(self::FORBEAST)];
+        foreach (preg_split('/[\s,]+/', trim((string) config('services.gateway.urls', ''))) ?: [] as $entry) {
+            if (!preg_match('/^([a-z0-9_-]{1,30})=(https?:\/\/\S+)$/', $entry, $m) || $m[1] === self::FORBEAST) continue;
+            $out[$m[1]] ??= rtrim($m[2], '/');
+        }
+
+        return $out;
+    }
+
+    /**
+     * Ang Meta app ng mga address ng forbeast gateway (GATEWAY_APP_IDS, "key=app_id", hiwalay sa space o comma, gaya ng
+     * GATEWAY_URLS): ang echo mula sa app na ito ay padala ng forbeast gateway sa address na iyon. Ang forbeast= ay hindi
+     * pinapansin (kilala na ang app nito, ChatEchoes::APPS); ang maling entry ay nilalaktawan.
+     * @return array<string, string> app_id => key
+     */
+    public static function appIds(): array
+    {
+        $out = [];
+        foreach (preg_split('/[\s,]+/', trim((string) config('services.gateway.app_ids', ''))) ?: [] as $entry) {
+            if (!preg_match('/^([a-z0-9_-]{1,30})=(\d{1,32})$/', $entry, $m) || $m[1] === self::FORBEAST) continue;
+            $out[$m[2]] ??= $m[1];
+        }
+
+        return $out;
+    }
+
+    /** Ang pangalan ng address sa screen. */
+    public static function routeLabel(string $route): string
+    {
+        return ucwords(str_replace(['_', '-'], ' ', $route));
+    }
+
+    /**
+     * Ang address ng page (chatbot.gateway_app): ang key kapag naka-configure, kung hindi ay forbeast. Ang hindi kilalang
+     * key ay isang warning kada page at value kada araw.
+     */
+    public static function route(string $page): string
+    {
+        $key = trim((string) app(PageSettings::class)->get($page, ChatbotFields::PROVIDER, self::ROUTE_KEY));
+        if ($key === '' || $key === self::FORBEAST) return self::FORBEAST;
+        if (array_key_exists($key, self::routes())) return $key;
+        if (\Illuminate\Support\Facades\Cache::add('gateway-route-unknown:' . sha1(app(PageSettings::class)->pageKey($page) . "\0" . $key), 1, 86400)) {
+            \Illuminate\Support\Facades\Log::warning('gateway route: unknown address key, using the default', ['page' => $page, 'key' => mb_substr($key, 0, 50)]);
+        }
+
+        return self::FORBEAST;
+    }
+
+    /** Ang URL ng tawag para sa page (lahat ng nasa /v1/pages/{id}): ang address ng page sa forbeast, ang URL ng iba pang gateway. */
+    public static function pageUrl(string $gateway, string $page): string
+    {
+        return $gateway === self::FORBEAST ? self::routes()[self::route($page)] : self::url($gateway);
+    }
+
+    /** Ang Guzzle options ng mga tawag sa gateway: IPv4 lang kapag GATEWAY_FORCE_IPV4 (CURLOPT_IPRESOLVE). */
+    public static function httpOptions(): array
+    {
+        return config('services.gateway.force_ipv4') ? ['force_ip_resolve' => 'v4'] : [];
     }
 }

@@ -197,6 +197,33 @@ class AdGroups
     }
 
     /**
+     * Ang group ng bawat ad sa listahan, para sa mga report (maraming ad nang sabay): gaya ng groupForAd (ang ad mismo,
+     * saka ang ad set nito, saka ang campaign nito), pero ang ad set at campaign ay mula sa naka-cache na parentsMany
+     * (ad_catalog, saka ads_manager_reports), walang tawag sa Meta. Ang ad na walang group ay wala sa sagot.
+     * @param array<int, string> $ads
+     * @return array<string, int> ad => numero ng group
+     */
+    public function groupsForAds(string $page, array $ads): array
+    {
+        $index = $this->index($page);
+        $ads = array_values(array_unique(array_filter(array_map('strval', $ads), fn ($a) => preg_match('/^\d{1,64}\z/', $a))));
+        if (!$index || !$ads) return [];
+        $out = [];
+        $rest = [];
+        foreach ($ads as $ad) {
+            if (isset($index[$ad])) $out[$ad] = $index[$ad];
+            else $rest[] = $ad;
+        }
+        foreach ($this->parentsMany($rest) as $ad => $p) {
+            foreach ($p as $parent) {
+                if ($parent !== null && isset($index[$parent])) { $out[(string) $ad] = $index[$parent]; break; }
+            }
+        }
+
+        return $out;
+    }
+
+    /**
      * @return array{0: ?int, 1: ?string, 2: bool} ang group, ang tala ng lookup, at kung pumalya ang lookup
      */
     private function match(string $page, ?string $ad, bool $lookup): array
