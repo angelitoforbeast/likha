@@ -241,8 +241,10 @@ class ChatbotAiQueue
         // (resumed, sync) ang text ng customer lang ang binubura, at ang row (record) pagkatapos ng 90. Ang paghahanap ay sa
         // ilang araw lang pagkatapos ng 2 (hindi ang buong 90), para mabilis ang sweep sa loob ng pool.
         $out['pruned'] = DB::table(self::TABLE)->where('created_at', '<', now()->subDays(self::KEEP_DAYS))->whereIn('status', ['failed', 'answered'])->where(fn ($q) => self::sentOrNone($q))->orderBy('id')->limit(5000)->delete();
+        // Naka-ayos sa created_at (may index), hindi sa id: sa id, binabasa ng database ang table mula sa simula
+        // hanggang makakita ng 5000; kapag nabura na ang mga text, ang buong table bawat minuto.
         $ids = DB::table(self::TABLE)->whereBetween('created_at', [now()->subDays(self::KEEP_DAYS + 5), now()->subDays(self::KEEP_DAYS)])->whereIn('status', ['resumed', 'sync'])
-            ->where(fn ($q) => $q->whereNotNull('messages')->orWhereNotNull('answer')->orWhereNotNull('context'))->orderBy('id')->limit(5000)->pluck('id');
+            ->where(fn ($q) => $q->whereNotNull('messages')->orWhereNotNull('answer')->orWhereNotNull('context'))->orderBy('created_at')->limit(5000)->pluck('id');
         if ($ids->isNotEmpty()) DB::table(self::TABLE)->whereIn('id', $ids)->update(['messages' => null, 'answer' => null, 'context' => null]);
         $out['pruned'] += DB::table(self::TABLE)->where('created_at', '<', now()->subDays(self::RECORD_DAYS))->whereIn('status', ['resumed', 'sync'])->where(fn ($q) => self::sentOrNone($q))->orderBy('id')->limit(5000)->delete();
 
