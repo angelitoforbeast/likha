@@ -365,6 +365,7 @@ Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('chatbot')->name('chatb
     Route::post('/active', [\App\Http\Controllers\ChatbotController::class, 'active'])->middleware('throttle:30,1,chatbot-active')->name('active');
     Route::post('/provider', [\App\Http\Controllers\ChatbotController::class, 'provider'])->middleware('throttle:30,1,chatbot-provider')->name('provider');
     Route::post('/problems/ack', [\App\Http\Controllers\ChatbotProblemAckController::class, 'store'])->middleware('throttle:60,1,chatbot-problem-ack')->name('problems.ack');
+    Route::post('/problems/ack-all', [\App\Http\Controllers\ChatbotProblemAckController::class, 'storeAll'])->middleware('throttle:10,1,chatbot-problem-ack-all')->name('problems.ack-all');
     // Aling gateway (forbeast / incepxionbot) ang sumasagot kapag gateway ang provider ng page.
     Route::post('/gateway', [\App\Http\Controllers\ChatbotController::class, 'gateway'])->middleware('throttle:30,1,chatbot-gateway')->name('gateway');
     // Aling address ng forbeast gateway (GATEWAY_URL o isa sa GATEWAY_URLS) ang tinatawag para sa page.

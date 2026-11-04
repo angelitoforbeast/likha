@@ -146,6 +146,32 @@
                 <li class="pt-1 text-xs text-slate-500" data-help="doubles">Main flow double: a new customer (first message to the page in Likha's records, in the last {{ \App\Services\Chatbot\ChatEchoes::HEALTH_MINUTES }} min) answered by both CBB (Chatbot Builder or Botcake) and the Likha bot's main flow. A customer already known to Chatbot Builder but new to Likha counts as new. Leftover: every other double reply, e.g. old customers still in a CBB sequence or loop; not urgent.</li>
             @endif
         </ol>
+        {{-- Sa ilalim ng listahan (kasabay nitong bukas/sarado): ang Acknowledge all / Done all (CEO lang) at ang iisang form
+             ng Acknowledge/Done (note, at sa Acknowledge, hanggang kailan), na inililipat sa ilalim ng pinindot na linya. --}}
+        <div id="cb-problems-actions" class="border-t border-slate-200 bg-white px-4 py-1.5 text-slate-800 sm:px-6" hidden>
+            @php($cbIsCeo = preg_replace('/\s+/u', ' ', trim((string) $cbRole)) === 'CEO')
+            @if($cbIsCeo && count($cbProblems['pages']))
+                <div class="flex flex-wrap gap-2" data-ack-all>
+                    <button type="button" class="cb-ack-all rounded border border-slate-300 px-2 py-0.5 text-xs font-semibold text-slate-700 hover:bg-slate-100" data-status="ack">Acknowledge all</button>
+                    <button type="button" class="cb-ack-all rounded border border-slate-300 px-2 py-0.5 text-xs font-semibold text-slate-700 hover:bg-slate-100" data-status="done">Done all</button>
+                </div>
+            @endif
+            <div id="cb-ack-form" class="my-1 rounded border border-slate-300 bg-slate-50 p-2 text-xs text-slate-800" hidden>
+                <div id="cb-ack-title" class="mb-1 font-semibold"></div>
+                <label class="block">Note <span class="text-slate-500">(what was done, or who is on it)</span>
+                    <textarea id="cb-ack-note" rows="2" maxlength="{{ \App\Services\Chatbot\ProblemAcks::MAX_NOTE }}" class="mt-0.5 block w-full rounded border border-slate-300 px-1 py-0.5 text-xs"></textarea></label>
+                <div id="cb-ack-until-row" class="mt-1 flex flex-wrap items-center gap-2">
+                    <span>Hide until</span>
+                    <select id="cb-ack-until" class="rounded border border-slate-300 px-1 py-0.5 text-xs">
+                        <option value="1">1 day</option><option value="7">7 days</option><option value="30">30 days</option><option value="date">a date…</option>
+                    </select>
+                    <input id="cb-ack-date" type="date" class="rounded border border-slate-300 px-1 py-0.5 text-xs" hidden>
+                    <span class="text-slate-500">It comes back sooner if it gets worse.</span>
+                </div>
+                <div id="cb-ack-done-help" class="mt-1 text-slate-500" hidden>Hidden for 30 minutes; it comes back marked if the problem is still found.</div>
+                <div class="mt-2 flex gap-2"><button type="button" id="cb-ack-save" class="rounded bg-slate-800 px-2 py-0.5 text-white">Save</button><button type="button" id="cb-ack-cancel" class="rounded border border-slate-300 px-2 py-0.5">Cancel</button><span id="cb-ack-error" class="text-red-600"></span></div>
+            </div>
+        </div>
     </div>
 @endif
 
@@ -172,34 +198,71 @@
     (() => {
         const btn = document.getElementById('cb-problems-toggle'), list = document.getElementById('cb-problems-list');
         if (!btn || !list) return;
-        const show = open => { list.hidden = !open; btn.setAttribute('aria-expanded', open ? 'true' : 'false'); };
+        const actions = document.getElementById('cb-problems-actions');
+        const show = open => { list.hidden = !open; if (actions) actions.hidden = !open; btn.setAttribute('aria-expanded', open ? 'true' : 'false'); };
         try { show(localStorage.getItem('cb-problems-open') === '1'); } catch (e) {}
         btn.addEventListener('click', () => {
             const open = list.hidden;
             show(open);
             try { localStorage.setItem('cb-problems-open', open ? '1' : '0'); } catch (e) {}
         });
-        // Acknowledge / Done / Undo ng isang linya: note (kailangan), at sa Acknowledge, hanggang kailan (blangko = 1 araw).
-        list.addEventListener('click', async e => {
-            const b = e.target.closest('.cb-ack');
-            if (!b) return;
-            const status = b.dataset.status;
-            let note = '', until = '';
-            if (status !== 'clear') {
-                note = (prompt(status === 'done' ? 'Done: what was fixed?' : 'Acknowledge: who is on it, or why it can wait?') || '').trim();
-                if (!note) return;
-                if (status === 'ack') {
-                    until = (prompt('Hide until (YYYY-MM-DD), or leave blank for 1 day. It comes back sooner if it gets worse.') || '').trim();
-                }
-            }
-            b.disabled = true;
+        // Acknowledge / Done (isang linya, o lahat: CEO lang) sa iisang form: note (kailangan), at sa Acknowledge, hanggang kailan.
+        // Ang Undo ay walang form.
+        const form = document.getElementById('cb-ack-form'), $ = id => document.getElementById(id);
+        let target = null;
+        const post = async (url, body) => {
+            const res = await fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json', 'Accept': 'application/json',
+                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content}, body: JSON.stringify(body)});
+            const data = await res.json().catch(() => ({}));
+            return res.ok ? null : (data.error || data.message || 'Not saved.');
+        };
+        const untilValue = () => {
+            const v = $('cb-ack-until').value;
+            if (v === 'date') return $('cb-ack-date').value;
+            const d = new Date(Date.now() + Number(v) * 86400000);
+            return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0') + ' '
+                + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+        };
+        $('cb-ack-until')?.addEventListener('change', () => { $('cb-ack-date').hidden = $('cb-ack-until').value !== 'date'; });
+        $('cb-ack-cancel')?.addEventListener('click', () => { form.hidden = true; target = null; });
+        $('cb-ack-save')?.addEventListener('click', async () => {
+            if (!target) return;
+            const note = $('cb-ack-note').value.trim();
+            if (!note) { $('cb-ack-error').textContent = 'Add a note first.'; return; }
+            const until = target.status === 'ack' ? untilValue() : '';
+            if (target.status === 'ack' && !until) { $('cb-ack-error').textContent = 'Pick a date.'; return; }
+            $('cb-ack-save').disabled = true;
             try {
-                const res = await fetch(@json(route('chatbot.problems.ack')), {method: 'POST', headers: {'Content-Type': 'application/json', 'Accept': 'application/json',
-                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content}, body: JSON.stringify({page: b.dataset.page, kind: b.dataset.kind, status, note, until, level: b.dataset.level || ''})});
-                const data = await res.json().catch(() => ({}));
-                if (!res.ok) { alert(data.error || data.message || 'Not saved.'); b.disabled = false; return; }
+                const err = target.all
+                    ? await post(@json(route('chatbot.problems.ack-all')), {status: target.status, note, until})
+                    : await post(@json(route('chatbot.problems.ack')), {page: target.page, kind: target.kind, status: target.status, note, until, level: target.level});
+                if (err) { $('cb-ack-error').textContent = err; $('cb-ack-save').disabled = false; return; }
                 location.reload();
-            } catch (err) { alert('No connection: not saved.'); b.disabled = false; }
+            } catch (e) { $('cb-ack-error').textContent = 'No connection: not saved.'; $('cb-ack-save').disabled = false; }
+        });
+        list.parentElement.addEventListener('click', async e => {
+            const b = e.target.closest('.cb-ack, .cb-ack-all');
+            if (!b || !form) return;
+            const status = b.dataset.status, all = b.classList.contains('cb-ack-all');
+            if (status === 'clear') {
+                b.disabled = true;
+                const err = await post(@json(route('chatbot.problems.ack')), {page: b.dataset.page, kind: b.dataset.kind, status: 'clear'}).catch(() => 'No connection: not saved.');
+                if (err) { alert(err); b.disabled = false; return; }
+                location.reload();
+                return;
+            }
+            target = {status, all, page: b.dataset.page, kind: b.dataset.kind, level: b.dataset.level || ''};
+            $('cb-ack-title').textContent = (status === 'done' ? (all ? 'Done all: every problem shown now' : 'Done') : (all ? 'Acknowledge all: every problem shown now' : 'Acknowledge'))
+                + (all ? '' : ': ' + b.dataset.page);
+            $('cb-ack-until-row').hidden = status !== 'ack';
+            $('cb-ack-done-help').hidden = status !== 'done';
+            $('cb-ack-error').textContent = '';
+            $('cb-ack-note').value = '';
+            $('cb-ack-save').disabled = false;
+            // Sa ilalim ng pinindot (sa linya, o sa itaas para sa lahat).
+            if (all) b.closest('[data-ack-all]').after(form); else b.closest('li').append(form);
+            form.hidden = false;
+            $('cb-ack-note').focus();
         });
     })();
 </script>
