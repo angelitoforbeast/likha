@@ -145,4 +145,22 @@ class RepliesViaChoiceTest extends ChatblastTestCase
         // A page never checked against the new Forbeast (no apps saved): as before.
         $this->postJson('/chatbot/provider', ['page_name' => 'Page Dos', 'provider' => 'gateway', 'gateway_app' => 'forbeast'])->assertOk();
     }
+
+    public function test_connecting_a_page_that_has_a_token_only_for_bot_2_sets_its_webhook_and_address_there(): void
+    {
+        // A page claimed after it was connected through the Incepxion app only: Bot 1's address refuses its webhook (409).
+        Http::swap(new \Illuminate\Http\Client\Factory());
+        Http::fake([
+            self::GW . '/v1/pages/1001/webhook' => Http::response(['error' => ['code' => 'app_not_connected']], 409),
+            self::APP2 . '/v1/pages/1001/webhook' => Http::response(['ok' => true]),
+            '*' => Http::response(['id' => '1001', 'name' => 'Page Uno', 'connected' => true, 'apps' => ['forbeast' => null, 'incepxion' => 'ok']]),
+        ]);
+
+        $res = app(ForbeastPageSetup::class)->connect('Page Uno');
+
+        $this->assertSame('ok', $res['status']);
+        $this->assertSame('incepxion', Gateways::route('Page Uno'));
+        Http::assertSent(fn ($r) => $r->method() === 'PUT' && $r->url() === self::APP2 . '/v1/pages/1001/webhook');
+        Http::assertNotSent(fn ($r) => $r->method() === 'PUT' && $r->url() === self::GW . '/v1/pages/1001/webhook');
+    }
 }

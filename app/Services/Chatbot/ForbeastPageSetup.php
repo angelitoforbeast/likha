@@ -4,6 +4,7 @@ namespace App\Services\Chatbot;
 
 use App\Models\PageSetting;
 use App\Services\BotcakeClient;
+use App\Services\ChatbotFields;
 use App\Services\PageSettings;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Response;
@@ -65,9 +66,14 @@ class ForbeastPageSetup
         }
         $name = trim((string) ($res->json('name') ?? ''));
         $this->keepScopes($page, self::scopes($res));
-        $this->keepApps($page, self::appStatuses($res));
+        $apps = self::appStatuses($res);
+        $this->keepApps($page, $apps);
         // Ang pangalan ng page sa Facebook na ibinalik na ng gateway: itinatabi, walang dagdag na tawag.
         app(FacebookName::class)->fromProbe($page, $pageId, ['status' => 'ok', 'name' => $name, 'id' => is_scalar($res->json('id')) ? (string) $res->json('id') : null], $this->gateway);
+        // Ang webhook ay isinusulat sa address ng Meta app na may token ang page: ang page na naka-connect lang sa ibang
+        // app (hal. Bot 2) ay tinatanggihan sa address ng Bot 1 (409). Kapag alam ng gateway ang token kada app at walang
+        // gumaganang token sa kasalukuyang address, ang address na meron ang ginagamit at itinatala bilang address ng page.
+        $base = $this->routeWithToken($page, $apps, $pageId) ?? $base;
 
         $secret = Str::random(64);
         $hook = $this->call(fn () => $this->http($token)->put($base . '/webhook',
@@ -176,6 +182,26 @@ class ForbeastPageSetup
     }
 
     /** Ang URL ng gateway; may $page: ang address ng page (chatbot.gateway_app), gaya ng padala. */
+    /**
+     * Ang /v1/pages/{id} ng address na may gumaganang token ang page, kapag ang kasalukuyang address ng page ay wala; null
+     * kapag ayos na ang kasalukuyan, hindi alam ($apps null), iisa ang address, o walang address na may token.
+     */
+    private function routeWithToken(string $page, ?array $apps, string $pageId): ?string
+    {
+        $routes = Gateways::routes();
+        if ($this->gateway !== Gateways::FORBEAST || $apps === null || count($routes) < 2) return null;
+        $current = Gateways::route($page);
+        if (($apps[$current] ?? null) === 'ok') return null;
+        foreach (array_keys($routes) as $key) {
+            if (($apps[$key] ?? null) !== 'ok') continue;
+            $this->settings->set($page, ChatbotFields::PROVIDER, Gateways::ROUTE_KEY, $key, false, null, true);
+
+            return $routes[$key] . '/v1/pages/' . rawurlencode($pageId);
+        }
+
+        return null;
+    }
+
     private function baseUrl(?string $page = null): string
     {
         if ($page === null || Gateways::url($this->gateway) === '') return Gateways::url($this->gateway);
