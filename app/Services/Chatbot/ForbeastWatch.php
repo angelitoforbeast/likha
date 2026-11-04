@@ -145,6 +145,22 @@ class ForbeastWatch
     }
 
     /**
+     * Ang huling resulta ng padala mula sa Meta (send_status ng gateway). Tinatanggap muna ng gateway ang padala (afterSend
+     * ay "sent"), saka pa lang sumasagot ang Meta: ang palya ng koneksyon ng page roon (token na binawi #190, permiso #200,
+     * rate limit) ay lipat agad, gaya ng palya sa mismong padala. Ang dahilan sa customer (#551, #10) ay hindi binibilang;
+     * ang #2022 (page na pinagbawalan ng Meta) ay pareho sa ibang daan, kaya hawak ang follow-up (PageRestriction), walang lipat.
+     */
+    public function afterResult(int|string $pageId, ?string $gateway, ?int $code, ?int $sub): void
+    {
+        $page = BotcakeChat::pageMap()[(string) $pageId] ?? null;
+        if ($page === null || $gateway === null || !Gateways::valid($gateway)) return;
+        if (ChatbotProvider::name($page) !== ChatbotProvider::GATEWAY || $gateway !== Gateways::active($page)) return;
+        if ($code === null || in_array($code, self::CUSTOMER_CODES, true) || in_array($sub, self::CUSTOMER_SUBCODES, true)) return;
+        if ($code === 2022 || !in_array($code, self::CONNECTION_CODES, true)) return;
+        $this->switch($page, 'connection_error', Gateways::label($gateway) . ' send failed at Meta (Meta #' . $code . ')', [], [], $gateway);
+    }
+
+    /**
      * Ang walang sagot ng page sa burst ng gateway (ang mga page na walang sagot sa huling burst_seconds). Ang page na umabot
      * sa bilang ng no_answer ($reached) habang burst_pages o higit pa ang nasa burst: hold ang gateway nang hold_minutes (isang
      * "held" event) sa halip na lipat, dahil ang sabay-sabay na walang sagot ay sira sa daan, hindi sa page. Ang hold na

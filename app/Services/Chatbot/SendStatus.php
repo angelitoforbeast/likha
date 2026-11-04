@@ -45,6 +45,16 @@ class SendStatus
         // Walang naihatid sa customer: kung ang padala ay ang tanong na hinihintay pa ang sagot, itatanong ulit.
         if ($status === 'failed' || ($status === 'partial' && $s['sent_count'] === 0)) $this->unsent($reply);
         app(PageRestriction::class)->note((int) $reply->page_id, $status === 'failed' ? 'failed' : 'sent', $set['error'] ?? null);
+        // Ang palya ng koneksyon ng page sa Meta (hal. #190) ay ebidensya ng lipat, gaya ng palya sa mismong padala.
+        if ($status !== 'sent') {
+            try {
+                $code = isset($s['error_code']) && is_numeric($s['error_code']) ? (int) $s['error_code'] : null;
+                $sub = isset($s['error_subcode']) && is_numeric($s['error_subcode']) ? (int) $s['error_subcode'] : null;
+                app(ForbeastWatch::class)->afterResult((int) $reply->page_id, $reply->via ?? null, $code, $sub);
+            } catch (Throwable $e) {
+                report($e);
+            }
+        }
 
         return 'send_status';
     }
@@ -70,7 +80,7 @@ class SendStatus
     {
         $s = $e['send'];
         $q = fn () => DB::table('chatbot_replies')->where('page_id', (int) $e['page_id'])->whereIn('kind', ['send', 'manual']);
-        $cols = ['id', 'client_ref', 'confirmed_status', 'sent_at', 'kind', 'page_id', 'psid', 'flow_id', 'node_id'];
+        $cols = ['id', 'client_ref', 'confirmed_status', 'sent_at', 'kind', 'page_id', 'psid', 'flow_id', 'node_id', ...(ChatbotReply::hasVia() ? ['via'] : [])];
         if ($s['client_ref'] !== null && $s['client_ref'] !== '') {
             $r = $q()->where('client_ref', $s['client_ref'])->first($cols);
             if ($r) return $r;
