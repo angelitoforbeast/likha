@@ -364,16 +364,27 @@ class ChatbotController extends Controller
             if (!array_key_exists($route, $routes)) {
                 return response()->json(['error' => 'Pick ' . implode(' or ', array_map(fn ($k) => Gateways::routeLabel($k), array_keys($routes))) . '.'], 422);
             }
-            // Ang page na alam nang walang gumaganang token sa Meta app ng address na ito ay hindi malilipat doon (ang
-            // kasalukuyang pili ay pwedeng i-save ulit). Hindi pa alam (walang naitabing check): gaya ng dati.
-            $notOk = array_filter($pages, function ($p) use ($route, $provider) {
-                $apps = app(ForbeastPageSetup::class)->apps($p);
-                $same = ChatbotProvider::name($p) === $provider && Gateways::route($p) === $route;
+            // Ang page na walang gumaganang token sa Meta app ng address na ito ay hindi malilipat doon (ang kasalukuyang pili
+            // ay pwedeng i-save ulit). Hindi pa alam (hal. galing sa Botcake, kaya walang health check): itinatanong ngayon sa
+            // gateway (ang Test ng page); hindi masagot: hindi rin pinapayagan.
+            $setup = app(ForbeastPageSetup::class);
+            $notOk = array_filter($pages, function ($p) use ($route, $provider, $setup) {
+                if (ChatbotProvider::name($p) === $provider && Gateways::route($p) === $route) return false;
+                $apps = $setup->apps($p);
+                if ($apps === null) {
+                    // Basa lang (walang isinusulat na status o webhook): ang token ng page kada app, saka itinatabi.
+                    $probe = $setup->probe(trim((string) $this->settings->get($p, 'botcake', 'page_id')), $setup->token($p), $p);
+                    if ($probe['status'] === 'ok') $setup->keepApps($p, $probe['apps'] ?? null);
+                    $apps = $probe['apps'] ?? null;
+                    // Sumagot ang gateway pero walang "apps" (lumang bersyon): hindi alam, kaya gaya ng dati. Hindi sumagot: hindi.
+                    if ($apps === null) return $probe['status'] !== 'ok';
+                }
 
-                return $apps !== null && ($apps[$route] ?? null) !== 'ok' && !$same;
+                return ($apps[$route] ?? null) !== 'ok';
             });
             if ($notOk) {
-                return response()->json(['error' => Gateways::routeLabel($route) . ' is not connected for: ' . implode(', ', array_slice(array_values($notOk), 0, 10))], 422);
+                return response()->json(['error' => Gateways::routeLabel($route) . ' is not connected for: ' . implode(', ', array_slice(array_values($notOk), 0, 10))
+                    . '. Connect the page to that app first (incepxionbot.com or app.forbeast.app), then pick it again.'], 422);
             }
         }
         $status = DB::transaction(fn () => array_map(function ($page) use ($provider, $route) {

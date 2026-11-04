@@ -141,10 +141,13 @@ class RepliesViaChoiceTest extends ChatblastTestCase
 
         // Bot 1 (Forbeast): the page's token there needs a reconnect, so it is refused; Bot 2 is saved.
         $this->postJson('/chatbot/provider', ['page_name' => 'Page Uno', 'provider' => 'gateway', 'gateway_app' => 'forbeast'])
-            ->assertStatus(422)->assertJsonFragment(['error' => 'Forbeast is not connected for: Page Uno']);
+            ->assertStatus(422)->assertJsonFragment(['error' => 'Forbeast is not connected for: Page Uno. Connect the page to that app first (incepxionbot.com or app.forbeast.app), then pick it again.']);
         $this->postJson('/chatbot/provider', ['page_name' => 'Page Uno', 'provider' => 'gateway', 'gateway_app' => 'incepxion'])->assertOk();
-        // A page never checked against the new Forbeast (no apps saved): as before.
-        $this->postJson('/chatbot/provider', ['page_name' => 'Page Dos', 'provider' => 'gateway', 'gateway_app' => 'forbeast'])->assertOk();
+        // A page never checked (no apps saved, e.g. it was on Botcake): the gateway is asked now, and its answer decides.
+        $this->postJson('/chatbot/provider', ['page_name' => 'Page Dos', 'provider' => 'gateway', 'gateway_app' => 'forbeast'])
+            ->assertStatus(422)->assertJsonFragment(['error' => 'Forbeast is not connected for: Page Dos. Connect the page to that app first (incepxionbot.com or app.forbeast.app), then pick it again.']);
+        $this->assertSame(['forbeast' => 'reconnect_needed', 'incepxion' => 'ok', 'other' => null], app(ForbeastPageSetup::class)->apps('Page Dos'), 'the check is kept');
+        $this->postJson('/chatbot/provider', ['page_name' => 'Page Dos', 'provider' => 'gateway', 'gateway_app' => 'incepxion'])->assertOk();
     }
 
     public function test_connecting_a_page_that_has_a_token_only_for_bot_2_sets_its_webhook_and_address_there(): void

@@ -374,6 +374,17 @@ class ForbeastWatch
                 if ($own) $this->switch($page, 'health', $l . ' says the page is ' . ($res->json('connected') === false ? 'not connected' : 'not able to send'), [], [], $gw);
                 return;
             }
+            // Ang address (Bot N) ng page ay walang gumaganang token sa Meta app nito (wala, o kailangang i-reconnect): ang mga
+            // sagot doon ay tatanggihan, kaya lipat (sa Botcake kapag walang ibang gateway na handa), gaya ng hindi konektado.
+            $apps = ForbeastPageSetup::appStatuses($res);
+            if ($own && $gw === Gateways::FORBEAST && $apps !== null && count(Gateways::routes()) > 1 && ChatbotProvider::name($page) === ChatbotProvider::GATEWAY) {
+                $route = Gateways::route($page);
+                if (($apps[$route] ?? null) !== 'ok') {
+                    $this->streak($page, false, $gw);
+                    $this->switch($page, 'connection_error', Gateways::routeLabel($route) . ' is not connected for this page (' . ($apps[$route] ?? 'no token') . ')', [], [], $gw);
+                    return;
+                }
+            }
             // Sumagot at konektado ang page: bumalik ang daan (ang "hindi konektado" ay sira ng page, hindi patunay).
             $this->recovered($page, $gw, 'health');
             $this->reset($page, $gw, 'health');
