@@ -163,9 +163,9 @@
                 <div id="cb-ack-until-row" class="mt-1 flex flex-wrap items-center gap-2">
                     <span>Hide until</span>
                     <select id="cb-ack-until" class="rounded border border-slate-300 px-1 py-0.5 text-xs">
-                        <option value="1">1 day</option><option value="7">7 days</option><option value="30">30 days</option><option value="date">a date…</option>
+                        <option value="1">1 minute</option><option value="15">15 minutes</option><option value="60">1 hour</option><option value="1440" selected>1 day</option><option value="10080">7 days</option><option value="43200">30 days</option><option value="date">a date and time…</option>
                     </select>
-                    <input id="cb-ack-date" type="date" class="rounded border border-slate-300 px-1 py-0.5 text-xs" hidden>
+                    <input id="cb-ack-date" type="datetime-local" step="60"class="rounded border border-slate-300 px-1 py-0.5 text-xs" hidden>
                     <span class="text-slate-500">It comes back sooner if it gets worse.</span>
                 </div>
                 <div id="cb-ack-done-help" class="mt-1 text-slate-500" hidden>The count starts again from zero now: it comes back only if it happens again after this. A setup that is still incomplete comes back after 30 minutes.</div>
@@ -216,12 +216,11 @@
             const data = await res.json().catch(() => ({}));
             return res.ok ? null : (data.error || data.message || 'Not saved.');
         };
+        // Ilang minuto mula ngayon (binibilang ng server), o ang petsa at oras na pinili ("2026-11-05T14:30" → "2026-11-05 14:30").
         const untilValue = () => {
             const v = $('cb-ack-until').value;
-            if (v === 'date') return $('cb-ack-date').value;
-            const d = new Date(Date.now() + Number(v) * 86400000);
-            return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0') + ' '
-                + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+            if (v === 'date') return {until: $('cb-ack-date').value.replace('T', ' ')};
+            return {minutes: Number(v)};
         };
         $('cb-ack-until')?.addEventListener('change', () => { $('cb-ack-date').hidden = $('cb-ack-until').value !== 'date'; });
         $('cb-ack-cancel')?.addEventListener('click', () => { form.hidden = true; target = null; });
@@ -229,13 +228,13 @@
             if (!target) return;
             const note = $('cb-ack-note').value.trim();
             if (!note) { $('cb-ack-error').textContent = 'Add a note first.'; return; }
-            const until = target.status === 'ack' ? untilValue() : '';
-            if (target.status === 'ack' && !until) { $('cb-ack-error').textContent = 'Pick a date.'; return; }
+            const until = target.status === 'ack' ? untilValue() : {};
+            if (until.until === '') { $('cb-ack-error').textContent = 'Pick a date and time.'; return; }
             $('cb-ack-save').disabled = true;
             try {
                 const err = target.all
-                    ? await post(@json(route('chatbot.problems.ack-all')), {status: target.status, note, until})
-                    : await post(@json(route('chatbot.problems.ack')), {page: target.page, kind: target.kind, status: target.status, note, until, level: target.level});
+                    ? await post(@json(route('chatbot.problems.ack-all')), {status: target.status, note, ...until})
+                    : await post(@json(route('chatbot.problems.ack')), {page: target.page, kind: target.kind, status: target.status, note, ...until, level: target.level});
                 if (err) { $('cb-ack-error').textContent = err; $('cb-ack-save').disabled = false; return; }
                 location.reload();
             } catch (e) { $('cb-ack-error').textContent = 'No connection: not saved.'; $('cb-ack-save').disabled = false; }

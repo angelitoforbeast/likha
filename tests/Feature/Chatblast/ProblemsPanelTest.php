@@ -307,6 +307,34 @@ class ProblemsPanelTest extends ChatblastTestCase
         $this->assertStringContainsString('still happening after it was marked done', $this->get('/chatbot/inbox')->getContent());
     }
 
+    public function test_acknowledge_for_a_minute_comes_back_after_it_and_a_date_keeps_its_time(): void
+    {
+        $this->actingAs($this->user());
+        $this->check('Page Dos', ['2 flows named UPDATE SHIPPING STATUS 2026']);
+        [$kind, $level] = $this->firstKind('Page Dos');
+
+        $html = $this->get('/chatbot/inbox')->getContent();
+        $this->assertStringContainsString('<option value="1">1 minute</option><option value="15">15 minutes</option><option value="60">1 hour</option><option value="1440" selected>1 day</option>', $html);
+        $this->assertStringContainsString('id="cb-ack-date" type="datetime-local"', $html);
+
+        $this->postJson('/chatbot/problems/ack', ['page' => 'Page Dos', 'kind' => $kind, 'status' => 'ack', 'note' => 'testing', 'minutes' => 0, 'level' => $level])->assertStatus(422);
+        $this->postJson('/chatbot/problems/ack', ['page' => 'Page Dos', 'kind' => $kind, 'status' => 'ack', 'note' => 'testing', 'minutes' => 1, 'level' => $level])->assertOk();
+        $this->assertSame('⚠ 0 pages with problems (0 urgent)', $this->panel()['line']);
+        $this->travel(61)->seconds();
+        Cache::flush();
+        $this->assertStringContainsString('the acknowledgement ended', $this->get('/chatbot/inbox')->getContent());
+
+        // A date and time: hidden until that exact minute, not the end of the day.
+        $at = now()->addHours(2)->format('Y-m-d H:i');
+        $this->postJson('/chatbot/problems/ack', ['page' => 'Page Dos', 'kind' => $kind, 'status' => 'ack', 'note' => 'until two', 'until' => $at, 'level' => $level])->assertOk();
+        $this->assertSame($at, app(\App\Services\Chatbot\ProblemAcks::class)->state('Page Dos', $kind, $level)['until']);
+
+        // The CEO's Acknowledge all takes minutes too.
+        $this->postJson('/chatbot/problems/ack', ['page' => 'Page Dos', 'kind' => $kind, 'status' => 'clear'])->assertOk();
+        $this->postJson('/chatbot/problems/ack-all', ['status' => 'ack', 'note' => 'all, 15 minutes', 'minutes' => 15])->assertOk()->assertJson(['saved' => 1]);
+        $this->assertSame(now()->addMinutes(15)->format('Y-m-d H:i'), app(\App\Services\Chatbot\ProblemAcks::class)->state('Page Dos', $kind, $level)['until']);
+    }
+
     public function test_the_kind_ignores_counts_and_times_and_an_ack_until_a_date_or_a_worse_level_returns_it(): void
     {
         $a = \App\Services\Chatbot\ProblemAcks::kind('Page restricted by Facebook: 57 of 58 sends failed since 16:08');
