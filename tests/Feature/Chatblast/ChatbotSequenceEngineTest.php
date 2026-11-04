@@ -350,6 +350,8 @@ class ChatbotSequenceEngineTest extends ChatblastTestCase
         $this->assertSame('2027-01-02 15:05', PageRestriction::untilFrom('restricted from messaging users until January 2 at 3:05 PM.', $now)->format('Y-m-d H:i'));
         $this->assertSame('2026-12-31 09:00', PageRestriction::untilFrom('until December 31, 2026 at 9:00 AM', $now)->format('Y-m-d H:i'));
         $this->assertNull(PageRestriction::untilFrom('(#2022) subcode 1404078', $now));
+        // Meta's own text: a narrow no-break space (U+202F) before AM/PM.
+        $this->assertSame('2026-12-01 03:10', PageRestriction::untilFrom("Botcake said \"(#2022) You're temporarily restricted from messaging users until December 1 at 3:10\u{202F}AM.\" (HTTP 200)", Carbon::parse('2026-11-04 17:00'))->format('Y-m-d H:i'));
     }
 
     public function test_S_070_5d_a_missing_or_unpublished_flow_or_a_failed_run_is_an_error_and_the_pointer_moves_on(): void

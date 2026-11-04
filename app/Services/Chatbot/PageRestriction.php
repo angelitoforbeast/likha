@@ -44,6 +44,8 @@ class PageRestriction
     /** Ang petsa sa error ("until December 1 at 3:10 AM"), sa oras ng app; lumipas na ang petsa ng taong ito → sa susunod na taon. */
     public static function untilFrom(?string $error, ?CarbonInterface $now = null): ?Carbon
     {
+        // Ang Meta ay naglalagay ng makitid na espasyo (U+202F) bago ang AM/PM: ginagawang karaniwang espasyo muna.
+        $error = $error === null ? null : (string) preg_replace('/[\x{00A0}\x{2007}\x{2009}\x{202F}]/u', ' ', $error);
         if ($error === null || !preg_match('/until\s+([A-Za-z]+\s+\d{1,2})(?:,?\s+(\d{4}))?\s+at\s+(\d{1,2}:\d{2}\s*[AP]M)/i', $error, $m)) return null;
         $now = Carbon::instance($now ?? now());
         try {
