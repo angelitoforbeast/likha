@@ -353,7 +353,8 @@ class PageOwnersScreenTest extends ChatblastTestCase
     /** Ang card ng isang page sa HTML. */
     private function card(string $html, string $id): string
     {
-        $this->assertSame(1, preg_match('#<li data-page="' . $id . '"((?!<li data-page=)[\s\S])*#', $html, $m), 'card ' . $id);
+        // Possessive (*+): walang backtracking, kaya hindi umaabot sa limit ng PCRE sa mahabang page.
+        $this->assertSame(1, preg_match('#<li data-page="' . $id . '"(?:(?!<li data-page=)[\s\S])*+#', $html, $m), 'card ' . $id);
 
         return $m[0];
     }
