@@ -273,7 +273,7 @@ class ProblemsPanelTest extends ChatblastTestCase
         $this->assertNull(app(\App\Services\Chatbot\ProblemAcks::class)->state('Page Dos', $kind, 'orange'));
     }
 
-    public function test_done_hides_a_line_for_30_minutes_and_it_comes_back_marked_when_still_there(): void
+    public function test_done_starts_the_count_from_zero_so_only_failures_after_it_bring_the_line_back(): void
     {
         $this->actingAs($this->user());
         foreach (['11:20:00', '11:30:00', '11:40:00'] as $t) $this->reply('1001', '7001', '2026-10-27 ' . $t, 'failed', self::RESTRICTED);
@@ -281,12 +281,30 @@ class ProblemsPanelTest extends ChatblastTestCase
         $this->postJson('/chatbot/problems/ack', ['page' => 'Page Uno', 'kind' => $kind, 'status' => 'done', 'note' => 'ads paused', 'level' => $level])->assertOk();
         $this->assertSame('⚠ 0 pages with problems (0 urgent)', $this->panel()['line']);
 
+        // 12:31: ang 11:40 na bigo (bago ang Done) ay nasa huling 60 minuto pa, kaya hindi ito bilang: nakatago pa.
         $this->travel(31)->minutes();
         Cache::flush();
-        foreach (['12:20:00'] as $t) $this->reply('1001', '7001', '2026-10-27 ' . $t, 'failed', self::RESTRICTED);
+        $this->assertSame('⚠ 0 pages with problems (0 urgent)', $this->panel()['line'], 'only what failed before Done: still hidden');
+
+        // 13:10: lumabas na sa window ang mga bigo bago ang Done; mga bagong bigo pagkatapos ng Done ang nagpapabalik dito.
+        $this->travelTo('2026-10-27 13:10:00');
+        foreach (['12:50:00', '13:00:00', '13:05:00'] as $t) $this->reply('1001', '7001', '2026-10-27 ' . $t, 'failed', self::RESTRICTED);
+        Cache::flush();
         $html = $this->get('/chatbot/inbox')->getContent();
-        $this->assertStringContainsString('still happening after it was marked done', $html);
+        $this->assertStringContainsString('new since it was marked done', $html);
         $this->assertStringContainsString('"ads paused"', $html);
+    }
+
+    public function test_done_on_a_state_like_an_incomplete_setup_comes_back_after_30_minutes_while_it_is_still_incomplete(): void
+    {
+        $this->actingAs($this->user());
+        $this->check('Page Dos', ['2 flows named UPDATE SHIPPING STATUS 2026']);
+        [$kind, $level] = $this->firstKind('Page Dos');
+        $this->postJson('/chatbot/problems/ack', ['page' => 'Page Dos', 'kind' => $kind, 'status' => 'done', 'note' => 'renamed', 'level' => $level])->assertOk();
+        $this->assertSame('⚠ 0 pages with problems (0 urgent)', $this->panel()['line']);
+        $this->travel(31)->minutes();
+        Cache::flush();
+        $this->assertStringContainsString('still happening after it was marked done', $this->get('/chatbot/inbox')->getContent());
     }
 
     public function test_the_kind_ignores_counts_and_times_and_an_ack_until_a_date_or_a_worse_level_returns_it(): void
