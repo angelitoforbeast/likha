@@ -154,7 +154,10 @@ class CppAdGroupRowsTest extends ChatblastTestCase
 
         $this->assertStringContainsString('const adGroupRows = ', $html);
         $this->assertStringContainsString('cpp-ag-row', $html);
-        $this->assertStringContainsString("!row.classList.contains('cpp-ag-row')", $html, 'Copy Table keeps the sheet shape');
+        $this->assertStringContainsString("withAdGroups || !row.classList.contains('cpp-ag-row')", $html, 'Copy Table keeps the sheet shape');
+        $this->assertStringContainsString('onclick="copySummaryOfAds()"', $html, 'Copy Table: one row per page');
+        $this->assertStringContainsString('onclick="copySummaryOfAds(true)"', $html, 'a second button copies the ad group rows too');
+        $this->assertStringContainsString('Copy with ad groups', $html);
         $this->assertStringContainsString('esc(g.label)', $html, 'group names are escaped');
         $this->assertStringNotContainsString('<b>MOBILE</b>', $html);
     }

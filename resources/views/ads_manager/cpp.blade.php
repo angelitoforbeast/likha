@@ -478,7 +478,11 @@
           <div class="w-fit max-w-full">
           <div class="flex justify-between items-center gap-6 mb-2">
             <h2 class="font-bold text-lg">${title}</h2>
-            <button onclick="copySummaryOfAds()" class="bg-blue-500 text-white px-3 py-1 rounded text-sm hover:bg-blue-600 shrink-0">Copy Table</button>
+            <div class="flex gap-2 shrink-0">
+              <button onclick="copySummaryOfAds()" class="bg-blue-500 text-white px-3 py-1 rounded text-sm hover:bg-blue-600">Copy Table</button>
+              <button onclick="copySummaryOfAds(true)" class="bg-white text-blue-600 border border-blue-500 px-3 py-1 rounded text-sm hover:bg-blue-50"
+                title="Kasama ang row ng bawat ad group sa ilalim ng page">Copy with ad groups</button>
+            </div>
           </div>
           <table id="summaryOfAdsTable" class="w-full border text-sm mb-6">
             <thead class="bg-gray-200">
@@ -902,12 +906,12 @@
       renderTables(dates, selectedPages);
     }
 
-    function copySummaryOfAds() {
+    function copySummaryOfAds(withAdGroups = false) {
       const table = document.getElementById('summaryOfAdsTable');
       if (!table) return;
 
-      // Ang mga row ng ad group ay sa screen lang: ang kinokopya ay gaya ng dati (isang row kada page).
-      const rows = Array.from(table.querySelectorAll('tr')).filter(row => !row.classList.contains('cpp-ag-row'));
+      // Copy Table: gaya ng dati (isang row kada page). Copy with ad groups: kasama ang row ng bawat ad group sa ilalim ng page.
+      const rows = Array.from(table.querySelectorAll('tr')).filter(row => withAdGroups || !row.classList.contains('cpp-ag-row'));
       const copiedText = rows.map(row => {
         return Array.from(row.querySelectorAll('th, td'))
           .map(cell => cell.textContent.replace(/₱/g, '').replace(/\n+/g, ', ').trim())
