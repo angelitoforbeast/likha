@@ -947,15 +947,11 @@ class MacroOutputController extends Controller
             $cursor->addDay();
         }
 
-        // ✅ Query: MacroOutput rows lang na may PAGE at sakop ng piniling dates
+        // ✅ Query: MacroOutput rows lang na may PAGE at sakop ng piniling dates. Sa ts_date (may index; pinupunan ng
+        // trigger mula sa petsa ng TIMESTAMP), hindi sa TIMESTAMP LIKE "%d-m-Y" na binabasa ang buong table bawat bukas.
         $query = MacroOutput::query()
             ->whereNotNull('PAGE')
-            ->where(function ($q) use ($dateDMYList) {
-                foreach ($dateDMYList as $dmy) {
-                    // TIMESTAMP sample: "00:03 01-07-2025" → LIKE "%01-07-2025"
-                    $q->orWhere('TIMESTAMP', 'like', "%{$dmy}");
-                }
-            });
+            ->whereBetween('ts_date', [$startDate->toDateString(), $endDate->toDateString()]);
 
         // (Optional) filter per PAGE:
         if ($request->filled('PAGE')) {
