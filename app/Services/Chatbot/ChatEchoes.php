@@ -15,7 +15,8 @@ use Illuminate\Support\Facades\Schema;
 /**
  * Ang echo: bawat mensaheng ipinadala ng page sa customer, mula sa alinmang app (Forbeast, Botcake, ang Page Inbox ng tao, …),
  * ay ipinapasa ng Meta sa bawat app na naka-subscribe sa page, kaya dumarating ito sa Likha sa Forbeast Gateway (ang Botcake
- * ay hindi nagpapasa ng echo nito). Iniimbak nang maikli sa chatbot_events (type echo; psid = ang customer, created_at = ang
+ * ay nagpapasa rin ng echo nito; sa page na Botcake ang route, ang echo na iyon ay ang sagot mismo ng Likha bot na ipinadala
+ * sa API ng Botcake). Iniimbak nang maikli sa chatbot_events (type echo; psid = ang customer, created_at = ang
  * oras ng Meta): ang mid, ang app, ang nagpadala, ang hash ng text at ang unang 200 letra. Para lang makita kung sino ang
  * sumagot (Inbox), ang hindi nasagot at ang dobleng sagot (Bot Health), at ang ebidensya ng ForbeastWatch. Walang ginagawa
  * ang bot dahil dito (hindi ito nagpa-pause kapag tao ang sumagot).
@@ -44,10 +45,10 @@ class ChatEchoes
     private const HEALTH_CACHE_SECONDS = 60;
     private const EXAMPLES = 5;
     /**
-     * Ang "CBB" ng dobleng sagot: ang Chatbot Builder at ang Botcake, ang mga app na may sariling main flow, sequence at
-     * loop bukod sa Likha bot.
+     * Ang "CBB" ng dobleng sagot: ang Chatbot Builder lang, ang app na may sariling main flow, sequence at loop bukod sa Likha
+     * bot. Ang Botcake ay hindi CBB: ito ang tagadala ng Likha bot sa page na Botcake ang route.
      */
-    public const CBB = ['chatbot_builder', 'botcake'];
+    public const CBB = ['chatbot_builder'];
     public const MAIN_EXAMPLES = 3;
     /** Ang page na may echo sa huling ilang oras lang ang sinusukat (ang page na walang echo ay hindi nakakabit sa Forbeast). */
     private const ACTIVE_SECONDS = 86400;
@@ -249,8 +250,9 @@ class ChatEchoes
             for ($i = 0; $i + 1 < $list->count(); $i++) {
                 [$a, $b] = [$list[$i], $list[$i + 1]];
                 if ($a['app'] === null || $b['app'] === null || $a['app'] === $b['app'] || $b['at'] - $a['at'] > $gap) continue;
+                // cbb: kasama sa pares ang echo ng Chatbot Builder (ang iba ay hindi leftover ng CBB).
                 $pairs[$a['page']][$a['psid']][] = ['at' => $at($b['at']), 'senders' => $a['label'] . ' + ' . $b['label'],
-                    'inbox' => $inbox($a['page'], $a['psid'])];
+                    'inbox' => $inbox($a['page'], $a['psid']), 'cbb' => in_array($a['sender'], self::CBB, true) || in_array($b['sender'], self::CBB, true)];
                 $i++; // ang pangalawa ay hindi na kapares ng susunod
             }
         }
@@ -268,12 +270,13 @@ class ChatEchoes
             $all = $left = [];
             foreach ($pairs[$id] ?? [] as $psid => $list) {
                 array_push($all, ...$list);
-                if (!isset($main[$psid])) array_push($left, ...$list);
+                if (!isset($main[$psid])) array_push($left, ...array_filter($list, fn ($p) => $p['cbb']));
             }
+            $strip = fn (array $list) => array_map(fn ($p) => array_diff_key($p, ['cbb' => 1]), $list);
             $r['doubles'] = count($all);
-            $r['double_examples'] = $latest($all, self::EXAMPLES);
+            $r['double_examples'] = $strip($latest($all, self::EXAMPLES));
             $r['leftovers'] = count($left);
-            $r['leftover_examples'] = $latest($left, self::EXAMPLES);
+            $r['leftover_examples'] = $strip($latest($left, self::EXAMPLES));
             $r['main_doubles'] = count($main);
             arsort($main);
             $r['main_examples'] = array_map(fn ($psid, $ts) => ['at' => $at($ts), 'inbox' => $inbox($id, (string) $psid)],
