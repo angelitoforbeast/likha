@@ -36,10 +36,19 @@ class TestHistory
 
     /**
      * Ang nakikita ng AI sa isang padala: wala kapag ai: false, ang ai_text kapag mayroon (ang sariling sagot ng AI), at
-     * ang buong text kapag ai: true o kapag lumang row na walang marka.
+     * ang buong text kapag ai: true o kapag lumang row na walang marka. Kasama ng buong text ang mga title ng button at
+     * quick reply ("Order na po? [Yes | No]"), maliban kung hindi ito naipadala (left_out).
      */
     public static function text(array $messages): string
     {
-        return implode("\n", array_filter(array_map(fn ($m) => !is_array($m) || ($m['ai'] ?? true) === false ? '' : (string) ($m['ai_text'] ?? $m['text'] ?? ''), $messages), fn ($t) => $t !== ''));
+        return implode("\n", array_filter(array_map(function ($m) {
+            if (!is_array($m) || ($m['ai'] ?? true) === false) return '';
+            if (isset($m['ai_text'])) return (string) $m['ai_text'];
+            $titles = empty($m['left_out']) ? array_column(array_merge((array) ($m['buttons'] ?? []), (array) ($m['quick_replies'] ?? [])), 'title') : [];
+
+            $text = (string) ($m['text'] ?? '');
+
+            return $titles ? trim($text . ' [' . implode(' | ', $titles) . ']') : $text;
+        }, $messages), fn ($t) => $t !== ''));
     }
 }
