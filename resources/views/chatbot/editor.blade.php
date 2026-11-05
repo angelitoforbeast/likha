@@ -208,7 +208,7 @@
         switch (n.type) {
             case 'start': case 'set': case 'sequence': case 'clear_ai': return ['next'];
             case 'condition': return [...(c.rows || []).map((_, i) => 'row_' + (i + 1)), 'no'];
-            case 'send': return c.wait ? (skipMinutes(c) ? ['reply', 'skipped'] : ['reply']) : ['continue'];
+            case 'send': return c.wait ? ['reply', ...ChatbotButtons.tapPorts(c.items).map(t => t.port), ...(skipMinutes(c) ? ['skipped'] : [])] : ['continue'];
             case 'ai': return ['success', 'failed'];
             case 'sheet': case 'encode_order': case 'upload_macro': case 'encode_macro': return ['next', 'failed'];
             default: return [];
@@ -222,6 +222,7 @@
             const r = (n.config.rows || [])[parseInt(p.slice(4), 10) - 1] || {};
             return (r.variable || '?') + ' ' + (rules[r.rule] || r.rule || '') + (r.value ? ' ' + r.value.split(/\r?\n/)[0].slice(0, 18) : '');
         }
+        if (p.startsWith('tap_')) return (ChatbotButtons.tapPorts(n.config.items).find(t => t.port === p) || {}).title || '(no title)';
         return PORT_LABEL[p] || p;
     }
     function summary(n) {
@@ -624,8 +625,8 @@
                     const cb = B.canAddButton(it), cq = B.canAddQuick(c.items, i);
                     const addB = el('button', {type: 'button', class: 'cb-btn cb-btn-sm' + (it.type === 'image' ? ' hidden' : ''), text: '+ Button', title: cb.why || null, disabled: !cb.ok});
                     const addQ = el('button', {type: 'button', class: 'cb-btn cb-btn-sm', text: '+ Quick reply', title: cq.why || null, disabled: !cq.ok});
-                    addB.addEventListener('click', () => { (it.buttons = it.buttons || []).push({title: '', type: 'postback', payload: ''}); tapAdded(); draw(); });
-                    addQ.addEventListener('click', () => { (it.quick_replies = it.quick_replies || []).push({title: '', payload: ''}); tapAdded(); draw(); });
+                    addB.addEventListener('click', () => { (it.buttons = it.buttons || []).push({title: '', type: 'postback', payload: '', id: B.newId()}); tapAdded(); draw(); });
+                    addQ.addEventListener('click', () => { (it.quick_replies = it.quick_replies || []).push({title: '', payload: '', id: B.newId()}); tapAdded(); draw(); });
                     const notes = B.notes(c.items, i).map(t => el('p', {class: 'text-xs text-red-700', text: t}));
                     const why = [cb, cq].filter(x => !x.ok && x.why && !(it.type === 'image' && x === cb)).map(x => el('p', {class: 'text-xs text-slate-500', text: x.why}));
                     const warn = rows.length && textOnly.length ? el('p', {class: 'text-xs text-amber-700', text: 'Botcake pages get the text only (no buttons or quick replies): ' + textOnly.join(', ')}) : null;
@@ -1010,7 +1011,7 @@
 
     /** Isang bagong graph mula sa server (Discard, Restore): mababawi ng Undo, at naka-save na. */
     function replaceGraph(g) {
-        graph = g; graph.nodes.forEach(n => n.config = n.config && !Array.isArray(n.config) ? n.config : {});
+        graph = g; ChatbotButtons.withIds(graph); graph.nodes.forEach(n => n.config = n.config && !Array.isArray(n.config) ? n.config : {});
         remember(); dirty = false; selWire = null; $('del-wire').classList.add('hidden'); render();
     }
 
@@ -1084,6 +1085,8 @@
     fetch(ed.dataset.graphUrl, {headers: {'Accept': 'application/json'}}).then(r => r.json()).then(data => {
         graph = data.graph; variables = data.variables || []; variableGroups = data.variable_groups || []; rules = data.rules || {}; sequences = data.sequences || [];
         graph.nodes.forEach(n => n.config = n.config && !Array.isArray(n.config) ? n.config : {});
+        // Ang button na walang id (naka-save bago ang mga exit ng tap) ay binibigyan dito; naiimbak sa susunod na save.
+        ChatbotButtons.withIds(graph);
         current = snapshot(); setState(data);
         applyView(); render(); fit();
     }).catch(() => status('Could not load the flow.', 'text-red-600'));

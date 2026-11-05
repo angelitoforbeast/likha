@@ -86,7 +86,53 @@
     return out;
   }
 
+  // Ang id ng button o quick reply, gaya ng FlowGraph::TAP_ID: ang port nito ay tap_<id>. Hindi galing sa title o puwesto,
+  // kaya ang pagpalit ng title o ang pagtanggal ng ibang button ay hindi nag-aalis ng wire.
+  var ID = /^[a-z0-9]{6,16}$/, ID_CHARS = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  function idRule() { return ID.source; }
+  function validId(v) { return typeof v === 'string' && ID.test(v); }
+
+  // Bagong id: laging 8 letra, bawat isa ay pinili sa [a-z0-9] (hindi toString(36) ng numero, na minsan ay mas maikli).
+  function newId() {
+    var c = root.crypto, bytes = [], out = '';
+    if (c && c.getRandomValues) bytes = Array.from(c.getRandomValues(new Uint8Array(8)));
+    else for (var j = 0; j < 8; j++) bytes.push(Math.floor(Math.random() * 256));
+    for (var i = 0; i < 8; i++) out += ID_CHARS.charAt(bytes[i] % ID_CHARS.length);
+    return out;
+  }
+
+  // Bawat button at quick reply ng bawat Send ay may tamang id na hindi umuulit sa step (ang kulang, sira o ulit ay pinapalitan).
+  function withIds(graph) {
+    list(graph && graph.nodes).forEach(function (n) {
+      if (!n || n.type !== 'send' || !n.config) return;
+      var seen = {};
+      list(n.config.items).forEach(function (it) {
+        if (!it) return;
+        list(it.buttons).concat(list(it.quick_replies)).forEach(function (t) {
+          if (!t || typeof t !== 'object') return;
+          if (!validId(t.id) || seen['=' + t.id]) { do { t.id = newId(); } while (seen['=' + t.id]); }
+          seen['=' + t.id] = true;
+        });
+      });
+    });
+    return graph;
+  }
+
+  // Ang mga exit ng tap ng isang Send, sa ayos ng form, gaya ng FlowGraph::tapPorts: ang postback at quick reply na may id.
+  function tapPorts(items) {
+    var out = [], seen = {};
+    list(items).forEach(function (it) {
+      if (!it) return;
+      list(it.buttons).concat(list(it.quick_replies)).forEach(function (t) {
+        if (!t || (t.type || 'postback') !== 'postback' || !validId(t.id) || seen['=' + t.id]) return;
+        seen['=' + t.id] = true;
+        out.push({port: 'tap_' + t.id, title: String(t.title == null ? '' : t.title)});
+      });
+    });
+    return out;
+  }
+
   root.ChatbotButtons = {MAX_BUTTONS: MAX_BUTTONS, MAX_QUICK: MAX_QUICK, MAX_TITLE: MAX_TITLE, MAX_BUTTON_TEXT: MAX_BUTTON_TEXT,
     chars: chars, payloadFor: payloadFor, clampTitle: clampTitle, clampText: clampText, canAddButton: canAddButton, canAddQuick: canAddQuick,
-    needsWait: needsWait, setType: setType, notes: notes};
+    needsWait: needsWait, setType: setType, notes: notes, idRule: idRule, newId: newId, withIds: withIds, tapPorts: tapPorts};
 })(typeof self !== 'undefined' ? self : this);
