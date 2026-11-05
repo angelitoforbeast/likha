@@ -4522,3 +4522,37 @@ Slice 231: 18 passed, 0 failed, 0 blocked, 0 skipped, 0 not run (18 cases, 18 te
 | S-231.5.2 | happy | Given an AI line marked Done, then it stays hidden until a new failure | `test_S_231_5_2_done_hides_the_ai_line_until_a_new_failure` | 2026-11-05 passed |
 | S-231.5.3 | edge | Given a database error inside the AI check, then the rest of the banner still shows | `test_S_231_5_3_a_database_error_in_the_ai_check_leaves_the_rest_of_the_banner` | 2026-11-05 passed |
 | S-231.5.4 | edge | Given the banner HTML at 390 × 844, then the new lines wrap, with no sideways scroll | `test_S_231_5_4_the_ai_lines_wrap_in_the_banner_list` | 2026-11-05 passed |
+
+## Slice 233 – Page id on botcake_psids
+
+As the office, I want every Botcake PSID row to carry its Facebook page id, so renaming a page in page settings never makes order matching, Chatblast, ad groups or the Inbox lose that page's older customers.
+
+Slice 233: not run yet. Threat model: chat payloads on `/api/botcake/chat`, Botcake API answers, sheet text and page names typed by staff are untrusted; the page id is taken from page settings or from a chat Botcake confirmed. No new route or input. Risk tier: high (a backfill on a large live table). Tests: `tests/Feature/Botcake/BotcakePsidPageIdBackfillTest.php`, `tests/Feature/Botcake/BotcakePsidPageIdTest.php`.
+
+### S-233.1 New rows carry the page id (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-233.1.1 | happy | Given a chat on `/api/botcake/chat` whose PSID Botcake confirms, when it is stored, then its `chat_verify` row has the page id | `test_S_233_1_1_a_verified_chat_stores_its_psid_row_with_the_page_id` | not run |
+| S-233.1.2 | happy | Given a page with `botcake.page_id`, when the Botcake API customer sync stores its customers, then each row has that page id (an older row without one gets it; one that has it keeps it) | `test_S_233_1_2_the_api_sync_stores_the_page_id_from_settings` | not run |
+| S-233.1.3 | edge | Given a sheet row for a page with no `botcake.page_id`, when it is recorded, then `page_id` is null and the row is still stored | `test_S_233_1_3_a_page_without_an_id_still_stores_its_row` | not run |
+
+### S-233.2 The backfill fills old rows safely (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-233.2.1 | happy | Given rows for 3 named pages that have ids, when `botcake:psid-page-id-backfill` runs, then all are filled and the counts are printed | `test_S_233_2_1_rows_of_three_named_pages_are_all_filled` | not run |
+| S-233.2.2 | negative | Given rows under a name with no page in settings (or a name that ever had two ids), when the backfill runs, then they stay null and the name is listed with its row count | `test_S_233_2_2_a_name_without_one_page_id_stays_null_and_is_reported` | not run |
+| S-233.2.3 | edge | Given a finished backfill, when it runs again, then nothing changes | `test_S_233_2_3_a_second_run_changes_nothing` | not run |
+| S-233.2.4 | edge | Given a run stopped part-way, when it runs again, then the rest is filled | `test_S_233_2_4_a_run_stopped_part_way_finishes_on_the_next_run` | not run |
+| S-233.2.5 | edge | Given names that differ from the settings name only in case or spacing, when the backfill runs, then they match through pageKey | `test_S_233_2_5_names_differing_in_case_or_spacing_match` | not run |
+
+### S-233.3 A rename doesn't break matching (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-233.3.1 | happy | Given page "A" with id X has rows, when it is renamed "B" in page settings, then order matching (BotcakePsidMatcher, BotcakeCustomerMatcher), Chatblast candidates, ad groups, the Inbox and the other page readers still find the old rows by id | `test_S_233_3_1_a_renamed_page_still_finds_its_old_rows` | not run |
+| S-233.3.2 | negative | Given a name reused after a rename (rows of page X and page Y both under "Shop", each with its own id), when either page is read, then it finds only its own rows | `test_S_233_3_2_two_pages_with_the_same_name_find_only_their_own_rows` | not run |
+| S-233.3.3 | edge | Given rows with `page_id` null, when the page is read, then they still match by name, as today | `test_S_233_3_3_rows_without_a_page_id_still_match_by_name` | not run |
+
+### S-233.4 Nothing changes for pages never renamed (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-233.4.1 | happy | Given pages never renamed, when the existing matcher, Chatblast, ad group, Inbox and PsidCoverage tests run unchanged, then they pass | the existing test files, unchanged | not run |
