@@ -48,7 +48,7 @@ payload; the editor uses the same rule in JS.
 **Publish** (`FlowGraph::publishProblems`, blocks, names the step): buttons with empty text; an empty title; a
 postback or quick reply with an empty payload; a web_url that is not an `https://` URL (`FlowEngine::isUrl` plus
 the https scheme, literal: no variables in a url); duplicate titles or duplicate payloads in one item; quick
-replies on an item that is not the last (an item added after it while editing must not fail the autosave).
+replies on an item that is not the last (an item added after it while editing must not block the draft save).
 `publishNotice` (no block) adds: a step with a postback or quick reply that does not wait (and that a sequence
 step never waits, so a tap there starts the page's main flow). The controller adds a second notice line from a
 new `ButtonPages::textOnly($flowId)`: the pages that reach the flow, found by the walk `ChatbotPageCheck`
