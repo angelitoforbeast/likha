@@ -2,7 +2,18 @@
 
 ## Status
 
-Plan written and spec-reviewed, waiting for "go". No code yet. Branch `feat/233-psid-page-id` from `f175cb2f`.
+Done, not pushed, not deployed. Branch `feat/233-psid-page-id` from `f175cb2f`, 11 commits. All 12 cases pass (S-233.4.1 through the existing tests); the full suite has only the 2 known pre-existing failures. One new migration (`2026_11_18_100000_add_page_id_to_botcake_psids.php`) and one new command (`botcake:psid-page-id-backfill`). High tier: tasks 1–3 reviewed by `skeptic-reviewer` at adversarial depth, task 4 at standard depth; 2 majors (task 1) fixed in one loop; minors fixed on untrusted paths or accepted in `TODO.md`.
+
+### Merge danger
+
+- **Kind:** a two-way door for the code, a mostly one-way door for the data. The column and indexes can be dropped (`down()` is there); the backfill only writes `page_id` on rows where it was null, and nothing else, so its effect can be undone by setting `page_id` back to null (it records nothing else).
+- **Blast radius:** order matching (both matchers), the Botcake customer sync, the `/api/botcake/chat` PSID check, the gateway name, the Inbox, the live feed, chatbot tags, Chatblast candidates, ad groups, the customers page, PSID coverage and the page settings grid. For pages never renamed the rows they find are the same as before.
+- **Deploy order, on Likha and on incepxion.pro:**
+  1. Pull the code and run `php artisan migrate --force` right away. Run it when no long sync is running (`botcake:sync-customers`), because each `ADD INDEX` briefly takes a metadata lock that waits for open transactions on `botcake_psids`, and new writes queue behind it while it waits. Expect about a minute on Likha.
+  2. `php artisan queue:restart`, so no worker keeps the old code or the memo "no page_id column" from before the migration.
+  3. `php artisan botcake:psid-page-id-backfill --max-chunks=1` to see one chunk's counts and time, then `php artisan botcake:psid-page-id-backfill`. Read the names it lists: those pages' old rows keep matching by name.
+- Code that runs before the migration (for example, workers between the pull and the migrate) falls back to the name, as today; nothing errors.
+- **Revert:** revert the commits; the column can stay (nothing else reads it) or be dropped with `migrate:rollback --step=1`.
 
 ## Plan
 
@@ -88,30 +99,111 @@ Left as is, with the reason: `BotcakePsidMatcher::recordImported` / `recordWaiti
 
 ## Summary
 
-(pending)
+Every `botcake_psids` row can now carry its Facebook page id, and every reader that looks a customer up by page uses the id first and the page name only for rows without an id (or a page without one). A page renamed in page settings keeps finding its old rows; a name reused by another page finds only its own rows; rows without an id match by name as before. Nothing renames, merges or deletes rows; `page` is untouched.
+
+**Backfill command:** `php artisan botcake:psid-page-id-backfill` (`--chunk=5000`, `--sleep=200` ms between chunks, `--max-chunks=0` = until done). It reads `page_id IS NULL AND id > last` by primary key in chunks, matches each row's page through `PageSettings::pageKey` against every `botcake.page_id` in page settings, active and history, and updates by id with `page_id IS NULL` repeated in the UPDATE (a live write in between is never overwritten). A name that ever had two or more ids stays null and is listed as "more than one page id"; an old (replaced) name's id fills only rows made on or before that name's last `replaced_at`. It prints `Filled`, `No matching page`, `More than one page id`, `Left without page id` and up to 50 names (largest first, control characters stripped, 80 characters at most) with their row counts; the log gets the counts only.
+
+**Run time per 100,000 rows** (throwaway seeded test, not committed: 100,000 rows over 4 names, 3 with ids, in-memory sqlite, `--sleep=0`): **1.39 s**, peak memory 66 MB; a second run took 0.05 s. Output: `Filled: 75000`, `No matching page: 25000`, `Left without page id: 25000`, `Lost Page: 25000`. With the default sleep add 20 chunks × 200 ms = **4 s per 100,000**, so about 5.4 s per 100,000 here. Live MySQL is slower than in-memory sqlite (each 5,000-row UPDATE by primary key writes to disk and to three new indexes); a fair guess is 5 to 15 s per 100,000 on the live server, so about 1 to 2 minutes for Likha's ~800,000 rows. Run `--max-chunks=1` first to see the counts and the time of one chunk.
+
+Per task (all backend; no screen changed):
+
+| # | Task | Tier | Commit | Files |
+|---|---|---|---|---|
+| 0 | Stories, slice 233 | low | `0f658061` | `qa/stories.md` |
+| 1 | Migration, backfill command | high | `dd9f9658`, fix `0d5ca6c2` | `database/migrations/2026_11_18_100000_add_page_id_to_botcake_psids.php`, `app/Console/Commands/BackfillBotcakePsidPageId.php`, `tests/Feature/Botcake/BotcakePsidPageIdBackfillTest.php`, the two test bases |
+| 2 | Model helpers; order matching and the API sync | high | `e3d12a89` | `app/Models/BotcakePsid.php` (`page_id` fillable, `hasPageId`, `pageIdOf`, `pageIdAttr`, `withPageId`, `scopeOfPage`, `updateOfPage`, `onPage`), `BotcakeCustomerSync`, `BotcakeCustomerMatcher`, `BotcakePsidMatcher`, `tests/Feature/Botcake/BotcakePsidPageIdTest.php` |
+| 3 | Chat path | high | `42bff3f6` | `BotcakeChatGuard`, `HandleGatewayEvent::name`, `Chatbot\Inbox`, `Chatbot\LiveFeed`, `Chatbot\ChatbotTags` |
+| 4 | Page lists | medium | `167e3693` | `ChatblastController::pageCustomers`, `Chatbot\AdGroups` (`latestAd`, `seen`), `BotcakeCustomersController`, `PsidCoverageController`, `PageSettingsGrid::info` |
+| – | Final minors wave | – | `c130b906` | `BotcakePsidMatcher` (a retried record uses its own page id), `LiveFeed` (`id:` / `name:` keys) |
+| 5 | Minors in TODO.md, result | low | `cdf02468` and this commit | `TODO.md`, this file |
+
+Notes on the build:
+- The model helpers were planned in task 1 but landed in task 2's commit, next to their first tests.
+- The migration was first named `2026_11_05_200000`; the repo already has migrations up to `2026_11_17_100000`, so it was renamed `2026_11_18_100000` to run last. It never ran anywhere but the in-memory test database.
+- The test bases `BotcakeApiTestCase` and `BotcakePsidTestCase` now run the new migration, and `BotcakePsidTestCase` also runs the page settings migrations (production always has that table; the sheet matcher now reads `botcake.page_id`). No test body changed.
+- `LiveFeed` selects every column of the few PSID rows it reads, so the poll asks the schema nothing; the existing poll query-count tests (S-199.8, S-200.4, S-205.6) compare two polls and failed while the one-time column check sat in the first poll.
+- No subagent developers: this session had no `backend-developer` agent, so the main session wrote the code test-first and `skeptic-reviewer` reviewed each task.
 
 ## Checks
 
-(pending)
+PHP is `"/c/Users/Forbeast/.config/herd/bin/php.bat"`, shortened to `php`. Tests run with `php vendor/bin/phpunit`.
+
+**Red runs** (first failure per slice, before the code):
+
+| Slice | Red |
+|---|---|
+| Task 1 | `BotcakePsidPageIdBackfillTest`: 5 errors, `CommandNotFoundException: The command "botcake:psid-page-id-backfill" does not exist.` |
+| Task 1 fix | against the old command with the `whereNull` guard taken out: `S_233_2_2 … Failed asserting that two arrays are identical.` and `S_233_2_3_a_row_written_by_a_live_writer … Failed asserting that two arrays are identical.` |
+| Task 2 | 8 failures, e.g. `S_233_1_2 … ('new') Failed asserting that two arrays are identical.`, `S_233_3_1 … ('customerMatcher') Failed asserting that null is identical to 'psid-a'.`, `S_233_3_2 … ('inactive') Failed asserting that two arrays are identical.` (one more error was a test-helper bug, fixed). S-233.1.3 "no id" and S-233.3.3 passed before the change: they pin today's behaviour. |
+| Task 3 | 7 failures, e.g. `('gatewayName') Failed asserting that null is identical to 'Ana Cruz'.`, `S_233_1_1 … Failed asserting that two arrays are identical.`, `('chatReaders') Failed asserting that 'Xavier Lim' is null.` The LiveFeed row first errored on a missing test migration (`no such column: via`), so its own red was not seen cleanly; its same-name row was red. |
+| Task 4 | 7 failures, e.g. `('settingsGrid') Failed asserting that 0 is identical to 1.`, `('latestAd') Failed asserting that null is identical to '120250000000000001'.`, `('coverage') Failed asserting that two strings are identical.` |
+| Minors wave | `('psidRetry') Failed asserting that two strings are identical.`, `S_233_3_3 … Failed asserting that 'Dina G.' is null.` |
+
+**Green, affected files** (last runs): `BotcakePsidPageIdBackfillTest` OK (6 tests, 23 assertions); `BotcakePsidPageIdTest` OK (27 tests, 70 assertions); `tests/Feature/Botcake` OK (129 tests, 492 assertions); `PsidCoverageTest`, all `tests/Feature/PageSettings`, `AdGroup*`, `Chatblast*`, `BotcakeChat*`, `ChatbotInbox*`, `ChatbotTagsTest`, `ChatbotLive*`, `AdOpen*`: OK.
+
+**Lint:** `php -l` on every changed PHP file: no syntax errors.
+
+**Full suite** (`php vendor/bin/phpunit`, on `cdf02468`):
+
+```
+Tests: 4555, Assertions: 77616, Failures: 2, PHPUnit Deprecations: 95, Skipped: 6.
+1) Tests\Feature\ExampleTest::test_the_application_returns_a_successful_response
+2) Tests\Feature\Item\ItemTableFitScriptTest::test_every_catalog_column_id_has_a_minimum_width_and_a_place_in_the_drop_order
+Time: 13:06.009, Memory: 862.00 MB
+```
+
+Both failures are the known pre-existing ones named in the spec; no new failure. BigBroadcastTest and AstraAddressRulesTest S-26.18 passed this run.
+
+Kit hook tests (`node --test 'test/hooks/*.test.mjs'`): 1075 tests, 1026 pass, 5 fail, all in `format-on-edit` on `symlink` with `EPERM` (this Windows account may not create symlinks). This branch changes nothing under `test/` or `.claude/`.
+
+**Case table**
+
+| Case | Test | Result |
+|---|---|---|
+| S-233.1.1 | `test_S_233_1_1_a_verified_chat_stores_its_psid_row_with_the_page_id` | pass |
+| S-233.1.2 | `test_S_233_1_2_the_api_sync_stores_the_page_id_from_settings` (new rows; an older row without a page id gets it; after a rename the old row is updated, not doubled) | pass |
+| S-233.1.3 | `test_S_233_1_3_a_page_without_an_id_still_stores_its_row` (a page without `botcake.page_id`; before the column is migrated) | pass |
+| S-233.2.1 | `test_S_233_2_1_rows_of_three_named_pages_are_all_filled` (also: the log holds counts only) | pass |
+| S-233.2.2 | `test_S_233_2_2_a_name_without_one_page_id_stays_null_and_is_reported` (no page; two ids; an old name's row made after the rename; cleaned, cut name) | pass |
+| S-233.2.3 | `test_S_233_2_3_a_second_run_changes_nothing`, plus `test_S_233_2_3_a_row_written_by_a_live_writer_during_the_run_is_not_overwritten` (extra, from the review) | pass |
+| S-233.2.4 | `test_S_233_2_4_a_run_stopped_part_way_finishes_on_the_next_run` | pass |
+| S-233.2.5 | `test_S_233_2_5_names_differing_in_case_or_spacing_match` (also an old name from history) | pass |
+| S-233.3.1 | `test_S_233_3_1_a_renamed_page_still_finds_its_old_rows`: 15 rows (BotcakeCustomerMatcher, BotcakePsidMatcher, its retry of an old waiting row, HandleGatewayEvent name, BotcakeChatGuard check, Inbox list name, Inbox panel, LiveFeed name, ChatbotTags ad, Chatblast candidates, ad groups seen, customers page, page settings grid, ad groups latestAd, PSID coverage) | pass |
+| S-233.3.2 | `test_S_233_3_2_two_pages_with_the_same_name_find_only_their_own_rows`: 5 rows (customer matcher incl. the ad id fill and chat_verify not a candidate, sheet records, the sync's inactive update, chat readers, page lists and coverage) | pass |
+| S-233.3.3 | `test_S_233_3_3_rows_without_a_page_id_still_match_by_name` (matchers; live feed; a page named "id:1001") | pass |
+| S-233.4.1 | the existing matcher, Chatblast, ad group, Inbox and PsidCoverage test files, bodies unchanged (`BotcakeCustomerMatchTest`, `BotcakePsidImportTest`, `BotcakeCustomerSyncTest`, `AdGroup*Test`, `ChatbotInbox*Test`, `PsidCoverageTest`, …) | pass |
+
+**MySQL 8 online DDL** (reasoning, no live measurement: no server access): the migration is four statements. `ADD COLUMN page_id varchar(64) NULL` at the end of the table is `ALGORITHM=INSTANT` on MySQL 8.0.12+ (a metadata change, under a second). Each of the three `ADD INDEX` is `ALGORITHM=INPLACE, LOCK=NONE`: reads and writes go on while the index builds; it scans the ~800,000 rows and sorts them, which on a table this size is typically 5 to 30 s per index, so about 15 s to 1.5 min in all (more on incepxion.pro, which is larger). Each statement takes an exclusive metadata lock for a moment at its start and end. That lock waits for any open transaction on `botcake_psids` (a long sync or a long report query), and while it waits, new reads and writes on the table queue behind it. See Merge danger.
+
+**Browser check:** skipped. No screen or template changed (the customers page, Chatblast and the grid show the same columns with different rows), and this session has no browser tools.
 
 ## Rulings
 
 - Spec review (skeptic-reviewer, spec-review mode) before this plan: verdict "go with changes". Folded in: column guard (design 6), worker restart and both installs in the deploy order (design 5), bulk UPDATEs split instead of OR (design 7), nested OR scope, concrete `PageSettingsGrid::info` rule (design 8), capped and cleaned name report, the extra test rows. Kept against its minor: `--max-chunks` (reason in design 4).
 - Constraint vs. design: the spec's deploy order is "migrate, deploy code, backfill", but here the migration file arrives with the code pull; the column guard makes either order safe.
-
-- S-233.4.1 has no new test: its Then is that the existing tests pass unchanged, so the evidence is those test files run unchanged before the PR.
+- S-233.4.1 has no new test: its Then is that the existing tests pass unchanged, so the evidence is those test files run unchanged (their bodies; the two bases now also migrate the new column and page settings).
 - `BotcakePsidMatcher`'s "already recorded?" lookups stay on the sheet's own page text (see Plan): they identify a sheet row, not a page.
+- The three reworded stories (S-233.1.1, S-233.1.3, S-233.3.2) were accepted as proposed.
+- **Page settings history in the backfill (reviewer's decision):** the backfill also uses inactive `botcake.page_id` rows (old name → id). A name that maps to exactly one id is filled; a name that ever mapped to two or more different ids stays null and is listed. The task 1 review added a bound: an id known only from history fills only rows made on or before that name's last `replaced_at`, because a later row under that name can belong to another page that took the name.
+- Reviews and loops: task 1 (adversarial, opus): 2 majors (history without a time bound; the live-writer guard untested), fixed in one loop (`0d5ca6c2`) and closed on re-check. Tasks 2 and 3 (adversarial, opus) and task 4 (standard, sonnet): no blockers or majors. Minors on untrusted paths fixed in one wave (`c130b906`: a retried sheet record uses its own page id; live-feed keys; the report cleaning was tested in the task 1 fix; the ad id fill across pages with one name got a test row); the rest accepted in `TODO.md` with reasons.
+- `BotcakeStressPage --seed` is the one writer left without `page_id` (fake PSIDs of a mock page; see TODO.md).
 
 ## Story changes
 
-- S-233.1.1 "a gateway chat event stores a row with page_id": `HandleGatewayEvent` never writes `botcake_psids`; the chat path that does is `/api/botcake/chat` (`BotcakeChatGuard`, source `chat_verify`). Proposed wording: ".1 happy: a chat on /api/botcake/chat whose PSID Botcake confirms stores a chat_verify row with page_id." The gateway's name lookup is covered as a reader in S-233.3.
-- S-233.1.3 "a page with no id in settings": the API sync never runs for such a page (it needs `botcake.page_id`), and the chat path always has an id. The case is tested on the sheet path (`BotcakePsidMatcher`), the one writer that can meet a page without an id. Proposed wording: ".3 edge: a sheet row for a page with no botcake.page_id → page_id null, the row is still stored."
-- S-233.3.2 "two different pages with the same name": page settings allow only one active `botcake.page_id` per page name, so this happens when a name is reused after a rename (page X renamed away from "Shop", page Y named "Shop"). The test builds it that way: rows of X and Y both carry page "Shop" with their own ids.
+- S-233.1.1 reworded: "a chat on /api/botcake/chat whose PSID Botcake confirms stores a chat_verify row with page_id." Reason: `HandleGatewayEvent` never writes `botcake_psids`; the chat path that does is `BotcakeChatGuard` (source `chat_verify`). The gateway's name lookup is tested as a reader in S-233.3.
+- S-233.1.3 reworded: "a sheet row for a page with no botcake.page_id → page_id null, the row is still stored." Reason: the API sync never runs for such a page and the chat path always has an id; the sheet path is the one writer that meets a page without an id. A second row covers "before the column is migrated".
+- S-233.3.2: built as a name reused after a rename (page settings allow one active `botcake.page_id` per name). Reason: that is the only way two pages share a name.
+- S-233.2.2 widened: "a name with no page in settings (or a name that ever had two ids)". Reason: the reviewer's history decision.
+- S-233.3.1 Then widened to "and the other page readers" (gateway name, chat check, live feed, tags, customers page, PSID coverage, page settings grid). Reason: every reader changed needs a red row.
+- All the above are in `qa/stories.md`, slice 233.
 
 ## Open questions
 
-- Pages renamed **before** this deploy: their old rows keep the old name, which the active map no longer knows, so the backfill leaves them null and lists them. The inactive history in `page_settings` (old `botcake.page_id` rows keep their old page name) could fill them. Not in the plan, since decision 2 says "the page settings map"; the backfill's report shows whether it is worth a follow-up.
+- None open. The one from the plan (pages renamed before this deploy) was decided: the backfill uses page settings history (see Rulings).
 
 ## Proposed tasks
 
-(pending)
+- EXPLAIN the backfill's chunk SELECT and the matcher's candidate query on a copy of the live table before the first run (TODO.md).
+- After the backfill on both installs, look at the names it lists; if many rows stay null, a follow-up can decide how to treat them (for example the owner telling which page an old name was).
+- `orderBy('id')` on the sync's existing-row lookup, with a test (TODO.md).
+- Other tables keyed by page name (`macro_output.PAGE`, `botcake_psid_import_runs.page_name`) have the same rename problem; out of scope here.
