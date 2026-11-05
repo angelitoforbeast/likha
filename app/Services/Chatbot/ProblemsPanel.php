@@ -183,7 +183,7 @@ class ProblemsPanel
                 $id !== '' ? [self::health($id, 'page-problems'), self::inbox($id)] : [], null, 10);
         }
         foreach (ForbeastWatch::unknownSite() as $s) {
-            $out[] = self::line(self::SITE, 'orange', 'Meta error ' . $s['code'] . ' on ' . $s['pages'] . ' pages: replies failing; no page switched (Botcake goes through the same Meta)',
+            $out[] = self::line(self::SITE, 'orange', 'Meta error ' . $s['code'] . ' on ' . $s['pages'] . ' pages: replies failing; no more pages switched (Botcake goes through the same Meta)',
                 [['Health', '/chatbot/health']], null, 10);
         }
         foreach (ForbeastWatch::unknownToday() as $d) {

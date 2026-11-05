@@ -263,7 +263,7 @@ class UnknownMetaCodeTest extends ChatblastTestCase
 
         $this->assertSame(0, $this->switchEvents(), 'walang page na lumipat: ang Botcake ay dumadaan din sa parehong Meta');
         foreach ($pages as $name) $this->assertSame('gateway', ChatbotProvider::name($name));
-        $this->assertSame([[ProblemsPanel::SITE, 'orange', 'Meta error #9999 on 5 pages: replies failing; no page switched (Botcake goes through the same Meta)']], $this->orange());
+        $this->assertSame([[ProblemsPanel::SITE, 'orange', 'Meta error #9999 on 5 pages: replies failing; no more pages switched (Botcake goes through the same Meta)']], $this->orange());
 
         // Paisa-isa: 4 page ang lumipat pagkatapos ng hold, saka ang ika-5 sa loob ng window. Kasama sa bilang ang mga lumipat
         // na, kaya ang ika-5 ay hindi na lilipat at lumalabas ang linya ng site.
@@ -276,7 +276,7 @@ class UnknownMetaCodeTest extends ChatblastTestCase
         $this->travel(3)->minutes();
         app(ForbeastWatch::class)->settleUnknown();
         $this->assertSame('gateway', ChatbotProvider::name('Page Singko'), 'ang ika-5 page ay hindi lumipat');
-        $this->assertSame([[ProblemsPanel::SITE, 'orange', 'Meta error #8888 on 5 pages: replies failing; no page switched (Botcake goes through the same Meta)']], $this->orange());
+        $this->assertSame([[ProblemsPanel::SITE, 'orange', 'Meta error #8888 on 5 pages: replies failing; no more pages switched (Botcake goes through the same Meta)']], $this->orange());
     }
 
     public function test_S_235_2_7_zero_percent_turns_the_switch_and_the_line_off(): void
