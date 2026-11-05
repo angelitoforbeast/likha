@@ -70,6 +70,7 @@ class ProblemsPanel
         $echoes = $this->safely(fn () => $this->echoes(), []);
         $lines = array_merge(
             $this->safely(fn () => $this->sends(), []),
+            $this->safely(fn () => $this->metaCodes(), []),
             $echoes,
             $own['events'], $own['slow'], $own['quiet'], $own['ai'] ?? [],
             $this->safely(fn () => $this->setup($own['sending'], $own['selling'] ?? null), []),
@@ -163,6 +164,33 @@ class ProblemsPanel
             $out[] = self::line($p['page'], $p['send_light'] === 'red' ? 'red' : 'orange',
                 $p['send_reason'] . ': ' . ($p['failed'] - $p['unreachable']) . ' of ' . $p['sends'] . ' sends failed since ' . self::hhmm($p['send_since']),
                 [self::health($p['page_id'], 'page-problems'), self::inbox($p['page_id'])], (string) $p['send_since']);
+        }
+
+        return $out;
+    }
+
+    /**
+     * Ang hindi kilalang error ng Meta sa padala ng gateway (ForbeastWatch, mula sa cache, walang query): orange ang UPDATE na
+     * karamihan ay pumapalya (walang lipat), orange na isang linya (SITE) ang code na pumapalya sa maraming page nang sabay
+     * (walang nailipat), at puti ang unang kita ng code ngayong araw, para makita ang bagong uri ng palya kahit kaunti pa.
+     */
+    private function metaCodes(): array
+    {
+        $out = [];
+        foreach (ForbeastWatch::unknownUpdates() as $a) {
+            $id = trim((string) $this->settings->get($a['page'], 'botcake', 'page_id'));
+            $out[] = self::line($a['page'], 'orange', 'New Meta error ' . $a['code'] . ' on ' . $a['page'] . ': ' . $a['failed'] . ' of ' . $a['total'] . ' updates failed in 10 min',
+                $id !== '' ? [self::health($id, 'page-problems'), self::inbox($id)] : [], null, 10);
+        }
+        foreach (ForbeastWatch::unknownSite() as $s) {
+            $out[] = self::line(self::SITE, 'orange', 'Meta error ' . $s['code'] . ' on ' . $s['pages'] . ' pages: replies failing; no more pages switched (Botcake goes through the same Meta)',
+                [['Health', '/chatbot/health']], null, 10);
+        }
+        foreach (ForbeastWatch::unknownToday() as $d) {
+            $at = now()->setTimestamp((int) $d['at'])->timezone('Asia/Manila');
+            $id = trim((string) $this->settings->get($d['page'], 'botcake', 'page_id'));
+            $out[] = self::line(self::SITE, 'white', 'New Meta error ' . $d['code'] . ' first seen today on ' . $d['page'] . ' at ' . $at->format('H:i'),
+                $id !== '' ? [self::health($id, 'page-problems')] : [['Health', '/chatbot/health']], $at->format('Y-m-d H:i:s'));
         }
 
         return $out;

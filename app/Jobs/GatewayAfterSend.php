@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Services\Chatbot\ForbeastWatch;
+use App\Services\Chatbot\MessagingProvider;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -30,7 +31,8 @@ class GatewayAfterSend implements ShouldQueue
     public function handle(ForbeastWatch $watch): void
     {
         try {
-            $watch->afterSend($this->page, $this->outcome, $this->body, $this->gateway);
+            // Ang pool ay laging UPDATE (sequence): walang bagong property, kaya tumatakbo pa rin ang lumang job sa queue.
+            $watch->afterSend($this->page, $this->outcome, $this->body, $this->gateway, MessagingProvider::UPDATE);
         } catch (Throwable $e) {
             report($e); // hindi kailanman humaharang sa padala, gaya ng GatewayProvider
         }

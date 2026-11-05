@@ -144,9 +144,9 @@ class DoubleReplyUrgentTest extends ChatblastTestCase
         // Walang naunang chat, pero may echo ng CBB (loop) bago ang window: kilala na ng CBB.
         $this->echo('7202', 'chatbot_builder', '2026-10-27 09:00:00');
         $this->doubled('7202', '11:30');
-        // May echo ng Botcake sa loob ng window bago ang unang chat.
-        $this->echo('7203', 'botcake', '2026-10-27 11:35:00');
-        $this->doubled('7203', '11:42', self::MAIN_FLOW, null, 'botcake');
+        // May echo ng CBB sa loob ng window bago ang unang chat.
+        $this->echo('7203', 'chatbot_builder', '2026-10-27 11:35:00');
+        $this->doubled('7203', '11:42', self::MAIN_FLOW, null);
 
         $lines = $this->doubleLines();
         $this->assertSame(['white'], array_column($lines, 'level'));

@@ -21,7 +21,8 @@ use Throwable;
  * kung may Botcake token ang page. Ang mga kondisyon (ang bilang ay nasa services.gateway.auto_switch): sunod-sunod na
  * palyang padala (hindi kasama ang error na sa customer ang dahilan), error ng Meta sa koneksyon ng page (agad), walang sagot
  * ang Forbeast nang sunod-sunod, may chat ang Botcake pero wala ang Forbeast, at ang health check (GET /v1/pages/{id}) na
- * pumapalya o nagsasabing hindi konektado.
+ * pumapalya o nagsasabing hindi konektado. Ang hindi kilalang error ng Meta ay binibilang kada page sa 10 minuto (tally):
+ * ang mga sagot na pumapalya rito ay lumilipat (settleUnknown), ang UPDATE ay linya lang sa banner.
  *
  * Ang "inbound" ay lumilipat lang kapag ang Forbeast talaga ang mabagal: hindi kapag ang Likha ang huli sa pag-imbak ng
  * gateway events, at hindi kapag sinasabi ng Forbeast na mabilis ito (inbound_lag_seconds) — ang nawawalang mensahe ay hindi
@@ -50,11 +51,16 @@ class ForbeastWatch
     /** Inilipat sa Forbeast ng tao o ng ibang sistema (hindi ng bantay): ang simula ng panahon sa Forbeast. */
     public const MOVED = 'moved';
     /** Ang mga lipat na kusang ibinabalik: ang sa koneksyon ng page (token, permiso) ay tao ang nag-aayos. */
-    public const BACK_CONDITIONS = ['inbound', 'failed_sends', 'no_answer', 'health'];
+    public const BACK_CONDITIONS = ['inbound', 'failed_sends', 'no_answer', 'health', 'unknown_error'];
 
-    /** Mga error ng Meta na sa customer ang dahilan (wala na, hindi na maabot, labas sa 24 oras, naka-block): hindi binibilang. */
+    /**
+     * Mga error ng Meta na sa customer ang dahilan (wala na, hindi na maabot, labas sa 24 oras, naka-block): hindi binibilang.
+     * Ang #10 na may subcode sa RESTRICTED_SUBCODES ay hindi sa customer kundi restriction ng page (tingnan ang cause()).
+     */
     public const CUSTOMER_CODES = [551, 10];
     public const CUSTOMER_SUBCODES = [1545041, 2018001, 2018108, 2018278];
+    /** Subcode ng #10 na pinagbawalan ng Meta ang page na magpadala: pareho sa Botcake, kaya walang lipat at hindi binibilang. */
+    public const RESTRICTED_SUBCODES = [1893063];
     /** Mga error ng Meta sa koneksyon ng page (token, permiso, rate limit): lipat agad. */
     public const CONNECTION_CODES = [190, 200, 2022, 613, 4, 32];
 
@@ -66,6 +72,7 @@ class ForbeastWatch
         'inbound' => 'Botcake got chats, Forbeast none',
         'health' => 'Forbeast health check failed',
         'send_lag' => 'Forbeast send lag',
+        'unknown_error' => 'Forbeast send failed at Meta with an unknown error',
     ];
 
     /** Ilang segundo itinatago ang bilang ng palya, at ang "naitala na" ng hindi makalipat (isang event kada oras). */
@@ -97,6 +104,14 @@ class ForbeastWatch
     private const FROM_STANDBY = '_from_standby';
     /** Ang tanda sa chat ng gateway na pinatakbo ulit pagkalipat sa kabilang gateway (isang beses lang). */
     private const RERUN = '_rerun';
+    /** Ang window ng hindi kilalang error ng Meta (segundo), at ang buhay ng bawat minutong bilang nito (isang minuto pa). */
+    private const UNKNOWN_WINDOW = 600;
+    private const UNKNOWN_BUCKET_TTL = 660;
+    /** Ang mga listahan ng hindi kilalang code: trip ng mga sagot, linya ng site, linya ng UPDATE, at ang unang kita kada araw. */
+    private const UNKNOWN_TRIPS = 'forbeast-watch:unknown-trips';
+    private const UNKNOWN_SITE = 'forbeast-watch:unknown-site';
+    private const UNKNOWN_UPDATES = 'forbeast-watch:unknown-updates';
+    private const UNKNOWN_DAY = 'forbeast-watch:unknown-day:';
 
     public function __construct(private PageSettings $settings)
     {
@@ -104,9 +119,12 @@ class ForbeastWatch
 
     /**
      * Pagkatapos ng bawat padala sa gateway (GatewayProvider). $body: ang sagot ng gateway; $gateway: ang gateway na
-     * ginamit. Ang palya ng gateway na hindi na aktibo (lumipat na ang page) ay hindi ebidensya.
+     * ginamit. Ang palya ng gateway na hindi na aktibo (lumipat na ang page) ay hindi ebidensya. Ang dahilan sa customer at
+     * ang restriction ng page (cause()) ay hindi binibilang: walang lipat, walang dagdag sa bilang ng palyang padala.
+     * $type (RESPONSE o UPDATE): ang palyang may Meta code ay binibilang sa window ng page (tally), dahil walang darating
+     * na send_status para dito; ang "sent" ay sa send_status binibilang. Walang $type = hindi binibilang.
      */
-    public function afterSend(string $page, array $outcome, mixed $body, ?string $gateway = null): void
+    public function afterSend(string $page, array $outcome, mixed $body, ?string $gateway = null, ?string $type = null): void
     {
         if (ChatbotProvider::name($page) !== ChatbotProvider::GATEWAY) return;
         $gw = $gateway ?? Gateways::active($page);
@@ -119,11 +137,19 @@ class ForbeastWatch
         if ($outcome['error'] === GatewayProvider::notSetUp($gw)) return; // walang tawag: hindi palya ng gateway
 
         [$code, $sub] = self::metaCode($body);
-        if (in_array($code, self::CUSTOMER_CODES, true) || in_array($sub, self::CUSTOMER_SUBCODES, true)) return;
+        if ($type !== null && $code !== null) {
+            try {
+                $this->tally($page, $gw, $type, true, $code, $sub);
+            } catch (Throwable $e) {
+                report($e); // ang bilang ay hindi dapat humarang sa lipat at sa bilang ng palyang padala sa ibaba
+            }
+        }
+        $cause = self::cause($code, $sub);
+        if ($cause === 'customer' || $cause === 'restricted') return;
         // Ang HTTP at ang code lang: ang text ng sagot ng gateway ay maaaring may laman ng mensahe (napupunta sa feed at sa screen).
         $http = (int) ($outcome['http'] ?? 0);
         $error = ($http === 0 ? Gateways::label($gw) . ' did not answer' : 'HTTP ' . $http) . ($code !== null ? ' (Meta #' . $code . ')' : '');
-        if (in_array($code, self::CONNECTION_CODES, true)) {
+        if ($cause === 'connection') {
             $this->switch($page, 'connection_error', $error, [], [], $gw);
             return;
         }
@@ -147,17 +173,239 @@ class ForbeastWatch
     /**
      * Ang huling resulta ng padala mula sa Meta (send_status ng gateway). Tinatanggap muna ng gateway ang padala (afterSend
      * ay "sent"), saka pa lang sumasagot ang Meta: ang palya ng koneksyon ng page roon (token na binawi #190, permiso #200,
-     * rate limit) ay lipat agad, gaya ng palya sa mismong padala. Ang dahilan sa customer (#551, #10) ay hindi binibilang;
-     * ang #2022 (page na pinagbawalan ng Meta) ay pareho sa ibang daan, kaya hawak ang follow-up (PageRestriction), walang lipat.
+     * rate limit) ay lipat agad, gaya ng palya sa mismong padala. Ang dahilan sa customer (#551, #10) at ang restriction ng
+     * page (#10 subcode 1893063, pareho sa Botcake) ay hindi binibilang; ang #2022 (page na pinagbawalan ng Meta) ay pareho
+     * sa ibang daan, kaya hawak ang follow-up (PageRestriction), walang lipat.
      */
     public function afterResult(int|string $pageId, ?string $gateway, ?int $code, ?int $sub): void
     {
         $page = BotcakeChat::pageMap()[(string) $pageId] ?? null;
         if ($page === null || $gateway === null || !Gateways::valid($gateway)) return;
         if (ChatbotProvider::name($page) !== ChatbotProvider::GATEWAY || $gateway !== Gateways::active($page)) return;
-        if ($code === null || in_array($code, self::CUSTOMER_CODES, true) || in_array($sub, self::CUSTOMER_SUBCODES, true)) return;
-        if ($code === 2022 || !in_array($code, self::CONNECTION_CODES, true)) return;
+        if ($code === 2022 || self::cause($code, $sub) !== 'connection') return;
         $this->switch($page, 'connection_error', Gateways::label($gateway) . ' send failed at Meta (Meta #' . $code . ')', [], [], $gateway);
+    }
+
+    /**
+     * Ang kumpirmadong resulta ng padala mula sa send_status (SendStatus): binibilang sa window ng page (tally). $pageId: ang
+     * Facebook page ID ng reply; $gateway: ang via nito.
+     */
+    public function tallyResult(int|string $pageId, ?string $gateway, string $type, bool $failed, ?int $code, ?int $sub): void
+    {
+        $page = BotcakeChat::pageMap()[(string) $pageId] ?? null;
+        if ($page === null || $gateway === null || !Gateways::valid($gateway)) return;
+        $this->tally($page, $gateway, $type, $failed, $code, $sub);
+    }
+
+    /**
+     * Ang uri ng padala ayon sa reply row: RESPONSE ang sagot mula sa Inbox (manual) at ang sagot sa chat ng customer na
+     * hindi sequence (gaya ng pagpili ng BotcakeOutbox), UPDATE ang iba. Walang messaging_type ang chatbot_replies.
+     */
+    public static function replyType(object $reply): string
+    {
+        return ($reply->kind ?? null) === 'manual' || (($reply->chat_id ?? null) !== null && ($reply->sequence_id ?? null) === null)
+            ? MessagingProvider::RESPONSE : MessagingProvider::UPDATE;
+    }
+
+    /**
+     * Ang bawat kumpirmadong padala ng page sa aktibong gateway nito, sa 10 minutong window (kada minutong bilang sa cache),
+     * hiwalay ang RESPONSE at UPDATE ($type). Lahat ay binibilang sa kabuuan; ang palya na hindi kilala ang code (cause()
+     * 'unknown') ay binibilang din kada code. Ang palya sa customer, restriction, koneksyon o walang code ay sa kabuuan lang.
+     * Ang window ay binabasa lang kapag may hindi kilalang code ang page sa huling 10 minuto (isang tanda), kaya ang
+     * karaniwang padala ay isang dagdag at isang basa lang, at ang resulta ay hindi nakadepende sa pagkakasunod ng padala.
+     */
+    public function tally(string $page, string $gateway, string $type, bool $failed, ?int $code, ?int $sub): void
+    {
+        if (ChatbotProvider::name($page) !== ChatbotProvider::GATEWAY || $gateway !== Gateways::active($page)) return;
+        $type = $type === MessagingProvider::UPDATE ? MessagingProvider::UPDATE : MessagingProvider::RESPONSE;
+        $base = 'forbeast-watch:unknown:' . strtolower($type) . ':' . $gateway . ':' . sha1($this->settings->pageKey($page));
+        $now = now()->getTimestamp();
+        $minute = intdiv($now, 60);
+        $this->bumpKey($base . ':t:' . $minute);
+        $seen = Cache::get($base . ':seen');
+        if ($failed && self::cause($code, $sub) === 'unknown') {
+            $c = $code . ($sub !== null ? '-' . $sub : '');
+            $this->bumpKey($base . ':c:' . $c . ':' . $minute);
+            $seen = array_filter(is_array($seen) ? $seen : [], fn ($at) => (int) $at > $now - self::UNKNOWN_WINDOW);
+            $seen[$c] = $now;
+            Cache::put($base . ':seen', $seen, self::UNKNOWN_WINDOW);
+            $this->firstToday($page, $c, $now);
+        }
+        if (!is_array($seen) || !$seen) return;
+
+        $keys = []; // cache key => code (null = ang kabuuan)
+        for ($m = $minute - intdiv(self::UNKNOWN_WINDOW, 60) + 1; $m <= $minute; $m++) {
+            $keys[$base . ':t:' . $m] = null;
+            foreach (array_keys($seen) as $c) $keys[$base . ':c:' . $c . ':' . $m] = (string) $c;
+        }
+        $total = 0;
+        $per = [];
+        foreach (Cache::many(array_keys($keys)) as $key => $n) {
+            if ($keys[$key] === null) $total += (int) $n;
+            else $per[$keys[$key]] = ($per[$keys[$key]] ?? 0) + (int) $n;
+        }
+        $unknown = array_sum($per);
+        if ($unknown === 0 || $total < self::limit('unknown_min_sends')) return;
+        // Raw ang porsyento (hindi limit(), na ginagawang 1 ang 0): ang 0 o mas mababa ay patay ang bahaging ito.
+        $pct = (int) config('services.gateway.auto_switch.' . ($type === MessagingProvider::UPDATE ? 'unknown_update_pct' : 'unknown_response_pct'));
+        if ($pct <= 0 || $unknown * 100 < $pct * $total) return;
+        arsort($per);
+        $top = (string) array_key_first($per);
+        // Ang burst ay ayon sa code lang (walang subcode): iisang sira ng Meta kahit iba-iba ang subcode.
+        $latest = ['code' => self::codeLabel($top), 'burst' => explode('-', $top)[0], 'failed' => $unknown, 'total' => $total, 'at' => $now];
+        // Ang pinakabagong bilang ay sa sariling key ng page (walang lock). Ang listahan ng site ay isinusulat sa ilalim ng
+        // lock nang isang beses lang kada minuto kada page (stamp), para walang agawan sa lock sa bawat palyang padala.
+        Cache::put($base . ':latest', $latest, self::UNKNOWN_WINDOW);
+        if (!Cache::add($base . ':stamp', 1, 60)) return;
+        if ($type === MessagingProvider::RESPONSE) $this->tripUnknown($page, $gateway, $base, $latest, $now);
+        else $this->alertUnknown($page, $base, $now);
+    }
+
+    /**
+     * Ang mga sagot ng page na pumapalya sa hindi kilalang code: hindi agad lipat. Itinatala muna ("trip", may since), dahil
+     * ang parehong code sa maraming page nang sabay ay sira ng Meta mismo, at ang Botcake ay dumadaan din doon; ang
+     * settleUnknown ang nagpapasya. Ang ulit habang naghihintay ay nagpapalit lang ng oras; ang lumipat na (switched) ay
+     * nananatiling lumipat habang nasa parehong gateway.
+     */
+    private function tripUnknown(string $page, string $gw, string $base, array $latest, int $now): void
+    {
+        $hash = sha1($this->settings->pageKey($page));
+        $this->underUnknown(function () use ($page, $gw, $base, $latest, $hash, $now) {
+            $trips = (array) Cache::get(self::UNKNOWN_TRIPS);
+            $b = $latest['burst'];
+            $old = $trips[$b][$hash] ?? null;
+            $fresh = is_array($old) && (int) $old['at'] > $now - self::UNKNOWN_WINDOW;
+            $trips[$b][$hash] = ['page' => $page, 'gateway' => $gw, 'base' => $base, 'error' => self::tripError($latest),
+                'since' => $fresh ? (int) $old['since'] : $now, 'at' => $now] + ($fresh && !empty($old['switched']) && ($old['gateway'] ?? null) === $gw ? ['switched' => true] : []);
+            Cache::put(self::UNKNOWN_TRIPS, $trips, 2 * self::UNKNOWN_WINDOW);
+        });
+    }
+
+    private static function tripError(array $latest): string
+    {
+        return $latest['code'] . ': ' . (int) $latest['failed'] . ' of ' . (int) $latest['total'] . ' replies failed in 10 min';
+    }
+
+    /**
+     * Ang UPDATE na pumapalya sa hindi kilalang code: walang lipat, linya lang sa banner (unknownUpdates) habang bago. Ang
+     * listahan ay ang page lang; ang bilang ay binabasa mula sa pinakabagong bilang nito ($base:latest).
+     */
+    private function alertUnknown(string $page, string $base, int $now): void
+    {
+        $this->underUnknown(function () use ($page, $base, $now) {
+            $all = array_filter((array) Cache::get(self::UNKNOWN_UPDATES), fn ($a) => is_array($a) && (int) $a['at'] > $now - self::UNKNOWN_WINDOW);
+            $all[sha1($this->settings->pageKey($page))] = ['page' => $page, 'base' => $base, 'at' => $now];
+            Cache::put(self::UNKNOWN_UPDATES, $all, self::UNKNOWN_WINDOW);
+        });
+    }
+
+    /** Ang unang kita ng code ($c) sa site ngayong araw (Manila): itinatala nang isang beses sa listahan ng araw. */
+    private function firstToday(string $page, string $c, int $now): void
+    {
+        $day = now('Asia/Manila');
+        $ttl = max(60, $day->copy()->endOfDay()->getTimestamp() - $now + 1);
+        if (!Cache::add('forbeast-watch:unknown-first:' . $day->toDateString() . ':' . $c, 1, $ttl)) return;
+        $key = self::UNKNOWN_DAY . $day->toDateString();
+        $this->underUnknown(function () use ($page, $c, $now, $ttl, $key) {
+            $all = (array) Cache::get($key);
+            $all[$c] ??= ['code' => self::codeLabel($c), 'page' => $page, 'at' => $now];
+            Cache::put($key, $all, $ttl);
+        });
+    }
+
+    /**
+     * Kada minuto (chatbot:forbeast-watch, pagkatapos ng settleHolds): ang mga trip ng hindi kilalang code. Ang luma sa
+     * window ay tinatanggal. Kapag burst_pages o higit pang page ang may trip sa parehong code sa window (0 = walang ganitong
+     * bantay), kasama ang mga lumipat na, wala nang lilipat habang bago ito: sira ng Meta, at isang linya sa banner
+     * (unknownSite). Ang lumipat na bago umabot sa bilang ay nananatiling lumipat. Kung hindi, ang trip na hold_minutes nang
+     * naghihintay ay lipat (unknown_error), gaya ng ibang kondisyon; ang unknown_response_pct na 0 ay walang lipat agad.
+     */
+    public function settleUnknown(): void
+    {
+        $now = now()->getTimestamp();
+        $size = (int) config('services.gateway.auto_switch.burst_pages');
+        $hold = self::limit('hold_minutes') * 60;
+        $on = (int) config('services.gateway.auto_switch.unknown_response_pct') > 0;
+        $due = $this->underUnknown(function () use ($now, $size, $hold, $on) {
+            $trips = (array) Cache::get(self::UNKNOWN_TRIPS);
+            $site = array_filter((array) Cache::get(self::UNKNOWN_SITE), fn ($s) => is_array($s) && (int) $s['at'] > $now - self::UNKNOWN_WINDOW);
+            $due = [];
+            foreach ($trips as $b => $pages) {
+                $pages = array_filter((array) $pages, fn ($t) => is_array($t) && (int) $t['at'] > $now - self::UNKNOWN_WINDOW);
+                $label = '#' . $b;
+                if ($size > 0 && count($pages) >= $size) $site[$label] = ['code' => $label, 'pages' => count($pages), 'at' => $now];
+                if (!isset($site[$label]) && $on) {
+                    foreach ($pages as $hash => $t) {
+                        if (!empty($t['switched']) || $now - (int) $t['since'] < $hold) continue;
+                        $due[] = $t;
+                        $pages[$hash]['switched'] = true;
+                    }
+                }
+                if ($pages) $trips[$b] = $pages; else unset($trips[$b]);
+            }
+            Cache::put(self::UNKNOWN_TRIPS, $trips, 2 * self::UNKNOWN_WINDOW);
+            Cache::put(self::UNKNOWN_SITE, $site, self::UNKNOWN_WINDOW);
+
+            return $due;
+        });
+        foreach ((array) $due as $t) {
+            try {
+                // Ang pinakabagong bilang ng page kung bago pa; kung hindi, ang bilang noong trip.
+                $latest = Cache::get($t['base'] . ':latest');
+                $error = is_array($latest) && (int) $latest['at'] > $now - self::UNKNOWN_WINDOW ? self::tripError($latest) : (string) $t['error'];
+                $this->switch((string) $t['page'], 'unknown_error', $error, [], [], (string) $t['gateway']);
+            } catch (Throwable $e) {
+                report($e); // isang page lang ang apektado
+            }
+        }
+    }
+
+    /** Ang UPDATE na pumapalya sa hindi kilalang code, kada page (huling 10 minuto). @return array<int, array{page: string, code: string, failed: int, total: int, at: int}> */
+    public static function unknownUpdates(): array
+    {
+        $from = now()->getTimestamp() - self::UNKNOWN_WINDOW;
+        $all = array_filter((array) Cache::get(self::UNKNOWN_UPDATES), fn ($a) => is_array($a) && (int) $a['at'] > $from);
+        if (!$all) return [];
+        $latest = Cache::many(array_map(fn ($a) => $a['base'] . ':latest', array_values($all)));
+        $out = [];
+        foreach ($all as $a) {
+            $l = $latest[$a['base'] . ':latest'] ?? null;
+            if (is_array($l) && (int) $l['at'] > $from) $out[] = ['page' => $a['page'], 'code' => $l['code'], 'failed' => (int) $l['failed'], 'total' => (int) $l['total'], 'at' => (int) $l['at']];
+        }
+
+        return $out;
+    }
+
+    /** Ang code na pumapalya sa maraming page nang sabay (walang nailipat). @return array<int, array{code: string, pages: int, at: int}> */
+    public static function unknownSite(): array
+    {
+        $from = now()->getTimestamp() - self::UNKNOWN_WINDOW;
+
+        return array_values(array_filter((array) Cache::get(self::UNKNOWN_SITE), fn ($s) => is_array($s) && (int) $s['at'] > $from));
+    }
+
+    /** Ang mga hindi kilalang code na unang nakita ngayong araw (Manila). @return array<int, array{code: string, page: string, at: int}> */
+    public static function unknownToday(): array
+    {
+        return array_values(array_filter((array) Cache::get(self::UNKNOWN_DAY . now('Asia/Manila')->toDateString()), 'is_array'));
+    }
+
+    /** "#code" o "#code subcode N" mula sa "code" o "code-sub". */
+    private static function codeLabel(string $c): string
+    {
+        [$code, $sub] = array_pad(explode('-', $c, 2), 2, null);
+
+        return '#' . $code . ($sub !== null ? ' subcode ' . $sub : '');
+    }
+
+    /** Ang $fn sa ilalim ng lock ng mga listahan ng hindi kilalang code (maraming worker ang sumusulat). */
+    private function underUnknown(callable $fn): mixed
+    {
+        try {
+            return Cache::lock('forbeast-watch:unknown-lock', 10)->block(3, $fn);
+        } catch (\Illuminate\Contracts\Cache\LockTimeoutException) {
+            return $fn(); // ang lock na hindi makuha ay hindi dapat humarang sa padala
+        }
     }
 
     /**
@@ -1073,6 +1321,20 @@ class ForbeastWatch
         return [$code, $sub];
     }
 
+    /**
+     * Ang dahilan ng error ng Meta: 'restricted' (#10 na pinagbawalan ang page, RESTRICTED_SUBCODES), 'customer'
+     * (CUSTOMER_CODES o CUSTOMER_SUBCODES, kahit walang code), 'connection' (CONNECTION_CODES), 'unknown' (ibang code), o
+     * null kapag walang code. Ang restriction muna, dahil code 10 din ito na kung hindi ay mabibilang na sa customer.
+     */
+    public static function cause(?int $code, ?int $sub): ?string
+    {
+        if ($code === 10 && in_array($sub, self::RESTRICTED_SUBCODES, true)) return 'restricted';
+        if (in_array($code, self::CUSTOMER_CODES, true) || in_array($sub, self::CUSTOMER_SUBCODES, true)) return 'customer';
+        if ($code === null) return null;
+
+        return in_array($code, self::CONNECTION_CODES, true) ? 'connection' : 'unknown';
+    }
+
     private static function limit(string $key): int
     {
         return max(1, (int) config('services.gateway.auto_switch.' . $key));
@@ -1084,6 +1346,13 @@ class ForbeastWatch
         Cache::add($key, 0, self::COUNT_TTL);
 
         return (int) Cache::increment($key);
+    }
+
+    /** Ang minutong bilang ng window ng hindi kilalang code (add muna, para may TTL ang key sa lahat ng cache store). */
+    private function bumpKey(string $key): void
+    {
+        Cache::add($key, 0, self::UNKNOWN_BUCKET_TTL);
+        Cache::increment($key);
     }
 
     private function reset(string $page, string $gateway, string ...$what): void

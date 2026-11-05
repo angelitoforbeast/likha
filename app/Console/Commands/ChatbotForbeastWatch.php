@@ -60,6 +60,12 @@ class ChatbotForbeastWatch extends Command
         } catch (Throwable $e) {
             report($e);
         }
+        // Ang mga page na pumapalya ang sagot sa hindi kilalang error ng Meta: lipat pagkatapos ng hold, maliban kung sabay-sabay.
+        try {
+            $watch->settleUnknown();
+        } catch (Throwable $e) {
+            report($e);
+        }
         // Ang page na inilipat ng bantay sa Botcake (inbound o padala): ibinabalik sa Forbeast kapag matagal nang maayos ang health.
         $back = PageSetting::where('provider', ChatbotFields::PROVIDER)->where('key', ForbeastWatch::KEY)->where('active', true)->orderBy('id')->get()
             // Pati ang held at hindi makalipat: ang page sa kabilang gateway ay may lipat pa ring babalikan sa ilalim nito.

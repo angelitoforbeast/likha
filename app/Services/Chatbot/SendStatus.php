@@ -56,6 +56,14 @@ class SendStatus
                 report($e);
             }
         }
+        // Bawat kumpirmadong resulta ay binibilang sa 10 minutong window ng page (ang hindi kilalang error ng Meta).
+        try {
+            $code = isset($s['error_code']) && is_numeric($s['error_code']) ? (int) $s['error_code'] : null;
+            $sub = isset($s['error_subcode']) && is_numeric($s['error_subcode']) ? (int) $s['error_subcode'] : null;
+            app(ForbeastWatch::class)->tallyResult((int) $reply->page_id, $reply->via ?? null, ForbeastWatch::replyType($reply), $status !== 'sent', $code, $sub);
+        } catch (Throwable $e) {
+            report($e);
+        }
 
         return 'send_status';
     }
@@ -81,7 +89,9 @@ class SendStatus
     {
         $s = $e['send'];
         $q = fn () => DB::table('chatbot_replies')->where('page_id', (int) $e['page_id'])->whereIn('kind', ['send', 'manual']);
-        $cols = ['id', 'client_ref', 'confirmed_status', 'sent_at', 'kind', 'page_id', 'psid', 'flow_id', 'node_id', ...(ChatbotReply::hasVia() ? ['via'] : [])];
+        // chat_id at sequence_id: ang uri ng padala (ForbeastWatch::replyType). Ang sequence_id ay mas lumang migration kaysa
+        // sa confirmed_at (hasConfirm sa itaas), kaya laging nandiyan dito.
+        $cols = ['id', 'client_ref', 'confirmed_status', 'sent_at', 'kind', 'page_id', 'psid', 'flow_id', 'node_id', 'chat_id', 'sequence_id', ...(ChatbotReply::hasVia() ? ['via'] : [])];
         if ($s['client_ref'] !== null && $s['client_ref'] !== '') {
             $r = $q()->where('client_ref', $s['client_ref'])->first($cols);
             if ($r) return $r;
