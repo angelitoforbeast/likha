@@ -95,8 +95,17 @@ Developers: `backend-developer` (sonnet) per task; `skeptic-reviewer` (sonnet, s
 
 ## Checks (command and output)
 
-Baseline: full suite on the clean tree at `b26149a5`, running while this plan was written; its failures will be
-listed here as pre-existing.
+Baseline, full suite on the clean tree at `b26149a5` (`php.bat artisan test`):
+
+```
+Tests:    3 failed, 4283 warnings, 206 passed (47406 assertions)
+Duration: 1104.69s
+FAILED  Tests\Feature\Chatblast\BigBroadcastTest > s 167 1 5000 messages on 50 pages all go out without one failed for waiting
+FAILED  Tests\Feature\ExampleTest > the application returns a successful response
+FAILED  Tests\Feature\Item\ItemTableFitScriptTest > every catalog column id has a minimum width and a place in the drop order
+```
+
+These 3 are pre-existing (red before any change of this spec).
 
 ## Rulings
 
