@@ -356,3 +356,12 @@ three checks block Publish, (3) the Health echo counts are a follow-up (Proposed
    UTF-16 units in `FlowEngine::taps` and the editor.
 4. **`ButtonPages` and `ChatbotPageCheck`** could share one "pages that reach a flow" walk (including
    sequences subscribed from the Inbox and the address question).
+
+## Left on this machine
+
+- `.claude/worktrees/base-229` (detached at `b2ca0dba`, the baseline run): its `vendor` is a junction to the
+  `fix-228` worktree's `vendor`. Remove the junction first (`rmdir vendor` in cmd, which removes only the
+  link), then `git worktree remove .claude/worktrees/base-229`; removing the folder with the junction still in
+  it could delete `fix-228`'s `vendor`.
+- The two test bootstraps in the user's Temp folder (`likha229-bootstrap.php`, `likha229-base-bootstrap.php`),
+  outside the repo.
