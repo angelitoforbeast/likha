@@ -303,6 +303,13 @@ class SequenceSendPool extends TicketPool
             $this->forget($id);
             return null;
         }
+        // Ang ulit pagkatapos ng 429: ang ibang padala sa customer ay maaaring sinagot ng #551 habang naghihintay ito.
+        if ($job['attempt'] > 0 && ($why = CustomerReach::skipReason($row->page_id, $row->psid)) !== null) {
+            $this->forget($id);
+            BotcakeSendQueue::finishSequence($row, $this->owner, ['status' => 'skipped', 'error' => $why, 'http' => null, 'via' => $job['provider'] === ChatbotProvider::GATEWAY
+                ? (string) $job['gateway'] : ChatbotProvider::BOTCAKE, 'ref' => $job['ref']] + ($job['provider'] === ChatbotProvider::GATEWAY && isset($job['req']['route']) ? ['route' => $job['req']['route']] : []));
+            return null;
+        }
         try {
             if ($job['attempt'] === 0) {
                 $page = (string) $row->page_name;
@@ -322,8 +329,8 @@ class SequenceSendPool extends TicketPool
                 $route = $job['provider'] === ChatbotProvider::GATEWAY ? ($job['req']['route'] ?? null) : null;
                 if (($check = app(ChatbotSequences::class)->sendCheck($row)) !== null) {
                     $this->forget($id);
-                    // Naka-off ang mga sagot: itinatala bilang skipped gaya ng padalang naghintay, at tuloy ang step.
-                    $o = $check['code'] === 'switched_off' ? ['status' => 'skipped', 'error' => $check['reason'], 'http' => null]
+                    // Naka-off ang mga sagot, o hindi maabot ang customer: itinatala bilang skipped gaya ng padalang naghintay, at tuloy ang step.
+                    $o = in_array($check['code'], ['switched_off', 'unreachable'], true) ? ['status' => 'skipped', 'error' => $check['reason'], 'http' => null]
                         : ['status' => 'skipped', 'error' => $check['reason'], 'http' => null, 'check' => $check['code']];
                     BotcakeSendQueue::finishSequence($row, $this->owner, $o + ['via' => $via, 'ref' => $job['ref']] + ($route !== null ? ['route' => $route] : []));
                     return null;
