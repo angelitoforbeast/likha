@@ -81,7 +81,7 @@ class ChatbotButtonsTestTabTest extends ChatblastTestCase
 
         $this->assertContains(['node' => 'n2', 'type' => 'send', 'port' => 'reply', 'note' => 'Reply received'], $res['path']);
         $this->assertSame('Salamat, Yes', $res['sends'][0]['messages'][0]['text']);
-        $this->assertStringContainsString("addEventListener('click', () => say(t.title))", $this->get('/chatbot/test')->getContent());
+        $this->assertStringContainsString("addEventListener('click', () => say(t.title, t.payload))", $this->get('/chatbot/test')->getContent());
     }
 
     public function test_S_229_7_4_a_test_run_sends_nothing_to_messenger(): void

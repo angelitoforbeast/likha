@@ -116,7 +116,7 @@
         const list = [...(m.buttons || []), ...(m.quick_replies || [])].filter(t => String(t.title || '').trim() !== '').map(t => {
             if (t.type === 'web_url') return /^https:\/\//i.test(t.url || '') ? el('a', {href: t.url, target: '_blank', rel: 'noopener noreferrer', class: tap, text: t.title + ' ↗'}) : el('span', {class: tap, text: t.title});
             const b = el('button', {type: 'button', class: tap, text: t.title});
-            b.addEventListener('click', () => say(t.title));
+            b.addEventListener('click', () => say(t.title, t.payload));
             return b;
         });
         return list.length ? el('div', {class: 'flex max-w-[80%] flex-wrap gap-1'}, list) : null;
@@ -170,10 +170,10 @@
         say(msg);
     });
     // Isang mensahe ng test customer: ang isinulat, o ang title ng button na pinindot.
-    async function say(msg) {
+    async function say(msg, tap) {
         stopSkip(); // a reply cancels the timer, as live
         log(el('div', {class: 'flex justify-end'}, el('div', {class: 'max-w-[80%] whitespace-pre-line break-words rounded-lg bg-blue-600 px-3 py-1.5 text-white', text: msg || '(empty)'})));
-        const {ok, data} = await post(box.dataset.sendUrl, {...base(), message: msg});
+        const {ok, data} = await post(box.dataset.sendUrl, {...base(), message: msg, ...(tap ? {tap} : {})});
         if (!ok) return log(el('div', {class: 'text-xs text-red-700', text: data.error || data.message || 'Could not run.'}));
         render(data);
     }
