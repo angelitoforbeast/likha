@@ -103,5 +103,21 @@
     paint();
   }
 
-  root.CppSort = {key: key, numeric: numeric, next: next, order: order, attach: attach};
+  // Para sa table na iginuguhit ng Alpine x-for (ang snapshot popup ng timeline): ang data ang sinosort, hindi ang mga
+  // <tr>, dahil ang x-for ang may-ari ng order ng DOM. fields: ang pangalan ng value ng bawat column, sa order ng header.
+  function sortItems(items, fields, state) {
+    var s = state || {col: null, dir: null};
+    var rows = items.map(function (it) { return {keys: fields.map(function (f) { return key(it[f]); })}; });
+    return order(rows, s.col, s.dir).map(function (i) { return items[i]; });
+  }
+
+  function nextFor(state, items, fields, col) { return next(state, col, numeric(items.map(function (it) { return key(it[fields[col]]); }))); }
+
+  // Ang aria-sort ng header (null = walang attribute), kung saan galing ang ▲ o ▼.
+  function aria(state, col) {
+    if (!state || state.col !== col || !state.dir) return null;
+    return state.dir === 'desc' ? 'descending' : 'ascending';
+  }
+
+  root.CppSort = {key: key, numeric: numeric, next: next, order: order, attach: attach, sortItems: sortItems, nextFor: nextFor, aria: aria};
 })(typeof self !== 'undefined' ? self : this);

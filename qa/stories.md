@@ -4556,3 +4556,20 @@ Slice 233: 12 passed, 0 failed, 0 blocked, 0 skipped, 0 not run (S-233.3.1 and S
 | Case | Type | Given / When / Then | Test | Last run |
 |------|------|---------------------|------|----------|
 | S-233.4.1 | happy | Given pages never renamed, when the existing matcher, Chatblast, ad group, Inbox and PsidCoverage tests run unchanged, then they pass | the existing test files, unchanged | 2026-11-05 passed |
+
+## Slice 236 – Sort the CPP timeline snapshot
+
+As the office, I want to sort the table in a timeline snapshot popup by clicking its headers, the same way as the CPP tables, so I can find the highest or lowest page of that snapshot quickly.
+
+Slice 236: 5 passed, 0 failed, 0 blocked, 0 skipped, 0 not run (S-236.1.5 is the existing CppSortTest, unchanged). Threat model: the snapshot rows come from `/ads_manager/cpp/timeline/detail` (page names and item names typed by staff are untrusted, shown with `x-text`); the sort only reorders them in the browser. No new route or input. Risk tier: low. Test: `tests/Feature/CPP/CppTimelineSortTest.php`.
+
+### S-236.1 Header click sorts the snapshot popup (P2)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-236.1.1 | happy | Given an open snapshot, when the CPP header is clicked once, twice and three times, then the rows go highest first (▼), then lowest first (▲), then back to the original order with no arrow | `test_S_236_1_1_a_numeric_column_sorts_highest_first_then_reversed_then_back_to_the_original_order` | 2026-11-06 passed |
+| S-236.1.2 | happy | Given an open snapshot, when the Page Name header is clicked, then the rows go A→Z, upper and lower case together (▲) | `test_S_236_1_2_a_text_column_sorts_a_to_z` | 2026-11-06 passed |
+| S-236.1.3 | edge | Given a row with no item names, when Item Names is sorted either way, then that row is last, and the TOTAL row (in the table foot) stays at the bottom | `test_S_236_1_3_the_total_row_stays_last_and_empty_cells_go_last` | 2026-11-06 passed |
+| S-236.1.4 | edge | Given a sorted snapshot, when the popup is closed and another snapshot opened, then its rows are in the original order with no arrow | `test_S_236_1_4_opening_a_new_snapshot_starts_unsorted` | 2026-11-06 passed |
+| S-236.1.5 | happy | Given the spec 230 CPP tables, when CppSortTest runs, then it still passes | `tests/Feature/CPP/CppSortTest.php` (11 tests) | 2026-11-06 passed |
+
+Wiring (no case of its own): `test_S_236_the_popup_headers_sort_by_click_enter_or_space_and_show_the_arrow`: every header is in the Tab order, sorts on click, Enter or Space, and takes its ▲/▼ from `aria-sort`.
