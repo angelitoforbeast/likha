@@ -4343,97 +4343,97 @@ Tests (`tests/Feature/Item/`): `StockFromFirstStockInTest`, `NexusStockHistoryTe
 
 As staff, I want Messenger buttons and quick replies in a Send message step, so customers can answer with one tap ("Oo po", "Order na"), while Botcake pages and gateway routes that are not ready get the text alone.
 
-Slice 229: 0 passed, 0 failed, 0 blocked, 0 skipped, 57 not run (57 cases; S-229.1.10 and S-229.2.7 were added after the spec review). Threat model: gateway events (tap titles and payloads) and anything posted to the flow save API are untrusted; staff flow content once saved and validated, config and the repo are trusted. Gate: `services.gateway.buttons` (env `GATEWAY_BUTTONS`, comma list of route keys, empty by default). Risk tier: high. Tests: `tests/Feature/Chatblast/ChatbotButtons*Test.php`.
+Slice 229: 57 passed, 0 failed, 0 blocked, 0 skipped, 0 not run (57 cases, 72 tests; S-229.7.6 on the markup only, the phone-width look is for a browser check; S-229.1.10 and S-229.2.7 were added after the spec review). Threat model: gateway events (tap titles and payloads) and anything posted to the flow save API are untrusted; staff flow content once saved and validated, config and the repo are trusted. Gate: `services.gateway.buttons` (env `GATEWAY_BUTTONS`, comma list of route keys, empty by default). Risk tier: high. Tests: `tests/Feature/Chatblast/ChatbotButtons*Test.php`.
 
 ### S-229.1 Staff add buttons or quick replies in the editor (P1)
 | Case | Type | Given / When / Then | Test | Last run |
 |------|------|---------------------|------|----------|
-| S-229.1.1 | happy | Given a Text item with "Yes" and "No" (postback) and "Website" (web_url), when it is saved and reloaded, then the same 3 come back with title, type and payload or url | T:1.1 | not run |
-| S-229.1.2 | happy | Given 3 quick replies, when the 2nd is edited and the 1st removed and the flow saved and reloaded, then 2 remain in order | T:1.2 | not run |
-| S-229.1.3 | happy | Given a title "Order {{first_name}}", then the variable is kept and the variable checker sees it like text | T:1.3 | not run |
-| S-229.1.4 | negative | Given an empty title, when the flow is published, then Publish is blocked with a clear message (the draft still saves) | T:1.4 | not run |
-| S-229.1.5 | negative | Given a web_url that is not an https URL, when the flow is published, then Publish is blocked (the draft still saves) | T:1.5 | not run |
-| S-229.1.6 | negative | Given a graph posted to the save API with an unknown button type or extra keys, then cleanConfig keeps only title, type and payload/url | T:1.6 | not run |
-| S-229.1.7 | edge | Given Filipino or emoji titles, then they are unchanged after save, reload and send | T:1.7 | not run |
-| S-229.1.8 | edge | Given an Image item, then the editor offers quick replies but no buttons | T:1.8 | not run |
-| S-229.1.9 | edge | Given a flow saved before this change, when it is opened and saved, then it is unchanged (no new keys) | T:1.9 | not run |
-| S-229.1.10 | edge | Given a draft posted to the save API with a `javascript:` (or other non-https) web_url, then the sender drops that button and the Test tab draws no link | T:1.10 | not run |
+| S-229.1.1 | happy | Given a Text item with "Yes" and "No" (postback) and "Website" (web_url), when it is saved and reloaded, then the same 3 come back with title, type and payload or url | `test_S_229_1_1_the_editor_has_the_button_row_with_title_type_and_payload_or_link`, `test_S_229_1_1_three_buttons_come_back_with_title_type_and_payload_or_url_after_save_and_reload` | 2026-11-05 passed |
+| S-229.1.2 | happy | Given 3 quick replies, when the 2nd is edited and the 1st removed and the flow saved and reloaded, then 2 remain in order | `test_S_229_1_2_the_row_editor_removes_only_its_own_row_and_not_a_nested_button`, `test_S_229_1_2_two_quick_replies_remain_in_order_after_edit_remove_save_and_reload` | 2026-11-05 passed |
+| S-229.1.3 | happy | Given a title "Order {{first_name}}", then the variable is kept and the variable checker sees it like text | `test_S_229_1_3_a_title_keeps_its_variable_and_the_variable_checker_sees_it_like_text` | 2026-11-05 passed |
+| S-229.1.4 | negative | Given an empty title, when the flow is published, then Publish is blocked with a clear message (the draft still saves) | `test_S_229_1_4_an_empty_title_blocks_publish_with_a_clear_message` | 2026-11-05 passed |
+| S-229.1.5 | negative | Given a web_url that is not an https URL, when the flow is published, then Publish is blocked (the draft still saves) | `test_S_229_1_5_a_link_that_is_not_https_blocks_publish` | 2026-11-05 passed |
+| S-229.1.6 | negative | Given a graph posted to the save API with an unknown button type or extra keys, then cleanConfig keeps only title, type and payload/url | `test_S_229_1_6_unknown_button_types_are_dropped_and_extra_keys_are_not_kept`, `test_S_229_1_6_b_a_title_with_invalid_utf8_posted_as_a_form_is_saved_cleaned_and_the_draft_survives` | 2026-11-05 passed |
+| S-229.1.7 | edge | Given Filipino or emoji titles, then they are unchanged after save, reload and send | `test_S_229_1_7_filipino_and_emoji_titles_are_unchanged_after_save_and_reload`, `test_S_229_1_7_filipino_and_emoji_titles_go_out_unchanged` | 2026-11-05 passed |
+| S-229.1.8 | edge | Given an Image item, then the editor offers quick replies but no buttons | `test_S_229_1_8_an_image_item_offers_quick_replies_but_no_buttons` | 2026-11-05 passed |
+| S-229.1.9 | edge | Given a flow saved before this change, when it is opened and saved, then it is unchanged (no new keys) | `test_S_229_1_9_a_flow_saved_before_this_change_saves_unchanged_with_no_new_keys` | 2026-11-05 passed |
+| S-229.1.10 | edge | Given a draft posted to the save API with a `javascript:` (or other non-https) web_url, then the sender drops that button and the Test tab draws no link | `test_S_229_1_10_a_link_that_is_not_https_is_never_sent`, `test_S_229_1_10_the_test_tab_never_links_to_a_url_that_is_not_https` | 2026-11-05 passed |
 
 ### S-229.2 Meta's limits in the editor and the saved flow (P1)
 | Case | Type | Given / When / Then | Test | Last run |
 |------|------|---------------------|------|----------|
-| S-229.2.1 | happy | Given 3 buttons, then the save is accepted | T:2.1 | not run |
-| S-229.2.2 | negative | Given 3 buttons, then "+ Button" is disabled; a posted graph with 4 is refused by cleanConfig | T:2.2 | not run |
-| S-229.2.3 | negative | Given 13 quick replies, then "+ Quick reply" is disabled; a posted graph with 14 is refused | T:2.3 | not run |
-| S-229.2.4 | negative | Given a 21-character title, then the save is refused; exactly 20 is accepted | T:2.4 | not run |
-| S-229.2.5 | edge | Given a title that only gets longer than 20 after variables are filled, then it is cut to 20 at send and the cut is noted in chatbot_replies | T:2.5 | not run |
-| S-229.2.6 | edge | Given button text over 640 characters, then the save is refused | T:2.6 | not run |
-| S-229.2.7 | edge | Given text with buttons that passes 640 characters, or titles that become duplicates, only after variables are filled, then the text is cut and the duplicate dropped, and the gateway gets a valid message | T:2.7 | not run |
+| S-229.2.1 | happy | Given 3 buttons, then the save is accepted | `test_S_229_2_1_three_buttons_are_accepted` | 2026-11-05 passed |
+| S-229.2.2 | negative | Given 3 buttons, then "+ Button" is disabled; a posted graph with 4 is refused by cleanConfig | `test_S_229_2_2_and_2_3_add_is_disabled_at_3_buttons_and_at_13_quick_replies`, `test_S_229_2_2_a_posted_graph_with_four_buttons_is_refused` | 2026-11-05 passed |
+| S-229.2.3 | negative | Given 13 quick replies, then "+ Quick reply" is disabled; a posted graph with 14 is refused | `test_S_229_2_3_a_posted_graph_with_fourteen_quick_replies_is_refused_and_thirteen_is_accepted`, `test_S_229_2_2_and_2_3_add_is_disabled_at_3_buttons_and_at_13_quick_replies` | 2026-11-05 passed |
+| S-229.2.4 | negative | Given a 21-character title, then the save is refused; exactly 20 is accepted | `test_S_229_2_4_the_title_stops_at_20_characters_counting_an_emoji_as_one`, `test_S_229_2_4_a_21_character_title_is_refused_and_exactly_20_is_accepted` | 2026-11-05 passed |
+| S-229.2.5 | edge | Given a title that only gets longer than 20 after variables are filled, then it is cut to 20 at send and the cut is noted in chatbot_replies | `test_S_229_2_5_a_title_that_gets_long_after_filling_is_cut_to_20_and_the_cut_is_noted` | 2026-11-05 passed |
+| S-229.2.6 | edge | Given button text over 640 characters, then the save is refused | `test_S_229_2_6_button_text_over_640_characters_is_refused_and_without_buttons_it_is_not` | 2026-11-05 passed |
+| S-229.2.7 | edge | Given text with buttons that passes 640 characters, or titles that become duplicates, only after variables are filled, then the text is cut and the duplicate dropped, and the gateway gets a valid message | `test_S_229_2_7_text_and_titles_that_break_the_limits_only_after_filling_still_make_a_valid_message` | 2026-11-05 passed |
 
 ### S-229.3 Never both on one message (P1)
 | Case | Type | Given / When / Then | Test | Last run |
 |------|------|---------------------|------|----------|
-| S-229.3.1 | happy | Given an item with buttons, then quick replies are disabled for it, and the reverse | T:3.1 | not run |
-| S-229.3.2 | negative | Given a posted graph with both on one item, then the save is refused | T:3.2 | not run |
-| S-229.3.3 | edge | Given quick replies on an item that is not the last, then Publish is blocked with a message naming the step (the draft still saves) | T:3.3 | not run |
-| S-229.3.4 | edge | Given an item whose buttons are all removed, then quick replies can be added | T:3.4 | not run |
+| S-229.3.1 | happy | Given an item with buttons, then quick replies are disabled for it, and the reverse | `test_S_229_3_1_and_3_4_buttons_and_quick_replies_exclude_each_other_until_removed` | 2026-11-05 passed |
+| S-229.3.2 | negative | Given a posted graph with both on one item, then the save is refused | `test_S_229_3_2_a_posted_graph_with_buttons_and_quick_replies_on_one_item_is_refused` | 2026-11-05 passed |
+| S-229.3.3 | edge | Given quick replies on an item that is not the last, then Publish is blocked with a message naming the step (the draft still saves) | `test_S_229_3_3_quick_replies_are_offered_only_on_the_last_message_and_flagged_elsewhere`, `test_S_229_3_3_quick_replies_on_a_message_that_is_not_the_last_block_publish`, `test_S_229_3_3_b_quick_replies_on_a_message_that_is_not_the_last_are_not_sent` | 2026-11-05 passed |
+| S-229.3.4 | edge | Given an item whose buttons are all removed, then quick replies can be added | `test_S_229_3_1_and_3_4_buttons_and_quick_replies_exclude_each_other_until_removed` | 2026-11-05 passed |
 
 ### S-229.4 A tap continues the flow (P1)
 | Case | Type | Given / When / Then | Test | Last run |
 |------|------|---------------------|------|----------|
-| S-229.4.1 | happy | Given a waiting step with a postback "Yes" and a save_to field, when the customer taps it, then the step leaves by `reply` and the field holds "Yes" | T:4.1 | not run |
-| S-229.4.2 | happy | The same for a quick reply | T:4.2 | not run |
-| S-229.4.3 | happy | Given a Condition after `reply` on the field, then the right branch is taken | T:4.3 | not run |
-| S-229.4.4 | negative | Given a web_url button, then no event comes and the step keeps waiting | T:4.4 | not run |
-| S-229.4.5 | negative | Given a postback button added, then Wait turns on; when Wait is turned off again, Publish warns | T:4.5 | not run |
-| S-229.4.6 | edge | Given the customer types instead of tapping, then `reply` with the typed text | T:4.6 | not run |
-| S-229.4.7 | edge | Given the same tap delivered twice, then the flow moves once | T:4.7 | not run |
-| S-229.4.8 | edge | Given a postback whose title and payload differ, then the field holds the title and the Inbox shows the title | T:4.8 | not run |
+| S-229.4.1 | happy | Given a waiting step with a postback "Yes" and a save_to field, when the customer taps it, then the step leaves by `reply` and the field holds "Yes" | `test_S_229_4_1_a_postback_tap_leaves_by_reply_and_saves_the_title` | 2026-11-05 passed |
+| S-229.4.2 | happy | The same for a quick reply | `test_S_229_4_2_a_quick_reply_tap_leaves_by_reply_and_saves_the_title` | 2026-11-05 passed |
+| S-229.4.3 | happy | Given a Condition after `reply` on the field, then the right branch is taken | `test_S_229_4_3_a_condition_on_the_saved_field_takes_the_right_branch` | 2026-11-05 passed |
+| S-229.4.4 | negative | Given a web_url button, then no event comes and the step keeps waiting | `test_S_229_4_4_a_link_button_sends_no_event_and_the_step_keeps_waiting` | 2026-11-05 passed |
+| S-229.4.5 | negative | Given a postback button added, then Wait turns on; when Wait is turned off again, Publish warns | `test_S_229_4_5_a_postback_or_quick_reply_turns_wait_on_and_a_link_alone_does_not`, `test_S_229_4_5_a_tap_step_that_does_not_wait_publishes_with_a_warning` | 2026-11-05 passed |
+| S-229.4.6 | edge | Given the customer types instead of tapping, then `reply` with the typed text | `test_S_229_4_6_typing_instead_of_tapping_leaves_by_reply_with_the_typed_text` | 2026-11-05 passed |
+| S-229.4.7 | edge | Given the same tap delivered twice, then the flow moves once | `test_S_229_4_7_the_same_tap_delivered_twice_moves_the_flow_once` | 2026-11-05 passed |
+| S-229.4.8 | edge | Given a postback whose title and payload differ, then the field holds the title and the Inbox shows the title | `test_S_229_4_8_a_postback_whose_title_and_payload_differ_saves_the_title_and_the_inbox_shows_the_title` | 2026-11-05 passed |
 
 ### S-229.5 Botcake pages and the gate (P1)
 | Case | Type | Given / When / Then | Test | Last run |
 |------|------|---------------------|------|----------|
-| S-229.5.1 | happy | Given a gateway page whose route is in GATEWAY_BUTTONS, then the gateway body carries the 049 shape and nothing else new | T:5.1 | not run |
-| S-229.5.2 | negative | Given a Botcake page, then the text goes out alone, chatbot_replies records that the buttons were left out, and the editor shows the warning | T:5.2 | not run |
-| S-229.5.3 | negative | Given a gateway route not in GATEWAY_BUTTONS, then the same as Botcake | T:5.3 | not run |
-| S-229.5.4 | negative | Given a Botcake page and a postback step that waits, then typing still leaves by `reply` and the skip timer still works | T:5.4 | not run |
-| S-229.5.5 | edge | Given a page switched between Botcake and gateway, then the provider is read at send time | T:5.5 | not run |
-| S-229.5.6 | edge | Given the gateway refuses the message (4xx), then chatbot_replies shows failed with the error, and it is not retried | T:5.6 | not run |
-| S-229.5.7 | edge | Given the async send pool and the sequence pool, then the buttons survive queueing | T:5.7 | not run |
+| S-229.5.1 | happy | Given a gateway page whose route is in GATEWAY_BUTTONS, then the gateway body carries the 049 shape and nothing else new | `test_S_229_5_1_a_gateway_route_on_the_list_gets_the_049_shape_and_nothing_else_new`, `test_S_229_5_1_b_bot_2_on_the_list_gets_the_049_shape_and_its_record_has_no_left_out`, `test_S_229_5_1_c_a_replay_of_stored_content_never_carries_our_marks` | 2026-11-05 passed |
+| S-229.5.2 | negative | Given a Botcake page, then the text goes out alone, chatbot_replies records that the buttons were left out, and the editor shows the warning | `test_S_229_5_2_the_editor_warns_that_botcake_pages_get_the_text_only`, `test_S_229_5_2_a_botcake_page_gets_the_text_alone_and_the_reply_records_the_buttons_were_left_out` | 2026-11-05 passed |
+| S-229.5.3 | negative | Given a gateway route not in GATEWAY_BUTTONS, then the same as Botcake | `test_S_229_5_3_a_gateway_route_not_on_the_list_is_treated_like_botcake` | 2026-11-05 passed |
+| S-229.5.4 | negative | Given a Botcake page and a postback step that waits, then typing still leaves by `reply` and the skip timer still works | `test_S_229_5_4_a_botcake_page_and_a_waiting_postback_step_leave_by_reply_when_typed_and_the_skip_timer_is_set` | 2026-11-05 passed |
+| S-229.5.5 | edge | Given a page switched between Botcake and gateway, then the provider is read at send time | `test_S_229_5_5_the_provider_is_read_at_send_time` | 2026-11-05 passed |
+| S-229.5.6 | edge | Given the gateway refuses the message (4xx), then chatbot_replies shows failed with the error, and it is not retried | `test_S_229_5_6_a_gateway_4xx_is_recorded_failed_with_the_error_and_not_retried` | 2026-11-05 passed |
+| S-229.5.7 | edge | Given the async send pool and the sequence pool, then the buttons survive queueing | `test_S_229_5_7_the_buttons_survive_the_send_pool_and_the_sequence_pool` | 2026-11-05 passed |
 
 ### S-229.6 Publish catches broken button messages (P1)
 | Case | Type | Given / When / Then | Test | Last run |
 |------|------|---------------------|------|----------|
-| S-229.6.1 | happy | Given a valid button message on a gateway-only flow, then it publishes with no extra notice | T:6.1 | not run |
-| S-229.6.2 | negative | Given buttons with empty text, then Publish is blocked, naming the step | T:6.2 | not run |
-| S-229.6.3 | negative | Given a postback with an empty payload, then Publish is blocked | T:6.3 | not run |
-| S-229.6.4 | negative | Given duplicate payloads in one message, then Publish is blocked | T:6.4 | not run |
-| S-229.6.5 | edge | Given a draft with a problem, then the draft saves; only Publish blocks | T:6.5 | not run |
-| S-229.6.6 | edge | Given Botcake pages that use the flow, then Publish lists them as a notice | T:6.6 | not run |
+| S-229.6.1 | happy | Given a valid button message on a gateway-only flow, then it publishes with no extra notice | `test_S_229_6_1_a_valid_button_message_on_a_gateway_only_flow_publishes_with_no_notice` | 2026-11-05 passed |
+| S-229.6.2 | negative | Given buttons with empty text, then Publish is blocked, naming the step | `test_S_229_6_2_buttons_with_empty_text_block_publish_naming_the_step` | 2026-11-05 passed |
+| S-229.6.3 | negative | Given a postback with an empty payload, then Publish is blocked | `test_S_229_6_3_a_postback_or_quick_reply_with_an_empty_payload_blocks_publish` | 2026-11-05 passed |
+| S-229.6.4 | negative | Given duplicate payloads in one message, then Publish is blocked | `test_S_229_6_4_duplicate_payloads_or_titles_in_one_message_block_publish` | 2026-11-05 passed |
+| S-229.6.5 | edge | Given a draft with a problem, then the draft saves; only Publish blocks | `test_S_229_6_5_a_draft_with_a_problem_saves_and_only_publish_blocks` | 2026-11-05 passed |
+| S-229.6.6 | edge | Given Botcake pages that use the flow, then Publish lists them as a notice | `test_S_229_6_6_publish_lists_the_pages_that_get_the_text_only_as_a_notice` | 2026-11-05 passed |
 
 ### S-229.7 Test tab and records (P2)
 | Case | Type | Given / When / Then | Test | Last run |
 |------|------|---------------------|------|----------|
-| S-229.7.1 | happy | The Test tab shows the text and the buttons or quick replies, with variables filled | T:7.1 | not run |
-| S-229.7.2 | happy | Clicking a shown button in Test continues the flow as a real tap would | T:7.2 | not run |
-| S-229.7.3 | happy | A real send's chatbot_replies content holds the buttons or quick replies with filled titles, via and route | T:7.3 | not run |
-| S-229.7.4 | negative | A Test run sends nothing to Messenger | T:7.4 | not run |
-| S-229.7.5 | edge | The Inbox shows the sent message and does not break on the new keys | T:7.5 | not run |
-| S-229.7.6 | edge | The editor at 390 x 844 with 3 buttons has no sideways scroll | T:7.6 | not run |
+| S-229.7.1 | happy | The Test tab shows the text and the buttons or quick replies, with variables filled | `test_S_229_7_1_the_test_tab_shows_the_text_and_the_buttons_with_variables_filled` | 2026-11-05 passed |
+| S-229.7.2 | happy | Clicking a shown button in Test continues the flow as a real tap would | `test_S_229_7_2_clicking_a_shown_button_continues_the_flow_as_a_real_tap` | 2026-11-05 passed |
+| S-229.7.3 | happy | A real send's chatbot_replies content holds the buttons or quick replies with filled titles, via and route | `test_S_229_7_3_a_real_send_records_the_buttons_with_filled_titles_via_and_route` | 2026-11-05 passed |
+| S-229.7.4 | negative | A Test run sends nothing to Messenger | `test_S_229_7_4_a_test_run_sends_nothing_to_messenger` | 2026-11-05 passed |
+| S-229.7.5 | edge | The Inbox shows the sent message and does not break on the new keys | `test_S_229_7_5_the_inbox_shows_a_sent_button_message_without_breaking_on_the_new_keys` | 2026-11-05 passed |
+| S-229.7.6 | edge | The editor at 390 x 844 with 3 buttons has no sideways scroll | `test_S_229_7_6_the_button_rows_wrap_on_a_phone` | 2026-11-05 passed |
 
 ### S-229.8 Late and old taps (P2)
 | Case | Type | Given / When / Then | Test | Last run |
 |------|------|---------------------|------|----------|
-| S-229.8.1 | happy | Given a tap while the wait is open (under the 23-hour cap), then `reply` | T:8.1 | not run |
-| S-229.8.2 | negative | Given a tap after the wait skipped, then it is a new message: no second exit, no double run | T:8.2 | not run |
-| S-229.8.3 | negative | Given the flow republished or the step deleted, then no error and no stuck wait | T:8.3 | not run |
-| S-229.8.4 | edge | Given a tap while another run holds the lock, then it is queued, not lost | T:8.4 | not run |
-| S-229.8.5 | edge | Given a tap at the same moment the wait skips, then exactly one wins | T:8.5 | not run |
+| S-229.8.1 | happy | Given a tap while the wait is open (under the 23-hour cap), then `reply` | `test_S_229_8_1_a_tap_while_the_wait_is_open_under_the_23_hour_cap_leaves_by_reply` | 2026-11-05 passed |
+| S-229.8.2 | negative | Given a tap after the wait skipped, then it is a new message: no second exit, no double run | `test_S_229_8_2_a_tap_after_the_wait_skipped_is_a_new_message_with_no_second_exit` | 2026-11-05 passed |
+| S-229.8.3 | negative | Given the flow republished or the step deleted, then no error and no stuck wait | `test_S_229_8_3_a_tap_for_a_step_that_was_deleted_starts_over_with_no_error_and_no_stuck_wait` | 2026-11-05 passed |
+| S-229.8.4 | edge | Given a tap while another run holds the lock, then it is queued, not lost | `test_S_229_8_4_a_tap_while_another_run_holds_the_lock_is_kept_and_runs_after` | 2026-11-05 passed |
+| S-229.8.5 | edge | Given a tap at the same moment the wait skips, then exactly one wins | `test_S_229_8_5_a_tap_at_the_moment_the_wait_skips_exactly_one_wins` | 2026-11-05 passed |
 
 ### S-229.9 The AI (P2)
 | Case | Type | Given / When / Then | Test | Last run |
 |------|------|---------------------|------|----------|
-| S-229.9.1 | happy | Given "Show this message to the AI" ticked, then the AI sees "Text [Yes \| No]" | T:9.1 | not run |
-| S-229.9.2 | negative | Given it not ticked, then the message is hidden as today | T:9.2 | not run |
-| S-229.9.3 | negative | Then ai and ai_text are still stripped before the send | T:9.3 | not run |
-| S-229.9.4 | edge | Given a tap, then the AI sees the title as the customer's turn | T:9.4 | not run |
+| S-229.9.1 | happy | Given "Show this message to the AI" ticked, then the AI sees "Text [Yes \| No]" | `test_S_229_9_1_a_message_shown_to_the_ai_carries_the_titles` | 2026-11-05 passed |
+| S-229.9.2 | negative | Given it not ticked, then the message is hidden as today | `test_S_229_9_2_a_message_not_shown_to_the_ai_stays_hidden` | 2026-11-05 passed |
+| S-229.9.3 | negative | Then ai and ai_text are still stripped before the send | `test_S_229_9_3_ai_and_ai_text_are_stripped_before_the_send` | 2026-11-05 passed |
+| S-229.9.4 | edge | Given a tap, then the AI sees the title as the customer's turn | `test_S_229_9_4_after_a_tap_the_ai_sees_the_title_as_the_customers_turn` | 2026-11-05 passed |
