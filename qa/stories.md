@@ -4465,3 +4465,16 @@ Slice 230: 10 passed, 0 failed, 0 blocked, 0 skipped, 0 not run (10 cases, 11 te
 | Case | Type | Given / When / Then | Test | Last run |
 |------|------|---------------------|------|----------|
 | S-230.3.1 | happy | Given a header reached with Tab, when Enter or Space is pressed, then it sorts, and `aria-sort` is ascending or descending on that header only | `test_S_230_3_1_enter_or_space_on_a_header_sorts_and_aria_sort_is_on_that_header_only` | 2026-11-05 passed |
+
+## Slice 232 – Hourly PSID sheet import off
+
+As the office, I want the Botcake PSID sheet import to stop running by itself every hour, so the server is not busy reading the whole sheet for 5 to 6 minutes when PSIDs already come from the chats and the Botcake API.
+
+Slice 232: 3 passed, 0 failed, 0 blocked, 0 skipped, 0 not run. Threat model: no new input; only two schedule entries are removed (low tier). Tests: `tests/Feature/Botcake/BotcakePsidScheduleTest.php`.
+
+### S-232.1 The sheet import is manual only (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-232.1.1 | happy | Given the app's schedule, when `php artisan schedule:list` loads it, then there is no `botcake:psid-import` line, and `botcake:sync-customers` and `botcake:prune-chats` are still listed | `test_S_232_1_1_the_sheet_import_is_not_scheduled_and_the_api_sync_and_chat_prune_still_are` | 2026-11-05 passed |
+| S-232.1.2 | happy | Given a signed-in staff member on the PSID import page, when they press the import button, then a run is created and the import job is queued on `psid` | `test_S_232_1_2_the_manual_import_button_still_queues_the_job` | 2026-11-05 passed |
+| S-232.1.3 | edge | Given no schedule, when `php artisan botcake:psid-import --clean-sheet` is run by hand, then it succeeds, creates a run and queues the import with the clean-sheet flag | `test_S_232_1_3_the_command_run_by_hand_creates_a_run_and_queues_the_import` | 2026-11-05 passed |

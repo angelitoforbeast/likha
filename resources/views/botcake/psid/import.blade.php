@@ -33,7 +33,7 @@
         <ul class="list-disc ml-5 space-y-1">
             <li>Updates <code>macro_output.botcake_psid</code> using <b>PAGE (A) + FULL NAME (B)</b>.</li>
             <li>Writes <code>imported</code>, <code>waiting</code> (wala pang order) or <code>conflict</code> into column <b>J</b> (blank rows only).</li>
-            <li>Ang <code>waiting</code> ay sinusubukan ulit kada import (hanggang 30 araw). Kusa itong tumatakbo kada oras; 03:00 binubura sa sheet ang mga row na naitala na.</li>
+            <li>Ang <code>waiting</code> ay sinusubukan ulit kada import (hanggang 30 araw). Hindi na ito kusang tumatakbo; sa button na lang ito.</li>
             <li>OPTIONAL cutoff uses <b>DATE (D)</b> on/before cutoff.</li>
         </ul>
     </div>
