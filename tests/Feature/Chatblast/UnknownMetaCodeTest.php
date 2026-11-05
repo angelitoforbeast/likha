@@ -216,6 +216,42 @@ class UnknownMetaCodeTest extends ChatblastTestCase
         $this->assertSame([], $this->metaLines());
     }
 
+    public function test_S_235_2_4_most_updates_failing_with_an_unknown_code_show_an_orange_line(): void
+    {
+        $this->tally(15, 9999, 5, MessagingProvider::UPDATE);
+        $this->travel(3)->minutes();
+        app(ForbeastWatch::class)->settleUnknown();
+
+        $this->assertNoSwitch('ang UPDATE ay hindi naglilipat');
+        $this->assertSame([['Page Uno', 'orange', 'New Meta error #9999 on Page Uno: 15 of 20 updates failed in 10 min']], $this->orange());
+    }
+
+    public function test_S_235_2_5_fewer_than_ten_sends_make_no_switch_and_no_orange_line(): void
+    {
+        // Ang palya sa mismong padala (walang darating na send_status) ay binibilang din sa window.
+        $this->failSends(4, ['error' => ['code' => 9999, 'message' => 'Something new']]);
+        $this->travel(3)->minutes();
+        app(ForbeastWatch::class)->settleUnknown();
+
+        $this->assertNoSwitch('kulang sa 10 ang padala');
+        $this->assertSame([], $this->orange());
+        $white = array_values(array_filter($this->metaLines(), fn ($l) => $l[1] === 'white'));
+        $this->assertCount(1, $white, 'ang unang kita ng code ngayong araw ay nakikita pa rin');
+    }
+
+    public function test_S_235_2_6_a_meta_wide_unknown_code_switches_no_page_and_shows_one_site_line(): void
+    {
+        $pages = ['Page Uno', 'Page Dos', 'Page Tres', 'Page Kwatro', 'Page Singko'];
+        foreach (array_slice($pages, 1) as $i => $name) $this->gatewayPage($name, (string) (1002 + $i));
+        foreach ($pages as $name) $this->tally(4, 9999, 8, MessagingProvider::RESPONSE, $name);
+        $this->travel(3)->minutes();
+        app(ForbeastWatch::class)->settleUnknown();
+
+        $this->assertSame(0, $this->switchEvents(), 'walang page na lumipat: ang Botcake ay dumadaan din sa parehong Meta');
+        foreach ($pages as $name) $this->assertSame('gateway', ChatbotProvider::name($name));
+        $this->assertSame([[ProblemsPanel::SITE, 'orange', 'Meta error #9999 on 5 pages: replies failing; no page switched (Botcake goes through the same Meta)']], $this->orange());
+    }
+
     public function test_S_235_2_7_zero_percent_turns_the_switch_and_the_line_off(): void
     {
         config(['services.gateway.auto_switch.unknown_response_pct' => 0, 'services.gateway.auto_switch.unknown_update_pct' => 0]);
@@ -226,5 +262,17 @@ class UnknownMetaCodeTest extends ChatblastTestCase
 
         $this->assertNoSwitch('0% = patay ang lipat');
         $this->assertSame([], $this->orange());
+    }
+
+    public function test_S_235_4_1_the_first_unknown_code_of_the_day_shows_one_white_line(): void
+    {
+        $this->travelTo(now()->setTime(9, 15));
+        $this->tally(1, 9999, 0);
+        $expect = [[ProblemsPanel::SITE, 'white', 'New Meta error #9999 first seen today on Page Uno at 09:15']];
+        $this->assertSame($expect, $this->metaLines());
+
+        $this->travel(3)->hours();
+        $this->tally(1, 9999, 0);
+        $this->assertSame($expect, $this->metaLines(), 'isang linya lang sa araw');
     }
 }
