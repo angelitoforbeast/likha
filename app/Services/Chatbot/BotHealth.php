@@ -747,10 +747,6 @@ class BotHealth
     }
 
     /**
-     * Ngayon kada oras: reply time ayon sa oras ng dating ng mensahe, at ang mga pumalya ayon sa oras ng padala. May
-     * send_status na ($real): ang totoong oras (ang hindi pa kumpirmado ay wala); kung wala pa, ang oras ng pagtanggap.
-     */
-    /**
      * Ang padalang nilaktawan dahil hindi maabot ang customer (CustomerReach) ay hindi pumalya: wala ito sa failed, sa mga
      * ilaw at sa listahan; may sariling bilang (unreachableSkips). Ang ibang skipped (hal. switched off) ay gaya ng dati.
      */
@@ -772,9 +768,10 @@ class BotHealth
             ->where('sent_at', '>=', $from)->where('sent_at', '<', $to)->when($pages !== null, fn ($q) => $q->whereIn('page_id', $pages))
             ->groupBy('page_id')->selectRaw('page_id, COUNT(*) as n')->pluck('n', 'page_id');
         $out = [];
+        $blasts = Schema::hasTable('botcake_messages');
         foreach ($names as $id => $name) {
             if ($pages !== null && !in_array((int) $id, $pages, true)) continue;
-            $blast = Schema::hasTable('botcake_messages') ? DB::table('botcake_messages')->where('page_name', $name)->where('status', 'skipped')
+            $blast = $blasts ? DB::table('botcake_messages')->where('page_name', $name)->where('status', 'skipped')
                 ->where('updated_at', '>=', $from)->where('updated_at', '<', $to)->where('reason', 'like', $like)->count() : 0;
             $n = (int) ($bot[$id] ?? 0);
             if ($n + $blast > 0) $out[] = ['page' => $name, 'page_id' => (string) $id, 'bot' => $n, 'chatblast' => $blast];
@@ -784,6 +781,10 @@ class BotHealth
         return $out;
     }
 
+    /**
+     * Ngayon kada oras: reply time ayon sa oras ng dating ng mensahe, at ang mga pumalya ayon sa oras ng padala. May
+     * send_status na ($real): ang totoong oras (ang hindi pa kumpirmado ay wala); kung wala pa, ang oras ng pagtanggap.
+     */
     private function hourly(array $rows, string $today, ?array $pages, bool $real = false): array
     {
         $hours = array_fill(0, 24, ['secs' => [], 'failed' => 0]);

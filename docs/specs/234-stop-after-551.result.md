@@ -2,10 +2,21 @@
 
 ## Status
 
-Plan ready, waiting for "go". Branch `fix/234-stop-after-551` from `f175cb2f`. No code yet. High tier: the spec
-review (skeptic-reviewer, spec-review mode) returned **needs revision** with three majors. The spec is not edited
-after the start, so those majors are carried below as proposed Rulings (R1–R3) and Story changes for the reviewer
-to confirm with the "go".
+Done, not pushed, not deployed. No migration. Branch `fix/234-stop-after-551` from `f175cb2f`. All 18 cases pass
+(31 tests). The full suite result is in Checks. The plan got its "go" with R1–R5 approved and a 30-day expiry for the mark.
+
+**Merge danger: high, but quick to turn off.**
+- **What changes:** after deploy, every scheduled send (sequence steps, follow-ups, wait timeouts, Chatblast) to a
+  customer whose last failed send said #551, or #10 outside the window, is skipped until that customer writes or
+  30 days pass. On incepxion.pro that is most of the 11% of sends that failed on 2026-11-05.
+- **Blast radius:** every live page on both sites and both routes. Answers to customer messages, manual inbox sends,
+  comment replies and the Test tab are not affected.
+- **Marks start empty:** customers who failed before the deploy are marked on their next failed send, not before.
+- **Off switch:** set `CHATBOT_STOP_UNREACHABLE=false` in the server's environment and run `php artisan config:cache`.
+  That stops new marks and all skips at once; stored marks stay unused. It is a two-way door.
+- **Revert:** revert the merge. The `__unreachable` rows in `chatbot_customer_values` are then unused and harmless.
+  `DELETE FROM chatbot_customer_values WHERE \`key\` = '__unreachable'` removes them; this is optional.
+- **Health:** the failed numbers drop on deploy day, because these skips no longer count as failed.
 
 ## Plan
 
@@ -95,15 +106,109 @@ Notes on order and sharing:
 
 ## Summary
 
-(pending: filled in after the work)
+Built in the main session: the kit's developer agents are not installed in this session. Each slice was written
+test first, with a red run per slice (below). `skeptic-reviewer` reviewed every slice. T1–T3 got an adversarial
+review on opus, T4–T5 a standard review on sonnet, and there was one fix loop.
+
+| Task | Commit | What shipped |
+|---|---|---|
+| T1 (high, backend) | `515e476e` | `app/Services/Chatbot/CustomerReach.php`: `code()` parser, `note()`, `skipReason()`, `clear()`, 30-day expiry, switch. The mark comes from `BotcakeOutbox::record` (failed), `SendStatus::receive` (gateway failed) and `ChatblastSender::finish` (step answers). `CustomerFields::clearAll` keeps the mark. Config `services.chatbot.stop_unreachable` + `.env.example`. The Chatblast skip in `deliver` and `poolStart` was written in this commit too. |
+| T2 (high, backend) | `37013e17` | Skip checks in `BotcakeOutbox::send` (UPDATE only), `ChatbotSequences::sendCheck` (code `unreachable`, recorded like switched-off), `SequenceSendPool` 429 retry, and `BotcakeSendPool::skipNow` + 429 retry (tickets without a chat). `BotcakeSendQueue::finishChatbot/finishSequence` store the mark before freeing the ticket. In `FlowEngine::afterSend`, the skip event gets the reason, and a skipped question with a wait sets `WAIT_UNSENT`. |
+| T3 (high, backend) | `7f4c1c81` | Clears in `ChatbotInbound::afterStore`, in `BotcakeChatController`'s bot-Off return, and in `HandleGatewayEvent` (Botcake-route and bot-Off returns; referral excluded). |
+| T4 (medium, backend) | `a142452c` | `BotHealth::unreachableSkips` (per page today, bot + Chatblast). `notUnreachableSkip` keeps these skips out of `replies()`, `hourly()` and `failures()`. |
+| Fix loop 1 | `36b73725` | Chatblast reads the page ID through `PageSettings::get` (case-insensitive). The gateway clear moved after the dedupe (no second DELETE). Tests added for the case difference, the echo and the Botcake-route gateway page. |
+| T5 (medium, frontend) | `e24fcb6f` | `/chatbot/health`: the "Skipped today: customer can't be reached" table, and the help sentence updated. No new CSS classes, so no `npm run build`. |
+| T6 (low, docs) | this commit | `qa/stories.md` slice 234, `TODO.md` accepted minors, this result. |
+
+**Measurement (one cheap lookup per send).**
+- **Query count:** `CustomerReach::skipReason` runs 1 query per check, an indexed `SELECT value` on the unique
+  (page_id, psid, key). It runs only on sends that are not answers. Each inbound chat adds 1 indexed `DELETE`.
+- **Timing:** a throwaway bench (deleted, not committed) used sqlite in memory with 100,000 rows in
+  `chatbot_customer_values`, 25,000 of them marks across 50 pages. Over 10,000 lookups: median 38.6 µs, p99 110.9 µs,
+  1 query per call.
+- **Not measured:** MySQL, since no local MySQL was used. The same unique index serves the same equality lookup.
+
+**Red runs (one per slice, first failure line):**
+- T1: `CustomerReachTest`, `Class "App\Services\Chatbot\CustomerReach" not found`, the module about to be made.
+  Chatblast (run against the original `ChatblastSender.php`): `Failed asserting that null is identical to Array`.
+- T2: `CustomerReachSendTest` S-234.2.1, `Failed asserting that two arrays are identical`. S-234.2.3:
+  `actual size 2 matches expected size 1`.
+- T3: `CustomerReachInboundTest` S-234.3.1, `Failed asserting that true is false`.
+- T4: `CustomerReachHealthTest` S-234.4.2, `Undefined array key "unreachable_skips"`, and
+  `Failed asserting that two arrays are identical`.
+- Fix loop: S-234.2.2 (page name in another case), `Failed asserting that null is not null`.
+- T5: S-234.4.1, `Failed asserting that '<!DOCTYPE html>…' contains "Skipped today…"` (assertSeeInOrder).
+
+**Not touched:** `botcake_psids` readers and writers (the parallel 233 branch). Only the inbound test creates a
+`BotcakePsid` row, the same way existing tests do.
+
+**Browser check:** skipped, because this session has no browser tools. The screen change is one table and one
+sentence, and the S-234.4.1 test checks the rendered page.
 
 ## Checks
 
-(pending)
+**Full suite** (`php.bat artisan test`), on the tree at `e24fcb6f` plus the docs of this commit:
+
+```
+  ⨯ the application returns a successful response
+  ⨯ every catalog column id has a minimum width and a place in the drop order
+   FAILED  Tests\Feature\ExampleTest > the application returns a successful response
+   FAILED  Tests\Feature\Item\ItemTableFitScriptTest > every catalog column id has a minimum width and a place in th…
+  Tests:    2 failed, 4362 warnings, 206 passed (77628 assertions)
+  Duration: 835.55s
+```
+
+- **No new failures:** the 2 red tests are the known pre-existing `ExampleTest` and `ItemTableFitScriptTest`.
+  `BigBroadcastTest` and `AstraAddressRulesTest` S-26.18 passed this time.
+- **Warnings:** the warnings are PHPUnit's `file_get_contents(…)` warnings of this worktree's environment, plus the
+  doc-comment deprecation notices. They show on untouched tests too.
+- **After the suite:** one tidy of `BotHealth.php` from the T4/T5 review (a docblock moved back above `hourly()`,
+  and `Schema::hasTable` moved out of the loop). After it, `CustomerReachHealthTest` and the `ChatbotHealth*Test`
+  files were rerun and passed (25 tests, 151 assertions). The full suite was not run again for this no-behaviour change.
+- **Lint:** `php.bat -l` passes on every changed PHP file. No PHP linter or formatter is configured.
+- **Kit hook tests:** `node --test 'test/hooks/*.test.mjs'` was not run; no kit files changed.
+
+**Case table** (all from the full-suite run, plus the T5/T4 rerun above):
+
+| Case | Test(s) | Result |
+|---|---|---|
+| S-234.1.1 | `test_S_234_1_1_a_send_that_fails_with_551_marks_the_customer_with_the_time_and_551`, `test_S_234_1_1_a_chatblast_send_flow_refused_with_551_marks_the_customer` | pass |
+| S-234.1.2 | `test_S_234_1_2_a_send_that_fails_with_the_window_10_marks_the_customer_with_10` (3 rows) | pass |
+| S-234.1.3 | `test_S_234_1_3_other_errors_do_not_mark` (11 rows, incl. `sendMessage failed (code 10, subcode 1893063)` in both gateway forms) | pass |
+| S-234.1.4 | `test_S_234_1_4_the_botcake_and_gateway_wordings_are_both_recognised` (3 rows), `test_S_234_1_4_the_gateway_send_status_failure_marks_and_the_1893063_one_does_not` | pass |
+| S-234.1.5 | rows of the S-234.1.2 and S-234.1.3 tables | pass |
+| S-234.2.1 | `test_S_234_2_1_a_sequence_step_to_a_marked_customer_is_skipped_recorded_and_not_called` | pass |
+| S-234.2.2 | `test_S_234_2_2_a_chatblast_to_a_marked_customer_is_skipped_with_the_reason_and_no_botcake_call`, `…_the_pool_skips_a_chatblast_whose_customer_was_marked_while_it_waited`, `…_a_page_name_from_the_order_that_differs_only_in_case_still_marks_and_skips`, `…_a_follow_up_sent_by_the_waiting_job_is_skipped_too`, `…_a_wait_timeout_send_without_a_chat_is_skipped_and_the_question_counts_as_unsent`, `…_the_reply_pool_skips_a_wait_timeout_ticket_of_a_marked_customer` | pass |
+| S-234.2.3 | `test_S_234_2_3_a_customer_marked_on_page_a_is_still_messaged_on_page_b` | pass |
+| S-234.2.4 | `test_S_234_2_4_after_a_551_the_next_sends_of_that_customer_in_the_pool_are_all_skipped`, `test_S_234_2_4_a_429_retry_after_another_send_stored_the_mark_is_skipped` | pass |
+| S-234.2.5 | `test_an_answer_to_the_customer_is_never_skipped_even_while_marked`, `test_the_switch_off_sends_to_a_marked_customer`, `test_the_switch_off_stops_new_marks`, `test_a_mark_older_than_30_days_no_longer_skips` | pass |
+| S-234.3.1 | `test_S_234_3_1_a_marked_customer_who_writes_to_the_page_is_unmarked_and_the_bot_answers`, `test_S_234_3_1_the_mark_is_cleared_even_when_the_page_bot_is_off` | pass |
+| S-234.3.2 | `test_S_234_3_2_after_the_customer_wrote_a_later_sequence_step_is_sent_normally` | pass |
+| S-234.3.3 | `test_S_234_3_3_a_gateway_postback_or_quick_reply_also_clears_the_mark` (5 rows: message, postback, quick reply, echo, referral), `…_a_gateway_message_to_a_page_on_the_botcake_route_clears_the_mark`, `…_a_gateway_message_clears_the_mark_on_a_page_whose_bot_is_off` | pass |
+| S-234.3.4 | `test_S_234_3_4_clear_all_fields_keeps_the_mark` | pass |
+| S-234.4.1 | `test_S_234_4_1_health_shows_the_skipped_sends_per_page_today` | pass |
+| S-234.4.2 | `test_S_234_4_2_the_count_per_page_today_matches_the_skipped_rows_with_that_reason`, `test_S_234_4_2_these_skips_are_not_counted_as_failed_sends` | pass |
+
+**Environment note:** an earlier local test run hung on a test of mine. Its second Chatblast send hit the customer's
+gap and requeued without end; the test now moves the clock past the gap. A `php.exe` (PID 176896, about 590 MB and
+growing) was still running after the hung run was stopped. I could not confirm what it was, so I left it running.
+If nothing else uses PHP on this machine, it is safe to end.
 
 ## Rulings
 
-Proposed. Each one needs the reviewer's yes with the "go".
+All approved with the "go". R1 as narrowed by the reviewer: #10 marks only with "outside of allowed window" or
+subcode 2018278. Subcode 1893063 (page temporarily restricted: all 723 #10s on Likha in the last 24 h) never
+marks, and a test uses the exact gateway text. The open question was ruled: the mark expires after 30 days
+(`CustomerReach::EXPIRE_DAYS`).
+
+- **R6 (made during the work):**
+  - **What:** a gateway event clears the mark itself only where it would not be stored (a Botcake-route page, or
+    the bot is Off). A stored chat clears in `afterStore`, after the duplicate check.
+  - **Why:** a duplicate event can't clear a newer mark, and gateway pages run one DELETE, not two.
+- **R7 (made during the work):** the Botcake bot-Off clear needs the chat key, which already fits the page. It does
+  not wait for the PSID check, because that check calls Botcake.
+
+The approved texts follow.
 
 - **R0 (decision 4): the store is CustomerFields / `chatbot_customer_values`.** Key `__unreachable`, with a unique
   index on (page_id, psid, key). The run-state "__" keys never show as variables. No new table, no migration.
@@ -140,7 +245,18 @@ Proposed. Each one needs the reviewer's yes with the "go".
 
 ## Story changes
 
-Proposed, applied to `qa/stories.md` only after the "go":
+Applied to `qa/stories.md`, slice 234. Besides those approved with the plan (below), two changes were made during
+the work:
+
+- **New S-234.2.5 negative:** an answer is never skipped, the switch off sends and stops marks, and a mark older than
+  30 days no longer skips. Reason: R4, R5 and the 30-day ruling each need a case.
+- **S-234.2.2 and S-234.3.3 grew:**
+  - S-234.2.2 adds the case-insensitive page name and the wait timeout through the reply pool.
+  - S-234.3.3 adds that an echo does not clear and that a Botcake-route page's gateway event clears.
+
+  Reason: the review findings showed these paths.
+
+Approved with the plan:
 
 - **S-234.1.3:** adds "a page permission #10 ('does not have permission') and a restriction #10 → no mark" (R1).
 - **New S-234.1.5 edge:** #10 with the window subcode 2018278 or window text marks; #10 without it does not (R1).
@@ -156,6 +272,14 @@ Proposed, applied to `qa/stories.md` only after the "go":
 
 ## Open questions
 
+None left open.
+- Question 1 below was ruled: the mark expires after 30 days.
+- Question 2 was ruled: R1–R5 yes.
+- Conflict with CLAUDE.local.md: none. The spec's line "All sends are recorded through BotcakeOutbox::record" is not
+  true for Chatblast; R2 handles this.
+
+The original questions, kept for the record:
+
 1. **A page with no inbound to Likha at all** (Botcake has no chat block pointing at Likha). Such a page's marked
    customers can never be cleared, so Chatblast to them stops for good, even after they write to the page in
    Messenger. Options:
@@ -169,4 +293,23 @@ Proposed, applied to `qa/stories.md` only after the "go":
 
 ## Proposed tasks
 
-(pending: suggestions for the owner, found during the work)
+Suggestions for the owner, found during the work:
+
+1. **Decide on the missed Chatblast message.** After a cleared customer writes, should they get the message that was
+   skipped? Today the skipped row keeps its dedupe key, so they don't (TODO.md).
+2. **Check the Chatblast 429 retry for the mark too** (TODO.md, small).
+3. **After deploy, read the new Health table for a week.** If one page shows thousands of skips a day, its list of
+   customers is mostly unreachable, and that is worth a look at the page itself.
+4. **Many `file_get_contents` warnings in this worktree's test run** come from the environment (they also appear on
+   untouched tests such as `SendStatusBatchTest`), likely the Vite manifest missing here. They are not new, but they
+   hide real warnings.
+
+### Review findings and where they went
+
+- **Spec review:** 3 majors, all turned into R1–R3 and approved.
+- **T1+T2 adversarial review:** 1 major (Chatblast page name case), fixed in `36b73725` and re-checked: fixed, no new
+  findings. Its minors went to TODO.md, apart from the duplicated lookup, which the fix removed.
+- **T3 adversarial review:** no majors. Fixed: the clear before dedupe (also removes the double DELETE) and the echo
+  and Botcake-route tests. The rest went to TODO.md.
+- **T4+T5 standard review:** no majors. Fixed after the suite: the orphaned `hourly()` docblock, and `Schema::hasTable`
+  moved out of the loop. The rest went to TODO.md.
