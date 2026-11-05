@@ -113,7 +113,7 @@
     // ay https lang (ang Test ay tumatakbo sa draft, na hindi pa dumaan sa Publish); ang iba ay text lang.
     function taps(m) {
         const tap = 'rounded-full border border-blue-300 bg-white px-3 py-1 text-xs text-blue-700 hover:bg-blue-50';
-        const list = [...(m.buttons || []), ...(m.quick_replies || [])].map(t => {
+        const list = [...(m.buttons || []), ...(m.quick_replies || [])].filter(t => String(t.title || '').trim() !== '').map(t => {
             if (t.type === 'web_url') return /^https:\/\//i.test(t.url || '') ? el('a', {href: t.url, target: '_blank', rel: 'noopener noreferrer', class: tap, text: t.title + ' ↗'}) : el('span', {class: tap, text: t.title});
             const b = el('button', {type: 'button', class: tap, text: t.title});
             b.addEventListener('click', () => say(t.title));

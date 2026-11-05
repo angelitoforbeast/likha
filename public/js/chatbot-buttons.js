@@ -63,6 +63,9 @@
     if (!item) return out;
     var taps = list(item.buttons).concat(list(item.quick_replies));
     if (!taps.length) return out;
+    // Ang mensaheng walang text (o link ng larawan) ay hindi ipinapadala, kaya hindi rin makikita ang mga tap nito.
+    var value = String(item.value || '').trim();
+    if (item.type === 'image' ? !/^https?:\/\/\S+$/i.test(value) && value.indexOf('{' + '{') < 0 : value === '') out.push(item.type === 'image' ? 'Add the image link: the quick replies go with it.' : 'Add the text: the buttons or quick replies go with it.');
     if (list(item.quick_replies).length && i !== list(items).length - 1) out.push('Quick replies only on the last message: move them, or Publish is blocked.');
     var titles = {}, payloads = {}, dup = false;
     taps.forEach(function (t) {
@@ -71,11 +74,12 @@
       if (titles[title]) dup = true;
       titles[title] = true;
       if (t.type === 'web_url') {
-        if (!/^https:\/\/[^\s{}]+\.[^\s{}]+/i.test(String(t.url || ''))) out.push('"' + t.title + '": use a link that starts with https://');
+        // Gaya ng FlowGraph::httpsUrl: buong https:// na link, walang puwang at walang variable.
+        if (!/^https:\/\/[^\s{}\/]+\.[^\s{}\/]+(\/[^\s{}]*)?$/i.test(String(t.url || ''))) out.push('"' + t.title + '": use a link that starts with https://');
       } else {
-        var p = String(t.payload || '').trim();
-        if (p === '') out.push('"' + t.title + '" needs a payload.');
-        else { if (payloads[p]) dup = true; payloads[p] = true; }
+        var p = String(t.payload || '');
+        if (p.trim() === '') out.push('"' + t.title + '" needs a payload.');
+        else { if (payloads['=' + p]) dup = true; payloads['=' + p] = true; } // buo, gaya ng server
       }
     });
     if (dup) out.push('Two buttons or quick replies have the same title or payload.');

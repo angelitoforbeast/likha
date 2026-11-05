@@ -185,5 +185,21 @@ class ChatbotButtonsEditorTest extends ChatblastTestCase
             ['title' => 'Yes', 'type' => 'postback', 'payload' => '']]]];
         $this->assertSame(['Every button and quick reply needs a title.', '"Site": use a link that starts with https://', '"Yes" needs a payload.'], $this->value('notes', $items, 0));
         $this->assertSame([], $this->value('notes', [['type' => 'text', 'value' => 'Hi', 'buttons' => [$this->postback('Yes'), ['title' => 'Site', 'type' => 'web_url', 'url' => 'https://x.test/p']]]], 0));
+
+        // Gaya ng FlowGraph::publishProblems: bawat item dito ay hinaharang ng Publish, kaya may paalala rin sa form.
+        $graph = fn (array $item) => ['nodes' => [['id' => 'n2', 'type' => 'send', 'config' => ['items' => [$item]]]]];
+        foreach ([
+            ['type' => 'text', 'value' => 'Hi', 'buttons' => [['title' => 'Site', 'type' => 'web_url', 'url' => 'https://x.test/{{id}}']]],
+            ['type' => 'text', 'value' => 'Hi', 'buttons' => [['title' => 'Site', 'type' => 'web_url', 'url' => 'https://ok.test bad']]],
+            ['type' => 'text', 'value' => '', 'quick_replies' => [['title' => 'Yes', 'payload' => 'YES']]],
+            ['type' => 'image', 'value' => 'not a link', 'quick_replies' => [['title' => 'Yes', 'payload' => 'YES']]],
+        ] as $item) {
+            $this->assertNotNull(FlowGraph::publishProblems($graph($item)), json_encode($item));
+            $this->assertNotSame([], $this->value('notes', [$item], 0), 'the form flags it too: ' . json_encode($item));
+        }
+        // Ang payload ay inihahambing nang buo (gaya ng server): " YES" at "YES" ay magkaiba.
+        $spaced = ['type' => 'text', 'value' => 'Hi', 'buttons' => [['title' => 'A', 'type' => 'postback', 'payload' => ' YES'], ['title' => 'B', 'type' => 'postback', 'payload' => 'YES']]];
+        $this->assertNull(FlowGraph::publishProblems($graph($spaced)));
+        $this->assertSame([], $this->value('notes', [$spaced], 0));
     }
 }

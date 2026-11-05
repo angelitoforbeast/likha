@@ -100,7 +100,10 @@ class ChatbotButtonsTestTabTest extends ChatblastTestCase
         $m = $this->send($flow, 'Hi')['sends'][0]['messages'][0];
 
         $this->assertSame(['Yes'], array_column($m['buttons'], 'title'), 'the sender dropped the link');
-        $this->assertStringContainsString("/^https:\\/\\//i.test(t.url || '')", $this->get('/chatbot/test')->getContent(), 'the page links only https');
+        $html = $this->get('/chatbot/test')->getContent();
+        $this->assertStringContainsString("/^https:\\/\\//i.test(t.url || '')", $html, 'the page links only https');
+        // Ang tap na walang title (draft) ay hindi iginuguhit: walang walang-laman na mensahe kapag pinindot.
+        $this->assertStringContainsString(".filter(t => String(t.title || '').trim() !== '')", $html);
     }
 
     public function test_S_229_7_5_the_inbox_shows_a_sent_button_message_without_breaking_on_the_new_keys(): void
