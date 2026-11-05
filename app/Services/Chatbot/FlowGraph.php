@@ -227,6 +227,7 @@ class FlowGraph
     public static function publishProblems(array $graph): ?string
     {
         foreach ($graph['nodes'] ?? [] as $n) {
+            if (($n['type'] ?? '') === 'send' && ($p = self::tapProblem((array) ($n['config']['items'] ?? [])))) return 'Send message step ' . $n['id'] . ' ' . $p;
             if (($n['type'] ?? '') !== 'encode_order') continue;
             $c = (array) ($n['config'] ?? []);
             if ((($c['on_failure'] ?? 'sheet') === 'sheet' || !empty($c['also_sheet'])) && self::spreadsheetId((string) ($c['sheet'] ?? '')) === null) {
@@ -263,7 +264,59 @@ class FlowGraph
             if (!$found) $lonely[] = $id;
         }
 
-        return $lonely ? 'Encode order step ' . implode(', ', $lonely) . " has no Upload to macro before it: it encodes the customer's open order row, or goes to failed when there is none." : null;
+        $notes = [];
+        if ($lonely) $notes[] = 'Encode order step ' . implode(', ', $lonely) . " has no Upload to macro before it: it encodes the customer's open order row, or goes to failed when there is none.";
+        // Ang tap ay sagot lang kapag naghihintay ang step; kung hindi, bagong mensahe ito (mula sa Start).
+        $noWait = array_column(array_filter($graph['nodes'] ?? [], fn ($n) => ($n['type'] ?? '') === 'send' && empty($n['config']['wait']) && self::hasTaps((array) ($n['config']['items'] ?? []))), 'id');
+        if ($noWait) $notes[] = 'Send message step ' . implode(', ', $noWait) . ' has a button or quick reply to tap but does not wait for the reply: a tap starts the flow again from Start. (In a sequence step a tap always goes to the page\'s main flow.)';
+
+        return $notes ? implode(' ', $notes) : null;
+    }
+
+    /** May button na postback o quick reply ba (ang may tap na dumarating bilang sagot)? Ang web_url ay walang tap. */
+    public static function hasTaps(array $items, bool $links = false): bool
+    {
+        foreach ($items as $i) {
+            if (!empty($i['quick_replies'])) return true;
+            foreach ((array) ($i['buttons'] ?? []) as $b) if ($links || ($b['type'] ?? '') === 'postback') return true;
+        }
+
+        return false;
+    }
+
+    /** Ang unang kulang ng mga button at quick reply ng isang Send (para sa Publish), o null. */
+    private static function tapProblem(array $items): ?string
+    {
+        $last = count($items) - 1;
+        foreach (array_values($items) as $k => $i) {
+            $taps = array_merge((array) ($i['buttons'] ?? []), (array) ($i['quick_replies'] ?? []));
+            if (!$taps) continue;
+            if (!empty($i['buttons']) && trim((string) ($i['value'] ?? '')) === '') return 'has buttons but no text.';
+            if (!empty($i['quick_replies']) && $k !== $last) return 'has quick replies on a message that is not the last: Messenger shows quick replies only on the last message.';
+            $titles = [];
+            $payloads = [];
+            foreach ($taps as $t) {
+                if (trim((string) ($t['title'] ?? '')) === '') return 'has a button or quick reply with no title.';
+                if (($t['type'] ?? 'postback') === 'web_url') {
+                    if (!self::httpsUrl((string) ($t['url'] ?? ''))) return 'has a link button that is not an https:// link.';
+                } else {
+                    if (trim((string) ($t['payload'] ?? '')) === '') return 'has a button or quick reply with no payload.';
+                    $payloads[] = (string) $t['payload'];
+                }
+                $titles[] = mb_strtolower(trim((string) $t['title']));
+            }
+            if (count(array_unique($titles)) !== count($titles) || count(array_unique($payloads)) !== count($payloads)) {
+                return 'has two buttons or quick replies with the same title or payload on one message.';
+            }
+        }
+
+        return null;
+    }
+
+    /** Isang https:// na link na buo (walang variable): ang link ng button. */
+    public static function httpsUrl(string $v): bool
+    {
+        return FlowEngine::isUrl($v) && strtolower((string) parse_url($v, PHP_URL_SCHEME)) === 'https' && !str_contains($v, '{{');
     }
 
     /**

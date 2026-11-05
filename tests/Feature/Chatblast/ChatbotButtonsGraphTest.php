@@ -15,6 +15,8 @@ use InvalidArgumentException;
  */
 class ChatbotButtonsGraphTest extends ChatblastTestCase
 {
+    private ?\App\Models\User $me = null;
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -59,7 +61,7 @@ class ChatbotButtonsGraphTest extends ChatblastTestCase
     private function saveAndReload(array $graph): array
     {
         $flow = ChatbotFlow::create(['name' => 'Main', 'graph' => FlowGraph::blank()]);
-        $this->actingAs($this->user());
+        $this->actingAs($this->me ??= $this->user());
         $this->putJson("/chatbot/flows/{$flow->id}/graph", ['graph' => $graph, 'version' => ChatbotFlow::find($flow->id)->draft_version])->assertOk();
 
         return $this->getJson("/chatbot/flows/{$flow->id}/graph")->assertOk()->json('graph');
@@ -171,6 +173,130 @@ class ChatbotButtonsGraphTest extends ChatblastTestCase
         $this->refused([['type' => 'image', 'value' => 'https://img.example.test/a.jpg', 'buttons' => [$this->postback('Yes')]]], 'Image');
         $this->assertSame([['title' => 'Yes', 'payload' => 'YES']],
             $this->items(FlowGraph::clean($this->graph([['type' => 'image', 'value' => 'https://img.example.test/a.jpg', 'quick_replies' => [['title' => 'Yes', 'payload' => 'YES']]]])))[0]['quick_replies']);
+    }
+
+    // ---- Publish ----
+
+    /** I-save ang draft (laging pumapasa) at i-Publish: ang sagot ng Publish. */
+    private function publish(array $graph, ?ChatbotFlow $flow = null): \Illuminate\Testing\TestResponse
+    {
+        $flow ??= ChatbotFlow::create(['name' => 'Main ' . random_int(1, 99999), 'graph' => FlowGraph::blank()]);
+        $this->actingAs($this->me ??= $this->user());
+        $this->putJson("/chatbot/flows/{$flow->id}/graph", ['graph' => $graph, 'version' => ChatbotFlow::find($flow->id)->draft_version])->assertOk();
+
+        return $this->postJson("/chatbot/flows/{$flow->id}/publish", ['version' => ChatbotFlow::find($flow->id)->draft_version]);
+    }
+
+    private function blocked(array $items, string $needle, array $config = ['wait' => true]): void
+    {
+        $error = $this->publish($this->graph($items, $config))->assertStatus(422)->json('error');
+        $this->assertStringContainsString('cannot be published', $error);
+        $this->assertStringContainsString('Send message step n2', $error);
+        $this->assertStringContainsString($needle, $error);
+    }
+
+    /** Ang page sa gateway (forbeast) na ang flow ay $flowId; $route: ang address (gateway_app). */
+    private function gatewayPage(string $page, int $flowId, ?string $route = null): void
+    {
+        $s = app(\App\Services\PageSettings::class);
+        $s->set($page, 'chatbot', 'provider', 'gateway', false, null, true);
+        if ($route !== null) $s->set($page, 'chatbot', 'gateway_app', $route, false, null, true);
+        $s->set($page, 'chatbot', 'flow_id', (string) $flowId, false, null, true);
+    }
+
+    private const GOOD = [['type' => 'text', 'value' => 'Order na po?', 'buttons' => [['title' => 'Yes', 'type' => 'postback', 'payload' => 'YES'], ['title' => 'Shop', 'type' => 'web_url', 'url' => 'https://shop.example.test/']]]];
+
+    public function test_S_229_1_4_an_empty_title_blocks_publish_with_a_clear_message(): void
+    {
+        $this->blocked([['type' => 'text', 'value' => 'Hi', 'buttons' => [['title' => '', 'type' => 'postback', 'payload' => 'YES']]]], 'no title');
+    }
+
+    public function test_S_229_1_5_a_link_that_is_not_https_blocks_publish(): void
+    {
+        foreach (['http://shop.example.test/', 'shop.example.test', 'javascript:alert(1)', 'https://{{shop_link}}'] as $url) {
+            $this->blocked([['type' => 'text', 'value' => 'Hi', 'buttons' => [['title' => 'Shop', 'type' => 'web_url', 'url' => $url]]]], 'https://');
+        }
+    }
+
+    public function test_S_229_3_3_quick_replies_on_a_message_that_is_not_the_last_block_publish(): void
+    {
+        $this->blocked([['type' => 'text', 'value' => 'Size?', 'quick_replies' => [['title' => 'M', 'payload' => 'M']]], ['type' => 'text', 'value' => 'Salamat']], 'not the last');
+    }
+
+    public function test_S_229_4_5_a_tap_step_that_does_not_wait_publishes_with_a_warning(): void
+    {
+        $notice = $this->publish($this->graph(self::GOOD, ['wait' => false]))->assertOk()->json('notice');
+        $this->assertStringContainsString('Send message step n2', $notice);
+        $this->assertStringContainsString('does not wait for the reply', $notice);
+        // Ang web_url lang ay walang tap: walang babala.
+        $this->assertNull($this->publish($this->graph([['type' => 'text', 'value' => 'Shop', 'buttons' => [self::GOOD[0]['buttons'][1]]]], ['wait' => false]))->assertOk()->json('notice'));
+    }
+
+    public function test_S_229_6_1_a_valid_button_message_on_a_gateway_only_flow_publishes_with_no_notice(): void
+    {
+        config(['services.gateway.buttons' => 'forbeast, incepxion']);
+        $flow = ChatbotFlow::create(['name' => 'Gateway only', 'graph' => FlowGraph::blank()]);
+        $this->gatewayPage('Page Uno', $flow->id);
+        $this->gatewayPage('Page Dos', $flow->id, 'incepxion');
+        config(['services.gateway.urls' => 'incepxion=https://incepxion.example.test/api']);
+
+        $res = $this->publish($this->graph(self::GOOD, ['wait' => true]), $flow)->assertOk();
+        $this->assertNull($res->json('notice'));
+    }
+
+    public function test_S_229_6_2_buttons_with_empty_text_block_publish_naming_the_step(): void
+    {
+        $this->blocked([['type' => 'text', 'value' => '  ', 'buttons' => [['title' => 'Yes', 'type' => 'postback', 'payload' => 'YES']]]], 'no text');
+    }
+
+    public function test_S_229_6_3_a_postback_or_quick_reply_with_an_empty_payload_blocks_publish(): void
+    {
+        $this->blocked([['type' => 'text', 'value' => 'Hi', 'buttons' => [['title' => 'Yes', 'type' => 'postback', 'payload' => '']]]], 'no payload');
+        $this->blocked([['type' => 'text', 'value' => 'Hi', 'quick_replies' => [['title' => 'Yes', 'payload' => ' ']]]], 'no payload');
+    }
+
+    public function test_S_229_6_4_duplicate_payloads_or_titles_in_one_message_block_publish(): void
+    {
+        $this->blocked([['type' => 'text', 'value' => 'Hi', 'buttons' => [['title' => 'Yes', 'type' => 'postback', 'payload' => 'OK'], ['title' => 'Oo', 'type' => 'postback', 'payload' => 'OK']]]], 'same');
+        $this->blocked([['type' => 'text', 'value' => 'Hi', 'quick_replies' => [['title' => 'Yes', 'payload' => 'A'], ['title' => 'Yes', 'payload' => 'B']]]], 'same');
+    }
+
+    public function test_S_229_6_5_a_draft_with_a_problem_saves_and_only_publish_blocks(): void
+    {
+        $flow = ChatbotFlow::create(['name' => 'Draft', 'graph' => FlowGraph::blank()]);
+        $broken = $this->graph([['type' => 'text', 'value' => '', 'buttons' => [['title' => '', 'type' => 'web_url', 'url' => 'htt']]], ['type' => 'text', 'value' => 'x']]);
+        $this->publish($broken, $flow)->assertStatus(422);
+
+        $this->assertSame('htt', ChatbotFlow::find($flow->id)->draft()['nodes'][1]['config']['items'][0]['buttons'][0]['url'], 'the draft kept the half-made button');
+        $this->assertNull(ChatbotFlow::find($flow->id)->published_at);
+    }
+
+    public function test_S_229_6_6_publish_lists_the_pages_that_get_the_text_only_as_a_notice(): void
+    {
+        config(['services.gateway.buttons' => 'forbeast', 'services.gateway.urls' => 'incepxion=https://incepxion.example.test/api']);
+        $flow = ChatbotFlow::create(['name' => 'Mixed', 'graph' => FlowGraph::blank()]);
+        $other = ChatbotFlow::create(['name' => 'Other', 'graph' => FlowGraph::blank()]);
+        $s = app(\App\Services\PageSettings::class);
+        $s->set('Page Botcake', 'chatbot', 'flow_id', (string) $flow->id, false, null, true);              // Botcake, main flow
+        $this->gatewayPage('Page Gateway', $flow->id);                                // forbeast, on the list: gets buttons
+        $this->gatewayPage('Page Not Ready', $flow->id, 'incepxion');                 // a route not on the list
+        $s->set('Page Group', 'chatbot', 'flow_id', (string) $other->id, false, null, true);              // Botcake, through an ad group
+        $s->set('Page Group', 'adgroup', 'g1.flow_id', (string) $flow->id, false, null, true);
+        $s->set('Page Elsewhere', 'chatbot', 'flow_id', (string) $other->id, false, null, true);          // Botcake, does not use the flow
+        // Botcake, through a sequence step: its main flow subscribes to a sequence whose step runs the flow.
+        $seq = \Illuminate\Support\Facades\DB::table('chatbot_sequences')->insertGetId(['name' => 'Follow up', 'created_at' => now(), 'updated_at' => now()]);
+        \Illuminate\Support\Facades\DB::table('chatbot_sequence_steps')->insert(['sequence_id' => $seq, 'position' => 1, 'flow_id' => $flow->id, 'active' => true, 'created_at' => now(), 'updated_at' => now()]);
+        $main = ChatbotFlow::create(['name' => 'Subscribes', 'graph' => ['nodes' => [['id' => 'n1', 'type' => 'start'], ['id' => 'n2', 'type' => 'sequence', 'config' => ['action' => 'subscribe', 'sequence_id' => $seq]]],
+            'edges' => [['from' => 'n1', 'port' => 'next', 'to' => 'n2']]]]);
+        $s->set('Page Sequence', 'chatbot', 'flow_id', (string) $main->id, false, null, true);
+
+        $notice = $this->publish($this->graph(self::GOOD, ['wait' => true]), $flow)->assertOk()->json('notice');
+        $this->assertStringContainsString('Botcake pages get the text only', $notice);
+        $this->assertStringContainsString('Page Botcake, Page Group, Page Not Ready, Page Sequence', $notice);
+        $this->assertStringNotContainsString('Page Gateway', $notice);
+        $this->assertStringNotContainsString('Page Elsewhere', $notice);
+        // Walang button sa flow: walang listahan.
+        $this->assertNull($this->publish($this->graph([['type' => 'text', 'value' => 'Hi']]), $flow)->json('notice'));
     }
 
     public function test_the_default_payload_is_the_title_upper_cased_with_non_alphanumerics_as_underscores(): void

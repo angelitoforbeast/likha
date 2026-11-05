@@ -146,6 +146,24 @@ class Gateways
      * Ang address ng page (chatbot.gateway_app): ang key kapag naka-configure, kung hindi ay forbeast. Ang hindi kilalang
      * key ay isang warning kada page at value kada araw.
      */
+    /** Tumatanggap ba ng button at quick reply ang address na ito (services.gateway.buttons)? Walang laman = wala. */
+    public static function buttonsOn(?string $route): bool
+    {
+        if ($route === null || $route === '') return false;
+        $on = array_filter(array_map(fn ($k) => strtolower(trim($k)), explode(',', (string) config('services.gateway.buttons', ''))));
+
+        return in_array(strtolower($route), $on, true);
+    }
+
+    /** Ang address na dadaanan ng padala ng page ngayon (gaya ng GatewayProvider::request); null = Botcake. */
+    public static function sendRoute(string $page): ?string
+    {
+        if (ChatbotProvider::name($page) !== ChatbotProvider::GATEWAY) return null;
+        $gw = self::active($page);
+
+        return $gw === self::FORBEAST ? self::route($page) : $gw;
+    }
+
     public static function route(string $page): string
     {
         $key = trim((string) app(PageSettings::class)->get($page, ChatbotFields::PROVIDER, self::ROUTE_KEY));

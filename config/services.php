@@ -265,6 +265,9 @@ return [
         // Ang Meta app ng mga address na iyon (ChatEchoes: ang echo nito ay sagot ng Likha bot, hindi "Other app"):
         // "key=app_id key2=app_id2", parehong key ng GATEWAY_URLS. Walang laman = gaya ng dati.
         'app_ids' => (string) env('GATEWAY_APP_IDS', ''),
+        // Ang mga address ng gateway na tumatanggap ng button at quick reply (Gateways::buttonsOn): "forbeast,incepxion,
+        // incepxionbot" (ang route ng chatbot_replies). Walang laman = text lang sa lahat, gaya ng Botcake.
+        'buttons' => (string) env('GATEWAY_BUTTONS', ''),
         // IPv4 lang sa mga tawag sa gateway (CURLOPT_IPRESOLVE), para masubok kung IPv6 lang ang nawawalang sagot.
         'force_ipv4' => (bool) env('GATEWAY_FORCE_IPV4', false),
         'key' => env('GATEWAY_KEY'),

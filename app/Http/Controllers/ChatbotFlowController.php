@@ -232,7 +232,9 @@ class ChatbotFlowController extends Controller
             // Results: ang naka-cache na version ng graph na ito (hal. ibinalik na lumang graph) ay ang bagong Publish na.
             DB::afterCommit(fn () => ChatbotTags::forgetFlowVersion($flow->id, $graph));
 
-            return response()->json($this->state($flow->fresh()) + ['graph' => $graph] + array_filter(['notice' => FlowGraph::publishNotice($graph)]));
+            $notice = implode(' ', array_filter([FlowGraph::publishNotice($graph), \App\Services\Chatbot\ButtonPages::notice($flow->id, $graph)]));
+
+            return response()->json($this->state($flow->fresh()) + ['graph' => $graph] + array_filter(['notice' => $notice]));
         });
     }
 
