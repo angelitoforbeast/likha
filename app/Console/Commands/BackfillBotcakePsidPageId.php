@@ -30,11 +30,17 @@ class BackfillBotcakePsidPageId extends Command
         $sleep = max(0, (int) $this->option('sleep'));
         $max   = max(0, (int) $this->option('max-chunks'));
 
-        // pageKey => [id => true], mula sa lahat ng botcake.page_id (active at history).
+        // pageKey => [id => hanggang kailan], mula sa lahat ng botcake.page_id (active at history). Ang active ay null
+        // (walang hangganan); ang history ay ang pinakahuling replaced_at: ang row na ginawa pagkatapos noon ay maaaring
+        // sa ibang page na kumuha ng pangalan, kaya hindi pinupunan (ligtas ang null: pangalan pa rin ang gamit ng reader).
         $ids = [];
         foreach (PageSetting::where('provider', 'botcake')->where('key', 'page_id')->orderBy('id')->get() as $s) {
             $id = trim((string) $s->plainValue());
-            if ($id !== '') $ids[$settings->pageKey((string) $s->page_name)][$id] = true;
+            if ($id === '') continue;
+            $key = $settings->pageKey((string) $s->page_name);
+            $until = $s->active ? null : ($s->replaced_at ? (string) $s->replaced_at : '');
+            if (!array_key_exists($id, $ids[$key] ?? [])) $ids[$key][$id] = $until;
+            elseif ($ids[$key][$id] !== null) $ids[$key][$id] = $until === null ? null : max($ids[$key][$id], $until);
         }
 
         $counts = ['filled' => 0, 'no_page' => 0, 'ambiguous' => 0];
@@ -43,7 +49,7 @@ class BackfillBotcakePsidPageId extends Command
         $chunks = 0;
         while (true) {
             $rows = DB::table('botcake_psids')->whereNull('page_id')->where('id', '>', $last)
-                ->orderBy('id')->limit($chunk)->get(['id', 'page']);
+                ->orderBy('id')->limit($chunk)->get(['id', 'page', 'created_at']);
             if ($rows->isEmpty()) break;
             $last = (int) $rows->last()->id;
             $chunks++;
@@ -51,20 +57,23 @@ class BackfillBotcakePsidPageId extends Command
             $byPage = [];
             foreach ($rows as $r) {
                 $key = $settings->pageKey((string) $r->page);
-                $byPage[$key]['ids'][] = (int) $r->id;
+                $found = $ids[$key] ?? [];
+                $until = count($found) === 1 ? reset($found) : '';
+                $fill = count($found) === 1 && ($until === null || ($r->created_at !== null && $until !== '' && (string) $r->created_at <= $until));
+                $byPage[$key][$fill ? 'fill' : 'skip'][] = (int) $r->id;
                 $byPage[$key]['name'] ??= (string) $r->page;
             }
             foreach ($byPage as $key => $p) {
-                $found = array_keys($ids[$key] ?? []);
-                if (count($found) === 1) {
+                if (!empty($p['fill'])) {
                     // page_id IS NULL ulit sa UPDATE: ang naisulat na ng live writer sa pagitan ay hindi pinapalitan.
-                    $counts['filled'] += DB::table('botcake_psids')->whereIn('id', $p['ids'])->whereNull('page_id')->update(['page_id' => (string) $found[0]]);
-                    continue;
+                    $counts['filled'] += DB::table('botcake_psids')->whereIn('id', $p['fill'])->whereNull('page_id')
+                        ->update(['page_id' => (string) array_key_first($ids[$key])]);
                 }
-                $ambiguous = count($found) > 1;
-                $counts[$ambiguous ? 'ambiguous' : 'no_page'] += count($p['ids']);
+                if (empty($p['skip'])) continue;
+                $ambiguous = count($ids[$key] ?? []) > 1;
+                $counts[$ambiguous ? 'ambiguous' : 'no_page'] += count($p['skip']);
                 $missing[$key] ??= [$p['name'], 0, $ambiguous];
-                $missing[$key][1] += count($p['ids']);
+                $missing[$key][1] += count($p['skip']);
             }
 
             if ($max > 0 && $chunks >= $max) break;
