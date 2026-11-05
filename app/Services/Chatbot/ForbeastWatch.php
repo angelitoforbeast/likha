@@ -137,7 +137,13 @@ class ForbeastWatch
         if ($outcome['error'] === GatewayProvider::notSetUp($gw)) return; // walang tawag: hindi palya ng gateway
 
         [$code, $sub] = self::metaCode($body);
-        if ($type !== null && $code !== null) $this->tally($page, $gw, $type, true, $code, $sub);
+        if ($type !== null && $code !== null) {
+            try {
+                $this->tally($page, $gw, $type, true, $code, $sub);
+            } catch (Throwable $e) {
+                report($e); // ang bilang ay hindi dapat humarang sa lipat at sa bilang ng palyang padala sa ibaba
+            }
+        }
         $cause = self::cause($code, $sub);
         if ($cause === 'customer' || $cause === 'restricted') return;
         // Ang HTTP at ang code lang: ang text ng sagot ng gateway ay maaaring may laman ng mensahe (napupunta sa feed at sa screen).
@@ -244,36 +250,51 @@ class ForbeastWatch
         $pct = (int) config('services.gateway.auto_switch.' . ($type === MessagingProvider::UPDATE ? 'unknown_update_pct' : 'unknown_response_pct'));
         if ($pct <= 0 || $unknown * 100 < $pct * $total) return;
         arsort($per);
-        $label = self::codeLabel((string) array_key_first($per));
-        if ($type === MessagingProvider::RESPONSE) $this->tripUnknown($page, $gateway, $label, $unknown, $total, $now);
-        else $this->alertUnknown($page, $label, $unknown, $total, $now);
+        $top = (string) array_key_first($per);
+        // Ang burst ay ayon sa code lang (walang subcode): iisang sira ng Meta kahit iba-iba ang subcode.
+        $latest = ['code' => self::codeLabel($top), 'burst' => explode('-', $top)[0], 'failed' => $unknown, 'total' => $total, 'at' => $now];
+        // Ang pinakabagong bilang ay sa sariling key ng page (walang lock). Ang listahan ng site ay isinusulat sa ilalim ng
+        // lock nang isang beses lang kada minuto kada page (stamp), para walang agawan sa lock sa bawat palyang padala.
+        Cache::put($base . ':latest', $latest, self::UNKNOWN_WINDOW);
+        if (!Cache::add($base . ':stamp', 1, 60)) return;
+        if ($type === MessagingProvider::RESPONSE) $this->tripUnknown($page, $gateway, $base, $latest, $now);
+        else $this->alertUnknown($page, $base, $now);
     }
 
     /**
      * Ang mga sagot ng page na pumapalya sa hindi kilalang code: hindi agad lipat. Itinatala muna ("trip", may since), dahil
      * ang parehong code sa maraming page nang sabay ay sira ng Meta mismo, at ang Botcake ay dumadaan din doon; ang
-     * settleUnknown ang nagpapasya. Ang ulit habang naghihintay ay nagpapalit lang ng bilang.
+     * settleUnknown ang nagpapasya. Ang ulit habang naghihintay ay nagpapalit lang ng oras; ang lumipat na (switched) ay
+     * nananatiling lumipat habang nasa parehong gateway.
      */
-    private function tripUnknown(string $page, string $gw, string $label, int $failed, int $total, int $now): void
+    private function tripUnknown(string $page, string $gw, string $base, array $latest, int $now): void
     {
         $hash = sha1($this->settings->pageKey($page));
-        $error = $label . ': ' . $failed . ' of ' . $total . ' replies failed in 10 min';
-        $this->underUnknown(function () use ($page, $gw, $label, $error, $hash, $now) {
+        $this->underUnknown(function () use ($page, $gw, $base, $latest, $hash, $now) {
             $trips = (array) Cache::get(self::UNKNOWN_TRIPS);
-            $old = $trips[$label][$hash] ?? null;
-            $since = is_array($old) && (int) $old['at'] > $now - self::UNKNOWN_WINDOW ? (int) $old['since'] : $now;
-            $trips[$label][$hash] = ['page' => $page, 'gateway' => $gw, 'error' => $error, 'since' => $since, 'at' => $now];
+            $b = $latest['burst'];
+            $old = $trips[$b][$hash] ?? null;
+            $fresh = is_array($old) && (int) $old['at'] > $now - self::UNKNOWN_WINDOW;
+            $trips[$b][$hash] = ['page' => $page, 'gateway' => $gw, 'base' => $base, 'error' => self::tripError($latest),
+                'since' => $fresh ? (int) $old['since'] : $now, 'at' => $now] + ($fresh && !empty($old['switched']) && ($old['gateway'] ?? null) === $gw ? ['switched' => true] : []);
             Cache::put(self::UNKNOWN_TRIPS, $trips, 2 * self::UNKNOWN_WINDOW);
         });
     }
 
-    /** Ang UPDATE na pumapalya sa hindi kilalang code: walang lipat, linya lang sa banner (unknownUpdates) habang bago. */
-    private function alertUnknown(string $page, string $label, int $failed, int $total, int $now): void
+    private static function tripError(array $latest): string
     {
-        $key = sha1($this->settings->pageKey($page)) . ':' . $label;
-        $this->underUnknown(function () use ($page, $label, $failed, $total, $now, $key) {
+        return $latest['code'] . ': ' . (int) $latest['failed'] . ' of ' . (int) $latest['total'] . ' replies failed in 10 min';
+    }
+
+    /**
+     * Ang UPDATE na pumapalya sa hindi kilalang code: walang lipat, linya lang sa banner (unknownUpdates) habang bago. Ang
+     * listahan ay ang page lang; ang bilang ay binabasa mula sa pinakabagong bilang nito ($base:latest).
+     */
+    private function alertUnknown(string $page, string $base, int $now): void
+    {
+        $this->underUnknown(function () use ($page, $base, $now) {
             $all = array_filter((array) Cache::get(self::UNKNOWN_UPDATES), fn ($a) => is_array($a) && (int) $a['at'] > $now - self::UNKNOWN_WINDOW);
-            $all[$key] = ['page' => $page, 'code' => $label, 'failed' => $failed, 'total' => $total, 'at' => $now];
+            $all[sha1($this->settings->pageKey($page))] = ['page' => $page, 'base' => $base, 'at' => $now];
             Cache::put(self::UNKNOWN_UPDATES, $all, self::UNKNOWN_WINDOW);
         });
     }
@@ -294,30 +315,33 @@ class ForbeastWatch
 
     /**
      * Kada minuto (chatbot:forbeast-watch, pagkatapos ng settleHolds): ang mga trip ng hindi kilalang code. Ang luma sa
-     * window ay tinatanggal. Kapag burst_pages o higit pang page ang may trip sa parehong code (0 = walang ganitong bantay),
-     * walang lilipat sa kanila habang bago ito: sira ng Meta, at isang linya sa banner (unknownSite). Kung hindi, ang trip
-     * na hold_minutes nang naghihintay ay lipat (unknown_error), gaya ng ibang kondisyon.
+     * window ay tinatanggal. Kapag burst_pages o higit pang page ang may trip sa parehong code sa window (0 = walang ganitong
+     * bantay), kasama ang mga lumipat na, wala nang lilipat habang bago ito: sira ng Meta, at isang linya sa banner
+     * (unknownSite). Ang lumipat na bago umabot sa bilang ay nananatiling lumipat. Kung hindi, ang trip na hold_minutes nang
+     * naghihintay ay lipat (unknown_error), gaya ng ibang kondisyon; ang unknown_response_pct na 0 ay walang lipat agad.
      */
     public function settleUnknown(): void
     {
         $now = now()->getTimestamp();
         $size = (int) config('services.gateway.auto_switch.burst_pages');
         $hold = self::limit('hold_minutes') * 60;
-        $due = $this->underUnknown(function () use ($now, $size, $hold) {
+        $on = (int) config('services.gateway.auto_switch.unknown_response_pct') > 0;
+        $due = $this->underUnknown(function () use ($now, $size, $hold, $on) {
             $trips = (array) Cache::get(self::UNKNOWN_TRIPS);
             $site = array_filter((array) Cache::get(self::UNKNOWN_SITE), fn ($s) => is_array($s) && (int) $s['at'] > $now - self::UNKNOWN_WINDOW);
             $due = [];
-            foreach ($trips as $label => $pages) {
+            foreach ($trips as $b => $pages) {
                 $pages = array_filter((array) $pages, fn ($t) => is_array($t) && (int) $t['at'] > $now - self::UNKNOWN_WINDOW);
-                if ($size > 0 && count($pages) >= $size) $site[$label] = ['code' => (string) $label, 'pages' => count($pages), 'at' => $now];
-                if (!isset($site[$label])) {
+                $label = '#' . $b;
+                if ($size > 0 && count($pages) >= $size) $site[$label] = ['code' => $label, 'pages' => count($pages), 'at' => $now];
+                if (!isset($site[$label]) && $on) {
                     foreach ($pages as $hash => $t) {
-                        if ($now - (int) $t['since'] < $hold) continue;
+                        if (!empty($t['switched']) || $now - (int) $t['since'] < $hold) continue;
                         $due[] = $t;
-                        unset($pages[$hash]);
+                        $pages[$hash]['switched'] = true;
                     }
                 }
-                if ($pages) $trips[$label] = $pages; else unset($trips[$label]);
+                if ($pages) $trips[$b] = $pages; else unset($trips[$b]);
             }
             Cache::put(self::UNKNOWN_TRIPS, $trips, 2 * self::UNKNOWN_WINDOW);
             Cache::put(self::UNKNOWN_SITE, $site, self::UNKNOWN_WINDOW);
@@ -326,19 +350,30 @@ class ForbeastWatch
         });
         foreach ((array) $due as $t) {
             try {
-                $this->switch((string) $t['page'], 'unknown_error', (string) $t['error'], [], [], (string) $t['gateway']);
+                // Ang pinakabagong bilang ng page kung bago pa; kung hindi, ang bilang noong trip.
+                $latest = Cache::get($t['base'] . ':latest');
+                $error = is_array($latest) && (int) $latest['at'] > $now - self::UNKNOWN_WINDOW ? self::tripError($latest) : (string) $t['error'];
+                $this->switch((string) $t['page'], 'unknown_error', $error, [], [], (string) $t['gateway']);
             } catch (Throwable $e) {
                 report($e); // isang page lang ang apektado
             }
         }
     }
 
-    /** Ang UPDATE na pumapalya sa hindi kilalang code, kada page at code (huling 10 minuto). @return array<int, array{page: string, code: string, failed: int, total: int, at: int}> */
+    /** Ang UPDATE na pumapalya sa hindi kilalang code, kada page (huling 10 minuto). @return array<int, array{page: string, code: string, failed: int, total: int, at: int}> */
     public static function unknownUpdates(): array
     {
         $from = now()->getTimestamp() - self::UNKNOWN_WINDOW;
+        $all = array_filter((array) Cache::get(self::UNKNOWN_UPDATES), fn ($a) => is_array($a) && (int) $a['at'] > $from);
+        if (!$all) return [];
+        $latest = Cache::many(array_map(fn ($a) => $a['base'] . ':latest', array_values($all)));
+        $out = [];
+        foreach ($all as $a) {
+            $l = $latest[$a['base'] . ':latest'] ?? null;
+            if (is_array($l) && (int) $l['at'] > $from) $out[] = ['page' => $a['page'], 'code' => $l['code'], 'failed' => (int) $l['failed'], 'total' => (int) $l['total'], 'at' => (int) $l['at']];
+        }
 
-        return array_values(array_filter((array) Cache::get(self::UNKNOWN_UPDATES), fn ($a) => is_array($a) && (int) $a['at'] > $from));
+        return $out;
     }
 
     /** Ang code na pumapalya sa maraming page nang sabay (walang nailipat). @return array<int, array{code: string, pages: int, at: int}> */

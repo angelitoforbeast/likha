@@ -121,12 +121,12 @@ class UnknownMetaCodeTest extends ChatblastTestCase
     }
 
     /** Isang sagot ng bot sa customer (may chat_id, walang sequence) na tinanggap ng gateway, saka ang send_status nito. */
-    private function confirmed(int $i, string $status, ?int $code): void
+    private function confirmed(int $i, string $status, ?int $code, string $pageId = '1001'): void
     {
         $ref = 'likha-unk-' . $i;
-        DB::table('chatbot_replies')->insert(['page_id' => 1001, 'psid' => (int) self::PSID, 'chat_id' => 500 + $i, 'node_id' => 'n2', 'kind' => 'send',
+        DB::table('chatbot_replies')->insert(['page_id' => (int) $pageId, 'psid' => (int) self::PSID, 'chat_id' => 500 + $i, 'node_id' => 'n2', 'kind' => 'send',
             'status' => 'sent', 'http' => 202, 'sent_at' => now()->toDateTimeString(), 'via' => 'forbeast', 'client_ref' => $ref]);
-        app(SendStatus::class)->receive(HandleGatewayEvent::fields(['kind' => 'event', 'event_id' => 100 + $i, 'type' => 'send_status', 'page_id' => '1001',
+        app(SendStatus::class)->receive(HandleGatewayEvent::fields(['kind' => 'event', 'event_id' => 100 + $i, 'type' => 'send_status', 'page_id' => $pageId,
             'psid' => self::PSID, 'send' => ['public_id' => 'snd_' . $ref, 'client_ref' => $ref, 'status' => $status, 'accepted_at' => now()->toIso8601String(),
                 'sent_at' => $status === 'sent' ? now()->toIso8601String() : null, 'message_count' => 1, 'sent_count' => $status === 'sent' ? 1 : 0,
                 'error_code' => $code, 'error_subcode' => null, 'error' => $code !== null ? 'Something new' : null]]));
@@ -186,17 +186,23 @@ class UnknownMetaCodeTest extends ChatblastTestCase
         // Ang tunay na daan: ang send_status ng bawat sagot. Ang mga palya muna, saka ang mga naipadala.
         for ($i = 0; $i < 4; $i++) $this->confirmed($i, 'failed', 9999);
         for ($i = 4; $i < 12; $i++) $this->confirmed($i, 'sent', null);
+        // Ang kabaligtaran sa ibang page: ang mga naipadala muna, saka ang mga palya.
+        $this->gatewayPage('Page Dos', '1002');
+        for ($i = 20; $i < 28; $i++) $this->confirmed($i, 'sent', null, '1002');
+        for ($i = 28; $i < 32; $i++) $this->confirmed($i, 'failed', 9999, '1002');
         $this->assertNoSwitch('naghihintay muna ng hold (baka marami pang page ang may parehong code)');
 
         $this->travel((int) config('services.gateway.auto_switch.hold_minutes') + 1)->minutes();
         $this->artisan('chatbot:forbeast-watch')->assertSuccessful();
 
-        $e = $this->switched();
-        $this->assertNotNull($e, 'lumipat ang page');
-        $this->assertSame('unknown_error', $e['condition']);
-        $this->assertStringContainsString('#9999', ForbeastWatch::reason($e));
-        $this->assertStringContainsString('4 of 12', $e['error']);
-        $this->assertSame('botcake', ChatbotProvider::name('Page Uno'));
+        foreach (['Page Uno', 'Page Dos'] as $page) {
+            $e = $this->switched($page);
+            $this->assertNotNull($e, 'lumipat ang ' . $page);
+            $this->assertSame('unknown_error', $e['condition']);
+            $this->assertStringContainsString('#9999', ForbeastWatch::reason($e));
+            $this->assertStringContainsString('4 of 12', $e['error']);
+            $this->assertSame('botcake', ChatbotProvider::name($page));
+        }
     }
 
     public function test_S_235_2_2_two_of_twelve_replies_failing_do_not_switch(): void
@@ -237,19 +243,40 @@ class UnknownMetaCodeTest extends ChatblastTestCase
         $this->assertSame([], $this->orange());
         $white = array_values(array_filter($this->metaLines(), fn ($l) => $l[1] === 'white'));
         $this->assertCount(1, $white, 'ang unang kita ng code ngayong araw ay nakikita pa rin');
+
+        // Ang sirang bilang (hal. cache) ay hindi humaharang sa bilang ng palyang padala: ang ika-5 palya ay lipat pa rin.
+        $watch = \Mockery::mock(ForbeastWatch::class, [app(PageSettings::class)])->makePartial();
+        $watch->shouldReceive('tally')->andThrow(new \RuntimeException('cache down'));
+        $this->app->instance(ForbeastWatch::class, $watch);
+        $this->send();
+        $this->assertSame('failed_sends', $this->switched()['condition'] ?? null);
     }
 
     public function test_S_235_2_6_a_meta_wide_unknown_code_switches_no_page_and_shows_one_site_line(): void
     {
         $pages = ['Page Uno', 'Page Dos', 'Page Tres', 'Page Kwatro', 'Page Singko'];
         foreach (array_slice($pages, 1) as $i => $name) $this->gatewayPage($name, (string) (1002 + $i));
-        foreach ($pages as $name) $this->tally(4, 9999, 8, MessagingProvider::RESPONSE, $name);
+        // Iba-iba ang subcode: iisang error pa rin ng Meta.
+        foreach ($pages as $i => $name) $this->tally(4, 9999, 8, MessagingProvider::RESPONSE, $name, 100 + $i);
         $this->travel(3)->minutes();
         app(ForbeastWatch::class)->settleUnknown();
 
         $this->assertSame(0, $this->switchEvents(), 'walang page na lumipat: ang Botcake ay dumadaan din sa parehong Meta');
         foreach ($pages as $name) $this->assertSame('gateway', ChatbotProvider::name($name));
         $this->assertSame([[ProblemsPanel::SITE, 'orange', 'Meta error #9999 on 5 pages: replies failing; no page switched (Botcake goes through the same Meta)']], $this->orange());
+
+        // Paisa-isa: 4 page ang lumipat pagkatapos ng hold, saka ang ika-5 sa loob ng window. Kasama sa bilang ang mga lumipat
+        // na, kaya ang ika-5 ay hindi na lilipat at lumalabas ang linya ng site.
+        Cache::flush();
+        foreach (array_slice($pages, 0, 4) as $name) $this->tally(4, 8888, 8, MessagingProvider::RESPONSE, $name);
+        $this->travel(3)->minutes();
+        app(ForbeastWatch::class)->settleUnknown();
+        foreach (array_slice($pages, 0, 4) as $name) $this->assertSame('botcake', ChatbotProvider::name($name));
+        $this->tally(4, 8888, 8, MessagingProvider::RESPONSE, 'Page Singko');
+        $this->travel(3)->minutes();
+        app(ForbeastWatch::class)->settleUnknown();
+        $this->assertSame('gateway', ChatbotProvider::name('Page Singko'), 'ang ika-5 page ay hindi lumipat');
+        $this->assertSame([[ProblemsPanel::SITE, 'orange', 'Meta error #8888 on 5 pages: replies failing; no page switched (Botcake goes through the same Meta)']], $this->orange());
     }
 
     public function test_S_235_2_7_zero_percent_turns_the_switch_and_the_line_off(): void
@@ -262,6 +289,14 @@ class UnknownMetaCodeTest extends ChatblastTestCase
 
         $this->assertNoSwitch('0% = patay ang lipat');
         $this->assertSame([], $this->orange());
+
+        // Ang trip na naghihintay na nang ibaba sa 0: hindi na lilipat.
+        config(['services.gateway.auto_switch.unknown_response_pct' => 30]);
+        $this->tally(4, 9999, 8);
+        config(['services.gateway.auto_switch.unknown_response_pct' => 0]);
+        $this->travel(3)->minutes();
+        app(ForbeastWatch::class)->settleUnknown();
+        $this->assertNoSwitch('0% ay patay agad, pati ang naghihintay na');
     }
 
     public function test_S_235_4_1_the_first_unknown_code_of_the_day_shows_one_white_line(): void
