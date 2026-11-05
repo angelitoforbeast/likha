@@ -287,7 +287,7 @@ class BotcakeCustomerSync
                         break;
                     }
 
-                    $this->store($page, $batch, $run);
+                    $this->store($page, $batch, $run, (string) $pageId);
                     $run->save();
                     if ($this->reachesBefore($batch, $oldest)) $reason = 'age';
                     elseif ($kind === 'by_date' && $this->allBefore($batch, $stopDate)) $reason = 'date';
@@ -300,10 +300,10 @@ class BotcakeCustomerSync
                 // lahat ng kasalukuyang customer na naka-subscribe sa loob ng window. Ang mas luma ay hindi binabasa, kaya
                 // hindi ginagalaw. Ang itinuloy o putol na basa ay hindi nakakita sa lahat: walang inactive.
                 if (in_array($kind, ['window', 'full'], true) && $start === 1 && in_array($reason, ['end', 'age'], true)) {
-                    $inactive = BotcakePsid::where('source', 'api')->where('page', $page)->where('status', 'available')
+                    $inactive = BotcakePsid::updateOfPage(fn () => BotcakePsid::where('source', 'api')->where('status', 'available')
                         ->where('subscribed_at', '>=', $oldest)
-                        ->where(fn ($w) => $w->whereNull('last_seen_at')->orWhere('last_seen_at', '<', now()->subDays(self::INACTIVE_DAYS)))
-                        ->update(['status' => 'inactive', 'last_checked_at' => now()]);
+                        ->where(fn ($w) => $w->whereNull('last_seen_at')->orWhere('last_seen_at', '<', now()->subDays(self::INACTIVE_DAYS))),
+                        (string) $pageId, fn ($q) => $q->where('page', $page), ['status' => 'inactive', 'last_checked_at' => now()]);
                 }
             } catch (BotcakeException $e) {
                 $error = $e->getMessage();
@@ -362,7 +362,7 @@ class BotcakeCustomerSync
         return $this->time($c['date_subscribed_at'] ?? $c['subscribed_at'] ?? $c['inserted_at'] ?? null)?->toDateString();
     }
 
-    private function store(string $page, array $batch, BotcakePsidImportRun $run): void
+    private function store(string $page, array $batch, BotcakePsidImportRun $run, string $pageId): void
     {
         $psids = [];
         foreach ($batch as $c) {
@@ -376,7 +376,8 @@ class BotcakeCustomerSync
         }
         if (!$psids) return;
 
-        $existing = BotcakePsid::where('source', 'api')->where('page', $page)
+        // Ayon sa page id muna: ang page na pinalitan ng pangalan ay nag-a-update ng lumang row nito, hindi nagdodoble.
+        $existing = BotcakePsid::where('source', 'api')->ofPage($pageId, fn ($q) => $q->where('page', $page))
             ->whereIn('psid', array_keys($psids))->get()->keyBy('psid');
 
         foreach ($psids as $psid => $c) {
@@ -394,7 +395,7 @@ class BotcakeCustomerSync
 
             $rec = $existing[$psid] ?? null;
             if (!$rec) {
-                BotcakePsid::create($attrs + $seen + [
+                BotcakePsid::create($attrs + $seen + BotcakePsid::pageIdAttr($pageId) + [
                     'page' => $page, 'psid' => $psid, 'source' => 'api', 'status' => 'available', 'first_seen_at' => now(),
                 ]);
                 $run->customers_new++;
@@ -402,6 +403,7 @@ class BotcakeCustomerSync
             }
 
             $rec->fill($attrs + $seen + ['status' => 'available']); // inactive na nakita ulit → available
+            if (trim((string) $rec->page_id) === '') $rec->fill(BotcakePsid::pageIdAttr($pageId)); // ang page ay hindi pinapalitan
             if ($rec->isDirty(['fb_name', 'phone_numbers', 'status'])) {
                 $run->customers_updated++;
             }

@@ -76,10 +76,31 @@ class BotcakePsidMatcher
 
     protected function tableQuery(string $page, string $name): Builder
     {
-        // Sheet records lang: ang Botcake API customers (source api) ay lookup, hindi kasaysayan ng sheet.
-        return BotcakePsid::where('source', 'sheet')
-            ->whereRaw('LOWER(page) = ?', [$this->lower($page)])
-            ->whereRaw('LOWER(fb_name) = ?', [$this->lower($name)]);
+        // Sheet records lang: ang Botcake API customers (source api) ay lookup, hindi kasaysayan ng sheet. Ang page ay
+        // ayon sa page id muna (nakikita pa rin ang record bago palitan ang pangalan ng page), saka ang pangalan.
+        return $this->tableBase($name)->ofPage($this->pageId($page), $this->byPageName($page));
+    }
+
+    protected function tableBase(string $name): Builder
+    {
+        return BotcakePsid::where('source', 'sheet')->whereRaw('LOWER(fb_name) = ?', [$this->lower($name)]);
+    }
+
+    protected function byPageName(string $page): \Closure
+    {
+        return fn ($q) => $q->whereRaw('LOWER(page) = ?', [$this->lower($page)]);
+    }
+
+    protected function pageId(string $page): ?string
+    {
+        return BotcakePsid::hasPageId() ? BotcakePsid::pageIdOf($page) : null;
+    }
+
+    /** Ang naghihintay na sheet records ng customer → conflict (dalawang UPDATE, hindi OR: tingnan ang updateOfPage). */
+    protected function conflictWaiting(string $page, string $name): void
+    {
+        BotcakePsid::updateOfPage(fn () => $this->tableBase($name)->where('status', self::WAITING), $this->pageId($page),
+            $this->byPageName($page), ['status' => self::CONFLICT, 'last_checked_at' => now()]);
     }
 
     protected function emptyPsid(Builder $q): Builder
@@ -133,11 +154,10 @@ class BotcakePsidMatcher
             'matched_at'      => $otherPsid ? null : now(),
             'matched_rows'    => $otherPsid ? 0 : $holding,
             'last_checked_at' => now(),
-        ]);
+        ] + BotcakePsid::pageIdAttr($this->pageId($page)));
 
         if ($otherPsid) {
-            $this->tableQuery($page, $name)->where('status', self::WAITING)
-                ->update(['status' => self::CONFLICT, 'last_checked_at' => now()]);
+            $this->conflictWaiting($page, $name);
             return self::CONFLICT;
         }
 
@@ -162,7 +182,7 @@ class BotcakePsidMatcher
                 'sheet_date'    => $sheetDate,
                 'status'        => self::WAITING,
                 'first_seen_at' => now(),
-            ]);
+            ] + BotcakePsid::pageIdAttr($this->pageId($page)));
         }
 
         return $rec;
@@ -187,8 +207,7 @@ class BotcakePsidMatcher
         if (count($known) > 1) {
             $rec->update(['status' => self::CONFLICT, 'last_checked_at' => now()]);
             // Ang ibang naghihintay na PSID ng parehong customer ay hindi na rin ikakabit.
-            $this->tableQuery($rec->page, $rec->fb_name)->where('status', self::WAITING)
-                ->update(['status' => self::CONFLICT, 'last_checked_at' => now()]);
+            $this->conflictWaiting($rec->page, $rec->fb_name);
             return;
         }
 

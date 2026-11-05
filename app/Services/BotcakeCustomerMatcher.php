@@ -59,8 +59,9 @@ class BotcakeCustomerMatcher
         $byName = [];
         $byPhone = [];
         $adOf = [];
+        $pageId = BotcakePsid::hasPageId() ? BotcakePsid::pageIdOf($page) : null;
         BotcakePsid::where('source', 'api')->where('status', 'available')
-            ->whereRaw("LOWER($trim(page)) = ?", [$key])
+            ->ofPage($pageId, fn ($q) => $q->whereRaw("LOWER($trim(page)) = ?", [$key]))
             ->select('id', 'psid', 'fb_name', 'phone_numbers', 'ad_id')
             ->chunkById(2000, function ($rows) use (&$byName, &$byPhone, &$adOf) {
                 foreach ($rows as $r) {
@@ -120,7 +121,10 @@ class BotcakeCustomerMatcher
         // saka UPDATE ayon sa id, hanggang 1000 bawat isa: hindi nila-lock ng UPDATE ang lahat ng bagong order ng page.
         // Ang PSID ay hindi ginagalaw, at ang may ad id na ay hindi pinapalitan (sinusuri sa mismong UPDATE).
         if ($hasAdCol) {
-            $adSql = "SELECT bp.ad_id FROM botcake_psids bp WHERE bp.source IN ('api', 'chat_verify') AND LOWER($trim(bp.page)) = ?"
+            // Ang row ng page: ayon sa page id, o ayon sa pangalan kapag wala pang page id ang row (gaya ng ofPage).
+            $onPage = $pageId === null ? "LOWER($trim(bp.page)) = ?" : "(bp.page_id = ? OR (bp.page_id IS NULL AND LOWER($trim(bp.page)) = ?))";
+            $pageArgs = $pageId === null ? [$key] : [$pageId, $key];
+            $adSql = "SELECT bp.ad_id FROM botcake_psids bp WHERE bp.source IN ('api', 'chat_verify') AND $onPage"
                 . " AND bp.psid = macro_output.botcake_psid AND bp.ad_id IS NOT NULL AND bp.ad_id <> ''";
             $emptyAd = "(botcake_ad_id IS NULL OR botcake_ad_id = '')";
 
@@ -129,14 +133,14 @@ class BotcakeCustomerMatcher
                 ->where('ts_date', '>=', $since)
                 ->whereNotNull('botcake_psid')->where('botcake_psid', '<>', '')
                 ->whereRaw($emptyAd)
-                ->whereRaw("EXISTS ($adSql)", [$key])
+                ->whereRaw("EXISTS ($adSql)", $pageArgs)
                 ->select('id')
-                ->chunkById(1000, function ($orders) use (&$out, $adSql, $emptyAd, $key) {
+                ->chunkById(1000, function ($orders) use (&$out, $adSql, $emptyAd, $pageArgs) {
                     $ids = $orders->pluck('id')->all();
                     $out['ad_filled'] += DB::update(
                         "UPDATE macro_output SET botcake_ad_id = ($adSql ORDER BY (bp.source = 'api') DESC, bp.id DESC LIMIT 1)"
                         . ' WHERE id IN (' . implode(',', array_fill(0, count($ids), '?')) . ") AND $emptyAd AND EXISTS ($adSql)",
-                        array_merge([$key], $ids, [$key])
+                        array_merge($pageArgs, $ids, $pageArgs)
                     );
                 }, 'id');
         }
