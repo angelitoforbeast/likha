@@ -3,6 +3,7 @@
 ## Status
 
 Done, not pushed, not deployed. No migration, no server change. Branch `feat/230-cpp-sort` from `b26149a5`.
+All 10 cases pass (11 tests); the full suite has no new failure against `b26149a5`.
 Low tier, so no reviewer pass: lint and tests were run by the main session (see Checks). Browser check skipped:
 this session has no browser tools, and the page needs a signed-in user with ad data (see Open questions).
 
@@ -70,12 +71,75 @@ Red run (before `public/js/cpp-sort.js` existed), `php artisan test tests/Featur
 Error: Cannot find module '...\public\js/cpp-sort.js'
 ```
 
-(The first attempt at the red run stopped on a name clash: the helper `page()` collides with
+(The first attempt at the red run stopped on a name clash: a private helper `page()` cannot override the protected
 `ChatblastTestCase::page()`; renamed `cppPage()`. The second green attempt failed because `require` loads a
 `.js` file as an ES module in this repo (`"type": "module"`); the test now runs the script with
 `vm.runInThisContext`, as a browser would.)
 
 Lint: `php -l tests/Feature/CPP/CppSortTest.php` → `No syntax errors detected`; `node --check public/js/cpp-sort.js` → ok.
+
+CPP tests, `php artisan test tests/Feature/CPP` (6 tests of slice 225 and the 11 new ones):
+
+```
+  Tests:    17 warnings (82 assertions)
+```
+
+Every `!` warning in this repo's runs (here and in the full suite, baseline included) is the same one:
+`file_get_contents(...\.env): Failed to open stream`, because the worktree has no env file; it is raised
+outside the tests' assertions and a run with plain `vendor/bin/phpunit` reports `OK (1 test, 5 assertions)`
+for the same test. Warnings are not failures.
+
+### Case table
+
+| Case | Test | Result |
+|---|---|---|
+| S-230.1.1 | `test_S_230_1_1_cpp_sorts_highest_first_then_lowest_first_then_back_to_the_original_order` | pass |
+| S-230.1.2 | `test_S_230_1_2_page_name_sorts_a_to_z_then_z_to_a` | pass |
+| S-230.1.3 | `test_S_230_1_3_date_sorts_newest_first_then_oldest_first_in_both_by_date_tables` | pass |
+| S-230.1.4 | `test_S_230_1_4_peso_comma_and_percent_values_sort_as_numbers_not_text` | pass |
+| S-230.1.5 | `test_S_230_1_5_empty_and_dash_cells_are_last_in_both_directions` | pass |
+| S-230.2.1 | `test_S_230_2_1_the_total_row_stays_last_after_any_sort` | pass |
+| S-230.2.2 | `test_S_230_2_2_ad_group_rows_stay_under_their_page_in_their_own_order` | pass |
+| S-230.2.3 | `test_S_230_2_3_a_re_render_keeps_the_chosen_sort` | pass |
+| S-230.2.4 | `test_S_230_2_4_copy_table_copies_the_rows_in_the_shown_order` | pass |
+| S-230.3.1 | `test_S_230_3_1_enter_or_space_on_a_header_sorts_and_aria_sort_is_on_that_header_only` | pass |
+| (page wiring) | `test_S_230_the_page_loads_the_sort_script_and_marks_the_rows_that_stay_put` | pass |
+
+### Full suite, `php artisan test`
+
+Baseline on `b26149a5` (run first, before any code change):
+
+```
+  Tests:    3 failed, 4283 warnings, 206 passed (47406 assertions)
+  Duration: 1254.72s
+   FAILED  Tests\Feature\Chatblast\BigBroadcastTest > s 167 1 5000 messages on 50 pages all go out without one faile…
+   FAILED  Tests\Feature\ExampleTest > the application returns a successful response
+   FAILED  Tests\Feature\Item\ItemTableFitScriptTest > every catalog column id has a minimum width and a place in th…
+```
+
+Branch at `a09e974e` (the code commit; later commits are docs only):
+
+```
+  Tests:    3 failed, 4294 warnings, 206 passed (77462 assertions)
+  Duration: 1411.59s
+   FAILED  Tests\Feature\ExampleTest > the application returns a successful response
+   FAILED  Tests\Feature\Item\ItemTableFitScriptTest > every catalog column id has a minimum width and a place in th…
+   FAILED  Tests\Feature\NightRun\AstraAddressRulesTest > s 26 18 over every pair of a name and its one word longer…
+```
+
+4492 → 4503 tests: the 11 new ones. No new failure:
+
+- **Pre-existing on `b26149a5`:** `ExampleTest` (`/` redirects, 302 instead of 200) and `ItemTableFitScriptTest`
+  (`actual size 57 matches expected size 45`, a column count in `OwnerColumnSettingsController`).
+- **Time limits, red or green by machine load:** `BigBroadcastTest` S-167.1 (red on the baseline, green on the
+  branch) and `AstraAddressRulesTest` S-26.18 (`Failed asserting that 30.7218547 is less than 25.0.` on the
+  branch run; green on the baseline at 20.8 s). Rerun alone, back to back: on `b26149a5` 24.03 s, pass; on the
+  branch 19.63 s and 17.83 s, pass. Neither test reads a file this change touches (the diff against
+  `b26149a5` is the CPP view, the new script and test, the DOM stub line, and docs).
+
+Kit hook tests, `node --test 'test/hooks/*.test.mjs'`: `tests 1075, pass 1026, fail 5`. The five are the
+symlink tests of `format-on-edit` (`EPERM ... syscall: 'symlink'`: Windows without symlink rights); no kit file
+is touched by this change.
 
 ## Rulings
 
@@ -117,4 +181,19 @@ decisions (for example "upper and lower case together" for .1.2, "by the date, n
 
 None blocking.
 
+- Not seen in a real browser. The tests run the script on a small DOM stub; the CSS arrow, the pointer cursor
+  and the focus outline on a header were not looked at on the live page (no browser tools in this session, and
+  the page needs a signed-in user with ad data). Worth one look by the reviewer on the running page: click CPP
+  three times, Tab to a header and press Space, then Copy Table and paste into a sheet.
+- The spec's done-when list has no checkboxes to tick in a committed file (the spec is never edited); all four
+  items are met, with the evidence under Checks and in `qa/stories.md`.
+
 ## Proposed tasks
+
+- For the owner: `ExampleTest` and `ItemTableFitScriptTest` fail on `b26149a5` already; the first expects `/` to
+  answer 200 (it redirects), the second counts 45 owner columns where there are 57.
+- For the owner: `BigBroadcastTest` S-167.1 and `AstraAddressRulesTest` S-26.18 assert wall-clock limits that a
+  busy machine misses (24.0 s against a 25 s limit on a quiet rerun); a larger margin or a separate slow group
+  would keep the full suite from flickering.
+- Possible later: sort the cpp_timeline grid the same way (out of scope here; the script takes any table with a
+  `thead` and `tbody`).
