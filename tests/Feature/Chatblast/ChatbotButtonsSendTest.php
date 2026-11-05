@@ -118,6 +118,47 @@ class ChatbotButtonsSendTest extends ChatblastTestCase
         ], $this->wire()[0], 'no ai, no cut mark: the 049 shape only');
     }
 
+    public function test_S_229_5_1_b_bot_2_on_the_list_gets_the_049_shape_and_its_record_has_no_left_out(): void
+    {
+        $bot2 = 'https://incepxionbot.example.test/api';
+        config(['services.incepxionbot.url' => $bot2, 'services.incepxionbot.key' => 'bot2_key', 'services.gateway.buttons' => 'incepxionbot']);
+        Http::fake([$bot2 . '/*' => Http::response(['status' => 'queued'], 202)]);
+        $this->gateway();
+        app(PageSettings::class)->set('Page Uno', 'chatbot', 'gateway', 'incepxionbot', false, null, true);
+        $this->flow($this->graph(self::YES_NO));
+
+        $call = Http::recorded()->first()[0];
+        $this->assertStringStartsWith($bot2, $call->url());
+        $this->assertSame('buttons', $call['messages'][0]['type']);
+        $row = ChatbotReply::where('node_id', 'n2')->firstOrFail();
+        $this->assertSame('incepxionbot', $row->via);
+        $this->assertArrayNotHasKey('left_out', $row->content[0]);
+    }
+
+    public function test_S_229_5_1_c_a_replay_of_stored_content_never_carries_our_marks(): void
+    {
+        // chatbot:heal-send-confirmations ay ipinapadala ulit ang naka-imbak na content sa GatewayProvider::request.
+        config(['services.gateway.buttons' => 'forbeast']);
+        $this->gateway();
+        $stored = [['type' => 'text', 'text' => 'Order na po?', 'ai' => false, 'text_cut' => true, 'left_out' => true,
+            'buttons' => [['title' => 'Buy Reflective stick', 'type' => 'postback', 'payload' => 'BUY', 'cut' => true]]],
+            ['type' => 'image', 'url' => 'https://img.example.test/a.jpg', 'ai_text' => 'x', 'quick_replies' => [['title' => 'M', 'payload' => 'M', 'cut' => true]]]];
+        $q = (new GatewayProvider())->request('Page Uno', '1001', '7001', $stored, 'likha-ref');
+
+        $this->assertSame([['type' => 'buttons', 'text' => 'Order na po?', 'buttons' => [['title' => 'Buy Reflective stick', 'type' => 'postback', 'payload' => 'BUY']]],
+            ['type' => 'image', 'url' => 'https://img.example.test/a.jpg', 'quick_replies' => [['title' => 'M', 'payload' => 'M']]]], $q['body']['messages']);
+    }
+
+    public function test_S_229_3_3_b_quick_replies_on_a_message_that_is_not_the_last_are_not_sent(): void
+    {
+        config(['services.gateway.buttons' => 'forbeast']);
+        $this->gateway();
+        // Isang draft mula sa save API (hindi pa dumaan sa Publish, na humaharang dito).
+        $this->flow($this->graph([['type' => 'text', 'value' => 'Size?', 'quick_replies' => [['title' => 'M', 'payload' => 'M']]], ['type' => 'text', 'value' => 'Salamat']]));
+
+        $this->assertSame([['type' => 'text', 'text' => 'Size?'], ['type' => 'text', 'text' => 'Salamat']], $this->wire()[0]);
+    }
+
     public function test_S_229_5_2_a_botcake_page_gets_the_text_alone_and_the_reply_records_the_buttons_were_left_out(): void
     {
         config(['services.gateway.buttons' => 'forbeast']);
