@@ -52,9 +52,14 @@ class ForbeastWatch
     /** Ang mga lipat na kusang ibinabalik: ang sa koneksyon ng page (token, permiso) ay tao ang nag-aayos. */
     public const BACK_CONDITIONS = ['inbound', 'failed_sends', 'no_answer', 'health'];
 
-    /** Mga error ng Meta na sa customer ang dahilan (wala na, hindi na maabot, labas sa 24 oras, naka-block): hindi binibilang. */
+    /**
+     * Mga error ng Meta na sa customer ang dahilan (wala na, hindi na maabot, labas sa 24 oras, naka-block): hindi binibilang.
+     * Ang #10 na may subcode sa RESTRICTED_SUBCODES ay hindi sa customer kundi restriction ng page (tingnan ang cause()).
+     */
     public const CUSTOMER_CODES = [551, 10];
     public const CUSTOMER_SUBCODES = [1545041, 2018001, 2018108, 2018278];
+    /** Subcode ng #10 na pinagbawalan ng Meta ang page na magpadala: pareho sa Botcake, kaya walang lipat at hindi binibilang. */
+    public const RESTRICTED_SUBCODES = [1893063];
     /** Mga error ng Meta sa koneksyon ng page (token, permiso, rate limit): lipat agad. */
     public const CONNECTION_CODES = [190, 200, 2022, 613, 4, 32];
 
@@ -104,7 +109,8 @@ class ForbeastWatch
 
     /**
      * Pagkatapos ng bawat padala sa gateway (GatewayProvider). $body: ang sagot ng gateway; $gateway: ang gateway na
-     * ginamit. Ang palya ng gateway na hindi na aktibo (lumipat na ang page) ay hindi ebidensya.
+     * ginamit. Ang palya ng gateway na hindi na aktibo (lumipat na ang page) ay hindi ebidensya. Ang dahilan sa customer at
+     * ang restriction ng page (cause()) ay hindi binibilang: walang lipat, walang dagdag sa bilang ng palyang padala.
      */
     public function afterSend(string $page, array $outcome, mixed $body, ?string $gateway = null): void
     {
@@ -119,11 +125,12 @@ class ForbeastWatch
         if ($outcome['error'] === GatewayProvider::notSetUp($gw)) return; // walang tawag: hindi palya ng gateway
 
         [$code, $sub] = self::metaCode($body);
-        if (in_array($code, self::CUSTOMER_CODES, true) || in_array($sub, self::CUSTOMER_SUBCODES, true)) return;
+        $cause = self::cause($code, $sub);
+        if ($cause === 'customer' || $cause === 'restricted') return;
         // Ang HTTP at ang code lang: ang text ng sagot ng gateway ay maaaring may laman ng mensahe (napupunta sa feed at sa screen).
         $http = (int) ($outcome['http'] ?? 0);
         $error = ($http === 0 ? Gateways::label($gw) . ' did not answer' : 'HTTP ' . $http) . ($code !== null ? ' (Meta #' . $code . ')' : '');
-        if (in_array($code, self::CONNECTION_CODES, true)) {
+        if ($cause === 'connection') {
             $this->switch($page, 'connection_error', $error, [], [], $gw);
             return;
         }
@@ -147,16 +154,16 @@ class ForbeastWatch
     /**
      * Ang huling resulta ng padala mula sa Meta (send_status ng gateway). Tinatanggap muna ng gateway ang padala (afterSend
      * ay "sent"), saka pa lang sumasagot ang Meta: ang palya ng koneksyon ng page roon (token na binawi #190, permiso #200,
-     * rate limit) ay lipat agad, gaya ng palya sa mismong padala. Ang dahilan sa customer (#551, #10) ay hindi binibilang;
-     * ang #2022 (page na pinagbawalan ng Meta) ay pareho sa ibang daan, kaya hawak ang follow-up (PageRestriction), walang lipat.
+     * rate limit) ay lipat agad, gaya ng palya sa mismong padala. Ang dahilan sa customer (#551, #10) at ang restriction ng
+     * page (#10 subcode 1893063, pareho sa Botcake) ay hindi binibilang; ang #2022 (page na pinagbawalan ng Meta) ay pareho
+     * sa ibang daan, kaya hawak ang follow-up (PageRestriction), walang lipat.
      */
     public function afterResult(int|string $pageId, ?string $gateway, ?int $code, ?int $sub): void
     {
         $page = BotcakeChat::pageMap()[(string) $pageId] ?? null;
         if ($page === null || $gateway === null || !Gateways::valid($gateway)) return;
         if (ChatbotProvider::name($page) !== ChatbotProvider::GATEWAY || $gateway !== Gateways::active($page)) return;
-        if ($code === null || in_array($code, self::CUSTOMER_CODES, true) || in_array($sub, self::CUSTOMER_SUBCODES, true)) return;
-        if ($code === 2022 || !in_array($code, self::CONNECTION_CODES, true)) return;
+        if ($code === 2022 || self::cause($code, $sub) !== 'connection') return;
         $this->switch($page, 'connection_error', Gateways::label($gateway) . ' send failed at Meta (Meta #' . $code . ')', [], [], $gateway);
     }
 
@@ -1071,6 +1078,20 @@ class ForbeastWatch
         if ($code === null && preg_match('/#(\d{1,7})\b/', \App\Services\BotcakeClient::messageText($body), $m)) $code = (int) $m[1];
 
         return [$code, $sub];
+    }
+
+    /**
+     * Ang dahilan ng error ng Meta: 'restricted' (#10 na pinagbawalan ang page, RESTRICTED_SUBCODES), 'customer'
+     * (CUSTOMER_CODES o CUSTOMER_SUBCODES, kahit walang code), 'connection' (CONNECTION_CODES), 'unknown' (ibang code), o
+     * null kapag walang code. Ang restriction muna, dahil code 10 din ito na kung hindi ay mabibilang na sa customer.
+     */
+    public static function cause(?int $code, ?int $sub): ?string
+    {
+        if ($code === 10 && in_array($sub, self::RESTRICTED_SUBCODES, true)) return 'restricted';
+        if (in_array($code, self::CUSTOMER_CODES, true) || in_array($sub, self::CUSTOMER_SUBCODES, true)) return 'customer';
+        if ($code === null) return null;
+
+        return in_array($code, self::CONNECTION_CODES, true) ? 'connection' : 'unknown';
     }
 
     private static function limit(string $key): int
