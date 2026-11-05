@@ -4437,3 +4437,31 @@ Slice 229: 57 passed, 0 failed, 0 blocked, 0 skipped, 0 not run (57 cases, 72 te
 | S-229.9.2 | negative | Given it not ticked, then the message is hidden as today | `test_S_229_9_2_a_message_not_shown_to_the_ai_stays_hidden` | 2026-11-05 passed |
 | S-229.9.3 | negative | Then ai and ai_text are still stripped before the send | `test_S_229_9_3_ai_and_ai_text_are_stripped_before_the_send` | 2026-11-05 passed |
 | S-229.9.4 | edge | Given a tap, then the AI sees the title as the customer's turn | `test_S_229_9_4_after_a_tap_the_ai_sees_the_title_as_the_customers_turn` | 2026-11-05 passed |
+
+## Slice 230 – Sort the CPP tables
+
+As staff on Ads Manager → CPP, I want to click a column header to sort the rows, so I can see the highest CPP or the biggest spend first.
+
+Slice 230: 10 passed, 0 failed, 0 blocked, 0 skipped, 0 not run (10 cases, 11 tests; one more test checks that the page loads the script and marks the TOTAL rows and date cells). Threat model: no new input; the page sorts what it already shows (low tier, client side only, no server query changed). Tests: `tests/Feature/CPP/CppSortTest.php`, running `public/js/cpp-sort.js` in Node on `tests/js/dom-stub.cjs`.
+
+### S-230.1 Click a header to sort (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-230.1.1 | happy | Given the by-page table, when "CPP" is clicked, then the rows are highest CPP first with ▼; clicked again, lowest first with ▲; a third time, the original order with no arrow | `test_S_230_1_1_cpp_sorts_highest_first_then_lowest_first_then_back_to_the_original_order` | 2026-11-05 passed |
+| S-230.1.2 | happy | Given "Page Name" clicked, then A→Z (upper and lower case together), and clicked again Z→A | `test_S_230_1_2_page_name_sorts_a_to_z_then_z_to_a` | 2026-11-05 passed |
+| S-230.1.3 | happy | Given either by-date table, when "Date" is clicked, then newest first, and clicked again oldest first (by the date, not the "Nov 5, 2026" text) | `test_S_230_1_3_date_sorts_newest_first_then_oldest_first_in_both_by_date_tables` | 2026-11-05 passed |
+| S-230.1.4 | edge | Given ₱ and comma amounts and % values, then they sort as numbers: ₱1,200.00 above ₱900.00, 12.00% above 9.00% | `test_S_230_1_4_peso_comma_and_percent_values_sort_as_numbers_not_text` | 2026-11-05 passed |
+| S-230.1.5 | edge | Given empty or "—" cells, then they are last in both directions | `test_S_230_1_5_empty_and_dash_cells_are_last_in_both_directions` | 2026-11-05 passed |
+
+### S-230.2 Rows that must not move wrongly (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-230.2.1 | happy | Given a TOTAL row, then it stays last after any sort of any column | `test_S_230_2_1_the_total_row_stays_last_after_any_sort` | 2026-11-05 passed |
+| S-230.2.2 | happy | Given an ad-based page with ad group rows, when pages are sorted, then its group rows stay under it in their own order, never sorted on their own | `test_S_230_2_2_ad_group_rows_stay_under_their_page_in_their_own_order` | 2026-11-05 passed |
+| S-230.2.3 | edge | Given a chosen sort, when the table is drawn again (date, page or item filter), then it comes back sorted the same way; each table keeps its own sort | `test_S_230_2_3_a_re_render_keeps_the_chosen_sort` | 2026-11-05 passed |
+| S-230.2.4 | edge | Given a sorted table, when Copy Table (or Copy with ad groups) is pressed, then the rows are copied in the shown order and the header text has no arrow | `test_S_230_2_4_copy_table_copies_the_rows_in_the_shown_order` | 2026-11-05 passed |
+
+### S-230.3 Keyboard and screen reader (P2)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-230.3.1 | happy | Given a header reached with Tab, when Enter or Space is pressed, then it sorts, and `aria-sort` is ascending or descending on that header only | `test_S_230_3_1_enter_or_space_on_a_header_sorts_and_aria_sort_is_on_that_header_only` | 2026-11-05 passed |
