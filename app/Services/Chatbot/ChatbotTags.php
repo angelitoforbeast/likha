@@ -84,8 +84,8 @@ class ChatbotTags
         try {
             $ad = Cache::remember('chatbot-ad:' . $pageId . ':' . $psid, 86400, function () use ($pageId, $psid, $pageName) {
                 $settings = app(PageSettings::class);
-                $fromPsid = BotcakePsid::where('psid', (string) $psid)->where('ad_id', '<>', '')->whereNotNull('ad_id')->get(['page', 'ad_id'])
-                    ->first(fn ($r) => $settings->pageKey((string) $r->page) === $settings->pageKey($pageName))?->ad_id;
+                $fromPsid = BotcakePsid::where('psid', (string) $psid)->where('ad_id', '<>', '')->whereNotNull('ad_id')->get(BotcakePsid::withPageId(['page', 'ad_id']))
+                    ->first(fn ($r) => $r->onPage((string) $pageId, $pageName))?->ad_id;
                 if ($fromPsid) return (string) $fromPsid;
                 $first = BotcakeChat::active()->where('page_id', (string) $pageId)->where('psid', (string) $psid)->orderBy('id')->first(['payload']);
                 $ad = trim((string) ($first?->payload['ad_id'] ?? ''));

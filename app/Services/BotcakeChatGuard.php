@@ -133,10 +133,10 @@ class BotcakeChatGuard
      */
     public function checkPsid(string $page, string $pageId, string $psid, ?string $name, ?string $adId = null): string
     {
-        $pageKey = $this->settings->pageKey($page);
-        // Ang psid ay naka-index; iilan lang ang row ng isang PSID, kaya ang page ay inihahambing dito (trim, case).
-        $rows = BotcakePsid::where('psid', $psid)->get(['id', 'page', 'ad_id'])
-            ->filter(fn ($r) => $this->settings->pageKey((string) $r->page) === $pageKey);
+        // Ang psid ay naka-index; iilan lang ang row ng isang PSID, kaya ang page ay inihahambing dito: page id muna,
+        // saka ang pangalan (trim, case) para sa row na wala pang page id.
+        $rows = BotcakePsid::where('psid', $psid)->get(BotcakePsid::withPageId(['id', 'page', 'ad_id']))
+            ->filter(fn ($r) => $r->onPage($pageId, $page));
         if ($rows->isNotEmpty()) {
             $empty = $rows->filter(fn ($r) => trim((string) $r->ad_id) === '')->pluck('id');
             if ($adId !== null && $empty->isNotEmpty()) BotcakePsid::whereIn('id', $empty)->update(['ad_id' => $adId]);
@@ -173,7 +173,7 @@ class BotcakeChatGuard
         BotcakePsid::create([
             'page' => $page, 'psid' => $psid, 'fb_name' => mb_substr((string) $name, 0, 255), 'status' => 'verified',
             'source' => 'chat_verify', 'first_seen_at' => now(), 'ad_id' => $adId,
-        ]);
+        ] + BotcakePsid::pageIdAttr($pageId));
 
         return 'ok';
     }

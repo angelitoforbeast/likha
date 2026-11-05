@@ -128,8 +128,8 @@ class Inbox
         // Ang pangalan ng customer na wala pang chat sa window (bot lang): mula sa botcake_psids.
         $page = BotcakeChat::pageMap()[$pageId] ?? null;
         $noName = array_map('strval', array_keys(array_filter($rows, fn ($r) => !$r['in'])));
-        $names = $noName && $page ? BotcakePsid::whereIn('psid', $noName)->get(['page', 'psid', 'fb_name'])
-            ->filter(fn ($p) => $this->settings->pageKey((string) $p->page) === $this->settings->pageKey($page))->pluck('fb_name', 'psid') : collect();
+        $names = $noName && $page ? BotcakePsid::whereIn('psid', $noName)->get(BotcakePsid::withPageId(['page', 'psid', 'fb_name']))
+            ->filter(fn ($p) => $p->onPage($pageId, $page))->pluck('fb_name', 'psid') : collect();
 
         $list = [];
         foreach ($rows as $psid => $r) {
@@ -387,8 +387,8 @@ class Inbox
     {
         $first = BotcakeChat::active()->where('page_id', $pageId)->where('psid', $psid)->orderBy('id')->first(['name', 'payload', 'received_at']);
         $last = BotcakeChat::active()->where('page_id', $pageId)->where('psid', $psid)->orderByDesc('id')->first(['name', 'payload', 'received_at']);
-        $record = BotcakePsid::where('psid', $psid)->get(['page', 'fb_name', 'source', 'ad_id', 'first_seen_at', 'subscribed_at'])
-            ->first(fn ($p) => $this->settings->pageKey((string) $p->page) === $this->settings->pageKey($page));
+        $record = BotcakePsid::where('psid', $psid)->get(BotcakePsid::withPageId(['page', 'fb_name', 'source', 'ad_id', 'first_seen_at', 'subscribed_at']))
+            ->first(fn ($p) => $p->onPage($pageId, $page));
         $fields = new CustomerFields((int) $pageId, (int) $psid);
         $wait = (string) $fields->get(CustomerFields::WAIT);
         $values = $fields->fields();

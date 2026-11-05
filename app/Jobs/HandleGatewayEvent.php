@@ -194,12 +194,11 @@ class HandleGatewayEvent implements ShouldQueue
         if ($e['type'] !== 'referral') ChatbotInbound::afterStore($chat, $pageName);
     }
 
-    /** Ang pangalan: sa botcake_psids (page + PSID), saka sa huling chat na may pangalan; kung wala, blangko. */
+    /** Ang pangalan: sa botcake_psids (page id o pangalan ng page + PSID), saka sa huling chat na may pangalan; kung wala, blangko. */
     private function name(PageSettings $settings, string $pageName, array $e): ?string
     {
-        $key = $settings->pageKey($pageName);
-        $known = BotcakePsid::where('psid', (string) $e['psid'])->get(['page', 'fb_name'])
-            ->first(fn ($r) => $settings->pageKey((string) $r->page) === $key && trim((string) $r->fb_name) !== '');
+        $known = BotcakePsid::where('psid', (string) $e['psid'])->get(BotcakePsid::withPageId(['page', 'fb_name']))
+            ->first(fn ($r) => $r->onPage((string) $e['page_id'], $pageName) && trim((string) $r->fb_name) !== '');
         if ($known) return mb_substr((string) $known->fb_name, 0, 255);
 
         return BotcakeChat::where('page_id', (string) $e['page_id'])->where('psid', (string) $e['psid'])->whereNotNull('name')->where('name', '!=', '')

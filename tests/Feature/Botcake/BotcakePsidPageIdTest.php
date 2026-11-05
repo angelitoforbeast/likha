@@ -9,14 +9,64 @@ use App\Services\BotcakeCustomerMatcher;
 use App\Services\BotcakeCustomerSync;
 use App\Services\BotcakePsidMatcher;
 use App\Services\PageSettings;
+use App\Jobs\HandleGatewayEvent;
+use App\Models\ChatbotReply;
+use App\Services\BotcakeChatGuard;
+use App\Services\Chatbot\ChatbotTags;
+use App\Services\Chatbot\Inbox;
+use App\Services\Chatbot\LiveFeed;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Once;
 use PHPUnit\Framework\Attributes\DataProvider;
+use Tests\Feature\Chatblast\ChatblastTestCase;
 
 /** Ang page_id ng botcake_psids: isinusulat ng bawat writer, at ito muna ang tinitingnan ng mga reader (pangalan kapag wala). */
-class BotcakePsidPageIdTest extends BotcakeApiTestCase
+class BotcakePsidPageIdTest extends ChatblastTestCase
 {
-    private const TOKEN = 'tok-page-id-test-3k9w';
+    private const INFO = 'botcake.io/api/public_api/v1/pages/*/customer/*/info';
+
+    protected bool $withCampaigns = false;
+
+    /** Ang mga table ng chat at ng Inbox, para sa mga reader ng chat. */
+    private function chatTables(): void
+    {
+        Artisan::call('migrate', ['--path' => [
+            'database/migrations/2026_10_20_100000_create_botcake_chats_table.php',
+            'database/migrations/2026_10_22_100000_widen_source_on_botcake_psids.php',
+            'database/migrations/2026_10_23_100000_create_chatbot_tables.php',
+            'database/migrations/2026_10_24_100000_add_inbox_indexes.php',
+            'database/migrations/2026_10_24_100100_create_chatbot_events_and_reply_user.php',
+            'database/migrations/2026_11_09_100000_add_via_to_chatbot_replies.php',
+            'database/migrations/2026_11_13_100000_widen_via_on_chatbot_replies.php',
+        ]]);
+    }
+
+    /** Ang pangalang nakikita ng reader ng chat para sa customer na walang pangalan sa chat (null = wala). */
+    private function chatName(string $reader, string $pageId, string $page, string $psid): ?string
+    {
+        if ($reader === 'gateway') {
+            $settings = app(PageSettings::class);
+            return (fn () => $this->name($settings, $page, ['page_id' => $pageId, 'psid' => $psid]))->call(new HandleGatewayEvent([]));
+        }
+        if ($reader === 'inboxList') {
+            ChatbotReply::where('psid', (int) $psid)->delete();
+            ChatbotReply::create(['page_id' => (int) $pageId, 'psid' => (int) $psid, 'node_id' => 'n1', 'kind' => 'send', 'content' => ['text' => 'Hi'], 'status' => 'sent', 'sent_at' => now()]);
+            $name = (string) (app(Inbox::class)->listWithCounts($pageId)['rows'][0]['name'] ?? '');
+            return $name === '' || str_starts_with($name, 'PSID') ? null : $name;
+        }
+        if ($reader === 'inboxPanel') {
+            $name = (string) app(Inbox::class)->panel($pageId, $page, $psid)['name'];
+            return str_starts_with($name, 'PSID') ? null : $name;
+        }
+        // liveFeed
+        $top = ['bot' => [$pageId . '|' . $psid => now()->toDateTimeString()]];
+        $start = now()->startOfDay()->toDateTimeString();
+        $end = now()->endOfDay()->toDateTimeString();
+        $names = (fn () => $this->customerFacts($top, $start, $end, [$pageId => $page])[0])->call(app(LiveFeed::class));
+        $name = (string) ($names[$pageId . '|' . $psid] ?? '');
+        return $name === '' || str_starts_with($name, 'Customer') ? null : $name;
+    }
 
     private function pageId(string $page, string $id): void
     {
@@ -90,7 +140,7 @@ class BotcakePsidPageIdTest extends BotcakeApiTestCase
     {
         if ($case === 'no column') {
             $this->pageId('Page Uno', '1001');
-            (require base_path('database/migrations/2026_11_05_200000_add_page_id_to_botcake_psids.php'))->down();
+            (require base_path('database/migrations/2026_11_18_100000_add_page_id_to_botcake_psids.php'))->down();
             Once::flush();
             $this->psid('Page Uno', null, 'psid-api', 'Ana Cruz');
         }
@@ -117,6 +167,12 @@ class BotcakePsidPageIdTest extends BotcakeApiTestCase
         return [
             'BotcakeCustomerMatcher' => ['customerMatcher'],
             'BotcakePsidMatcher'     => ['psidMatcher'],
+            'HandleGatewayEvent name' => ['gatewayName'],
+            'BotcakeChatGuard check'  => ['guardCheck'],
+            'Inbox list name'         => ['inboxListName'],
+            'Inbox panel'             => ['inboxPanelName'],
+            'LiveFeed name'           => ['liveFeedName'],
+            'ChatbotTags ad'          => ['tagsAd'],
         ];
     }
 
@@ -155,12 +211,70 @@ class BotcakePsidPageIdTest extends BotcakeApiTestCase
         $this->assertSame('1001', BotcakePsid::where('psid', 'psid-new')->value('page_id'), 'ang bagong sheet row ay may page id');
     }
 
+    private function oldChatRow(): void
+    {
+        $this->chatTables();
+        $this->psid('Page Uno', '1001', '7001', 'Ana Cruz', ['source' => 'chat_verify', 'status' => 'verified', 'ad_id' => '120250000000000001']);
+    }
+
+    private function gatewayNameAfterRename(): void
+    {
+        $this->oldChatRow();
+        $this->assertSame('Ana Cruz', $this->chatName('gateway', '1001', 'Page Bago', '7001'));
+    }
+
+    private function guardCheckAfterRename(): void
+    {
+        $this->oldChatRow();
+        Http::fake(); // walang tawag sa Botcake: kilala na ang PSID sa page
+
+        $this->assertSame('ok', app(BotcakeChatGuard::class)->checkPsid('Page Bago', '1001', '7001', 'Ana Cruz'));
+        Http::assertNothingSent();
+    }
+
+    private function inboxListNameAfterRename(): void
+    {
+        $this->oldChatRow();
+        $this->assertSame('Ana Cruz', $this->chatName('inboxList', '1001', 'Page Bago', '7001'));
+    }
+
+    private function inboxPanelNameAfterRename(): void
+    {
+        $this->oldChatRow();
+        $this->assertSame('Ana Cruz', $this->chatName('inboxPanel', '1001', 'Page Bago', '7001'));
+    }
+
+    private function liveFeedNameAfterRename(): void
+    {
+        $this->oldChatRow();
+        $this->assertSame('Ana C.', $this->chatName('liveFeed', '1001', 'Page Bago', '7001'));
+    }
+
+    private function tagsAdAfterRename(): void
+    {
+        $this->oldChatRow();
+        $this->assertSame('120250000000000001', ChatbotTags::adId(1001, 7001, 'Page Bago'));
+    }
+
+    public function test_S_233_1_1_a_verified_chat_stores_its_psid_row_with_the_page_id(): void
+    {
+        $this->chatTables();
+        $this->page('Page Uno', '1001');
+        Http::fake([self::INFO => Http::response(['success' => true, 'data' => ['psid' => '7001', 'id' => 'c-1']])]);
+
+        $this->assertSame('ok', app(BotcakeChatGuard::class)->checkPsid('Page Uno', '1001', '7001', 'Ana Cruz'));
+
+        $row = BotcakePsid::where('psid', '7001')->sole();
+        $this->assertSame(['chat_verify', 'Page Uno', '1001'], [$row->source, $row->page, $row->page_id]);
+    }
+
     public static function samePageNameCases(): array
     {
         return [
             'customer matcher candidates' => ['customerMatcher'],
             'sheet records' => ['psidMatcher'],
             'the sync marks only its own rows inactive' => ['inactive'],
+            'chat readers' => ['chatReaders'],
         ];
     }
 
@@ -202,6 +316,22 @@ class BotcakePsidPageIdTest extends BotcakeApiTestCase
 
         $this->assertSame('matched', $status);
         $this->assertSame('y-new', $order->fresh()->botcake_psid);
+    }
+
+    private function chatReadersSameName(): void
+    {
+        $this->chatTables();
+        $this->page('Shop', '2002');
+        // Ang PSID 7001 ay naitala sa "Shop" ng page 1001 lang.
+        $this->psid('Shop', '1001', '7001', 'Xavier Lim', ['source' => 'chat_verify', 'status' => 'verified', 'ad_id' => '120250000000000009']);
+        Http::fake([self::INFO => Http::response(['success' => false, 'message' => 'Not found customer'])]);
+
+        foreach (['gateway', 'inboxList', 'inboxPanel', 'liveFeed'] as $reader) {
+            $this->assertNull($this->chatName($reader, '2002', 'Shop', '7001'), $reader);
+        }
+        $this->assertNull(ChatbotTags::adId(2002, 7001, 'Shop'));
+        $this->assertNotSame('ok', app(BotcakeChatGuard::class)->checkPsid('Shop', '2002', '7001', 'Xavier Lim'));
+        $this->assertSame('Xavier Lim', $this->chatName('inboxPanel', '1001', 'Moved', '7001'), 'ang sariling page ay nakikita pa rin');
     }
 
     private function inactiveSameName(): void

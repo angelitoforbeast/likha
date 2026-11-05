@@ -320,11 +320,17 @@ class LiveFeed
         $settings = app(\App\Services\PageSettings::class);
         $unnamed = array_diff_key($keys, $names);
         $known = [];
+        // Ang row na may page id ay sa page id lang hinahanap; ang wala pa ay sa pangalan ng page (gaya ng dati). Lahat ng
+        // column: kasama ang page_id kapag mayroon na, nang walang dagdag na tanong sa schema kada poll.
         foreach (DB::table('botcake_psids')->whereIn('psid', array_values(array_unique(array_column($unnamed, 1))))->where('fb_name', '<>', '')->orderBy('id')
-            ->get(['page', 'psid', 'fb_name']) as $r) $known[$settings->pageKey((string) $r->page) . '|' . $r->psid] = (string) self::shortName($r->fb_name);
+            ->get() as $r) {
+            $own = trim((string) ($r->page_id ?? ''));
+            $known[($own !== '' ? 'id:' . $own : $settings->pageKey((string) $r->page)) . '|' . $r->psid] = (string) self::shortName($r->fb_name);
+        }
         foreach ($unnamed as $k => [$pageId, $psid]) {
             $pageName = $pages[$pageId] ?? null;
-            $names[$k] = ($pageName !== null ? ($known[$settings->pageKey($pageName) . '|' . $psid] ?? '') : '') ?: 'Customer · ' . mb_strimwidth($pageName ?? 'Page ' . $pageId, 0, 18, '…');
+            $names[$k] = ($known['id:' . $pageId . '|' . $psid] ?? ($pageName !== null ? ($known[$settings->pageKey($pageName) . '|' . $psid] ?? '') : ''))
+                ?: 'Customer · ' . mb_strimwidth($pageName ?? 'Page ' . $pageId, 0, 18, '…');
         }
 
         $lastIds = DB::table('chatbot_replies')->whereIn('page_id', array_map('intval', $pageIds))->whereIn('psid', array_map('intval', $psids))
