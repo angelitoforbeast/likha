@@ -142,6 +142,11 @@
     .tl-detail-table thead th { background: #f1f5f9; color: #334155; text-align: left; font-weight: 600; }
     .tl-detail-table tbody tr:nth-child(even) td { background: #fafafa; }
     .tl-detail-table tfoot td { background: #f1f5f9; font-weight: 700; }
+    .tl-detail-table thead th { cursor: pointer; }
+    /* Ang naka-sort na column (public/js/cpp-sort.js): ▼ pinakamataas muna, ▲ pataas. Galing sa aria-sort, kaya hindi
+       kasama sa text na kinokopya ng Copy. */
+    th[aria-sort="descending"]::after { content: " ▼"; }
+    th[aria-sort="ascending"]::after { content: " ▲"; }
     .num { text-align: right; font-family: 'SFMono-Regular', Consolas, monospace; }
 
     .tl-legend {
@@ -339,15 +344,15 @@
               <table class="tl-detail-table" id="tlDetailTable">
                 <thead>
                   <tr>
-                    <th>Page Name</th>
-                    <th>Item Names</th>
-                    <th class="num">Amount Spent</th>
-                    <th class="num">Orders</th>
-                    <th class="num">Proceed</th>
-                    <th class="num">CPP</th>
-                    <th class="num">CPI</th>
-                    <th class="num">CPM</th>
-                    <th class="num">TCPR%</th>
+                    <th tabindex="0" :aria-sort="modalAria(0)" @click="sortModal(0)" @keydown.enter.prevent="sortModal(0)" @keydown.space.prevent="sortModal(0)">Page Name</th>
+                    <th tabindex="0" :aria-sort="modalAria(1)" @click="sortModal(1)" @keydown.enter.prevent="sortModal(1)" @keydown.space.prevent="sortModal(1)">Item Names</th>
+                    <th class="num" tabindex="0" :aria-sort="modalAria(2)" @click="sortModal(2)" @keydown.enter.prevent="sortModal(2)" @keydown.space.prevent="sortModal(2)">Amount Spent</th>
+                    <th class="num" tabindex="0" :aria-sort="modalAria(3)" @click="sortModal(3)" @keydown.enter.prevent="sortModal(3)" @keydown.space.prevent="sortModal(3)">Orders</th>
+                    <th class="num" tabindex="0" :aria-sort="modalAria(4)" @click="sortModal(4)" @keydown.enter.prevent="sortModal(4)" @keydown.space.prevent="sortModal(4)">Proceed</th>
+                    <th class="num" tabindex="0" :aria-sort="modalAria(5)" @click="sortModal(5)" @keydown.enter.prevent="sortModal(5)" @keydown.space.prevent="sortModal(5)">CPP</th>
+                    <th class="num" tabindex="0" :aria-sort="modalAria(6)" @click="sortModal(6)" @keydown.enter.prevent="sortModal(6)" @keydown.space.prevent="sortModal(6)">CPI</th>
+                    <th class="num" tabindex="0" :aria-sort="modalAria(7)" @click="sortModal(7)" @keydown.enter.prevent="sortModal(7)" @keydown.space.prevent="sortModal(7)">CPM</th>
+                    <th class="num" tabindex="0" :aria-sort="modalAria(8)" @click="sortModal(8)" @keydown.enter.prevent="sortModal(8)" @keydown.space.prevent="sortModal(8)">TCPR%</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -397,6 +402,7 @@
     </template>
   </div>
 
+  <script src="{{ asset('js/cpp-sort.js') }}?v={{ substr(md5_file(public_path('js/cpp-sort.js')), 0, 10) }}"></script>
   <script>
     function cppTimeline() {
       return {
@@ -426,16 +432,23 @@
           // pages na may orders pero walang ads na that bucket.
           hideZeroSpent: true,
           zeroSpentCount: 0,
+          // Ang sort ng table sa header click; habang bukas lang ang popup, kaya bawat bukas ng snapshot ay hindi pa sorted.
+          sort: { col: null, dir: null },
         },
+
+        // Ang value ng bawat column ng popup table, sa order ng mga header, para sa pag-sort.
+        modalSortFields: ['page_name', 'item_names', 'amount_spent', 'orders', 'proceed_orders', 'cpp', 'cpi', 'cpm', 'tcpr_pct'],
 
         // Filtered row list for the modal table. When hideZeroSpent is on
         // (default), drops rows where amount_spent == 0. Totals are always
         // computed sa backend from the ad-spending subset regardless of
         // visibility toggle.
         modalVisibleRows() {
-          if (!this.modal.hideZeroSpent) return this.modal.rows;
-          return this.modal.rows.filter(r => Number(r.amount_spent ?? 0) > 0);
+          const rows = this.modal.hideZeroSpent ? this.modal.rows.filter(r => Number(r.amount_spent ?? 0) > 0) : this.modal.rows;
+          return CppSort.sortItems(rows, this.modalSortFields, this.modal.sort);
         },
+        sortModal(col) { this.modal.sort = CppSort.nextFor(this.modal.sort, this.modal.rows, this.modalSortFields, col); },
+        modalAria(col) { return CppSort.aria(this.modal.sort, col); },
 
         init() { this.reload(); },
 
@@ -536,6 +549,7 @@
           this.modal.date    = date;
           this.modal.bucket  = bucket;
           this.modal.rows    = [];
+          this.modal.sort    = { col: null, dir: null };
           try {
             const qs = new URLSearchParams({ date, bucket });
             const res = await fetch(`{{ route('ads_manager.cpp.timeline.detail') }}?${qs.toString()}`);
