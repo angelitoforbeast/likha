@@ -325,11 +325,11 @@ class LiveFeed
         foreach (DB::table('botcake_psids')->whereIn('psid', array_values(array_unique(array_column($unnamed, 1))))->where('fb_name', '<>', '')->orderBy('id')
             ->get() as $r) {
             $own = trim((string) ($r->page_id ?? ''));
-            $known[($own !== '' ? 'id:' . $own : $settings->pageKey((string) $r->page)) . '|' . $r->psid] = (string) self::shortName($r->fb_name);
+            $known[($own !== '' ? 'id:' . $own : 'name:' . $settings->pageKey((string) $r->page)) . '|' . $r->psid] = (string) self::shortName($r->fb_name);
         }
         foreach ($unnamed as $k => [$pageId, $psid]) {
             $pageName = $pages[$pageId] ?? null;
-            $names[$k] = ($known['id:' . $pageId . '|' . $psid] ?? ($pageName !== null ? ($known[$settings->pageKey($pageName) . '|' . $psid] ?? '') : ''))
+            $names[$k] = ($known['id:' . $pageId . '|' . $psid] ?? ($pageName !== null ? ($known['name:' . $settings->pageKey($pageName) . '|' . $psid] ?? '') : ''))
                 ?: 'Customer · ' . mb_strimwidth($pageName ?? 'Page ' . $pageId, 0, 18, '…');
         }
 

@@ -206,6 +206,7 @@ class BotcakePsidPageIdTest extends ChatblastTestCase
         return [
             'BotcakeCustomerMatcher' => ['customerMatcher'],
             'BotcakePsidMatcher'     => ['psidMatcher'],
+            'BotcakePsidMatcher retry of an old waiting row' => ['psidRetry'],
             'HandleGatewayEvent name' => ['gatewayName'],
             'BotcakeChatGuard check'  => ['guardCheck'],
             'Inbox list name'         => ['inboxListName'],
@@ -339,6 +340,19 @@ class BotcakePsidPageIdTest extends ChatblastTestCase
         $this->assertSame(['chat_verify', 'Page Uno', '1001'], [$row->source, $row->page, $row->page_id]);
     }
 
+    private function psidRetryAfterRename(): void
+    {
+        // Naghihintay mula bago palitan ang pangalan; ang bagong sheet record (bagong pangalan) ay ibang PSID ng customer.
+        $old = $this->psid('Page Uno', '1001', 'psid-old', 'Ana Cruz', ['source' => 'sheet', 'status' => 'waiting', 'first_seen_at' => now()]);
+        $this->psid('Page Bago', '1001', 'psid-new', 'Ana Cruz', ['source' => 'sheet', 'status' => 'matched']);
+        $order = $this->order('Page Uno', 'Ana Cruz');
+
+        app(BotcakePsidMatcher::class)->retryWaiting();
+
+        $this->assertSame('conflict', $old->fresh()->status);
+        $this->assertNull($order->fresh()->botcake_psid);
+    }
+
     public static function samePageNameCases(): array
     {
         return [
@@ -452,7 +466,13 @@ class BotcakePsidPageIdTest extends ChatblastTestCase
 
         app(BotcakeCustomerMatcher::class)->matchPage('Page Uno');
         $status = app(BotcakePsidMatcher::class)->recordSheetRow($this->sheetSetting(), 'Page Uno', 'Ben Reyes', 'psid-other', '2026-11-05');
+        // Ang live feed: ang pangalan mula sa row na walang page id ay sa pangalan ng page; ang page na "id:1001" ay hindi page 1001.
+        $this->chatTables();
+        $this->psid('Page Uno', null, '7001', 'Carla Uy', ['source' => 'chat_verify', 'status' => 'verified']);
+        $this->psid('id:1001', null, '7002', 'Dina Go', ['source' => 'chat_verify', 'status' => 'verified']);
 
+        $this->assertSame('Carla U.', $this->chatName('liveFeed', '1001', 'Page Uno', '7001'));
+        $this->assertNull($this->chatName('liveFeed', '1001', 'Page Uno', '7002'));
         $this->assertSame('psid-a', $ana->fresh()->botcake_psid);
         $this->assertSame('conflict', $status, 'ang lumang sheet record na walang page id ay nakikita sa pangalan');
         $this->assertNull($ben->fresh()->botcake_psid);
