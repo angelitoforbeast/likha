@@ -81,6 +81,7 @@ class PageProblemsTest extends ChatblastTestCase
     {
         $this->send('1001', '2026-10-27 10:30:00', 'failed', self::RESTRICTED, 200); // lampas 60 minuto: hindi kasama
         foreach (['11:17:05', '11:20:00', '11:30:00', '11:40:00', '11:55:00'] as $t) $this->send('1001', '2026-10-27 ' . $t, 'failed', self::RESTRICTED, 200);
+        $this->sends('1001', 5, 0, from: '2026-10-27 11:56:00'); // 5 of 10 (50%): pula ayon sa % ng restricted
 
         $p = $this->problems()['1001'];
         $this->assertSame('red', $p['light']);
@@ -92,7 +93,7 @@ class PageProblemsTest extends ChatblastTestCase
         $this->actingAs($this->user());
         foreach (['/chatbot/inbox', '/chatbot/health', '/chatblast/page-settings'] as $url) {
             $banner = $this->banner($this->get($url)->assertOk()->getContent());
-            $this->assertSame('⚠ 1 page with problems (1 urgent) Patricia Manalo 🔴 Page restricted by Facebook: 5 of 5 sends failed since 11:17 Health Inbox', $banner, $url);
+            $this->assertSame('⚠ 1 page with problems (1 urgent) Patricia Manalo 🔴 Page restricted by Facebook: 5 of 10 sends failed since 11:17 Health Inbox', $banner, $url);
         }
         $this->assertStringContainsString('href="/chatbot/health?page_id=1001#page-problems"', $this->get('/chatbot/inbox')->getContent());
     }
@@ -201,7 +202,7 @@ class PageProblemsTest extends ChatblastTestCase
         $this->assertNull($this->banner($this->get('/chatblast/page-settings')->assertOk()->getContent()));
 
         $this->actingAs($this->user('Marketing - OIC', 'oic@example.test'));
-        $this->assertStringContainsString('Patricia Manalo 🔴', (string) $this->banner($this->get('/chatblast/page-settings')->assertOk()->getContent()));
+        $this->assertStringContainsString('Patricia Manalo 🟠', (string) $this->banner($this->get('/chatblast/page-settings')->assertOk()->getContent()));
     }
 
     /** Spec 184: ang banner ng mga problema ay naglilista ng lahat ng page (wala nang "+N more"). */
@@ -219,5 +220,73 @@ class PageProblemsTest extends ChatblastTestCase
         $this->assertStringStartsWith('⚠ 4 pages', $this->banner($this->get('/chatbot')->getContent())); // naka-cache pa
         $this->travel(61)->seconds();
         $this->assertStringStartsWith('⚠ 5 pages', $this->banner($this->get('/chatbot')->getContent()));
+    }
+
+    /** $n na padala ng page sa huling oras, isa kada 10 segundo mula 11:05; ang unang $blocked ay restricted. */
+    private function restricted(string $page, int $n, int $blocked): void
+    {
+        $rows = [];
+        for ($i = 0; $i < $n; $i++) {
+            $rows[] = ['page_id' => (int) $page, 'psid' => 7001 + $i, 'node_id' => 'n2', 'kind' => 'send', 'status' => $i < $blocked ? 'failed' : 'sent',
+                'error' => $i < $blocked ? self::RESTRICTED : null, 'http' => $i < $blocked ? 200 : null, 'raw' => null,
+                'sent_at' => date('Y-m-d H:i:s', strtotime('2026-10-27 11:05:00') + 10 * $i)];
+        }
+        foreach (array_chunk($rows, 100) as $chunk) DB::table('chatbot_replies')->insert($chunk);
+    }
+
+    public function test_S_238_1_1_three_of_303_restricted_is_amber_not_red(): void
+    {
+        $this->restricted('1001', 303, 3); // 1%
+        $p = $this->problems()['1001'];
+        $this->assertSame(['amber', 3, 303, 'Page restricted by Facebook'], [$p['send_light'], $p['blocked'], $p['sends'], $p['reason']]);
+
+        $this->actingAs($this->user());
+        $this->assertStringContainsString('Patricia Manalo 🟠 Page restricted by Facebook: 3 of 303 sends failed since 11:05', (string) $this->banner($this->get('/chatbot')->getContent()));
+    }
+
+    public function test_S_238_1_2_ten_of_303_restricted_is_red_by_count(): void
+    {
+        $this->restricted('1001', 303, 10); // 3.3%: kulang sa 5%, pula dahil sa bilang
+        $this->assertSame('red', $this->problems()['1001']['send_light']);
+    }
+
+    public function test_S_238_1_3_six_of_100_restricted_is_red_by_percent(): void
+    {
+        $this->restricted('1001', 100, 6); // 6 ay kulang sa 10, pero 6% ≥ 5%
+        $this->assertSame('red', $this->problems()['1001']['send_light']);
+    }
+
+    public function test_S_238_1_4_with_too_few_sends_the_percent_does_not_count_and_the_count_decides(): void
+    {
+        $this->restricted('1001', 8, 4); // 50%, pero 8 padala lang (kailangan 10)
+        $this->assertSame('amber', $this->problems()['1001']['send_light']);
+    }
+
+    public function test_S_238_1_5_saved_thresholds_without_the_new_key_take_the_default_and_the_form_shows_and_saves_it(): void
+    {
+        $old = BotHealth::defaultThresholds();
+        unset($old['page_blocked_pct']);
+        \App\Models\AppSetting::set(BotHealth::SETTING, json_encode($old));
+        $this->assertSame(['amber' => 0, 'red' => 5], BotHealth::thresholds()['page_blocked_pct']);
+
+        $this->restricted('1001', 100, 6);
+        $this->assertSame('red', $this->problems()['1001']['send_light']);
+
+        $this->actingAs($this->user());
+        $html = $this->get('/chatbot/health')->assertOk()->getContent();
+        $this->assertMatchesRegularExpression('#<tr data-rule="page_blocked_pct">.*?restricted or permission failures, % of sends.*?name="t\[page_blocked_pct\]\[red\]" value="5"#s', $html);
+        $this->post('/chatbot/health/thresholds', ['t' => ['page_blocked_pct' => ['amber' => 0, 'red' => 10]]])->assertRedirect();
+        $this->assertSame(['amber' => 0, 'red' => 10], BotHealth::thresholds()['page_blocked_pct']);
+        $this->assertSame('amber', $this->problems()['1001']['send_light']);
+    }
+
+    public function test_S_238_1_6_a_page_going_from_red_to_amber_turns_orange_and_orange_still_counts_as_urgent(): void
+    {
+        $this->restricted('1001', 100, 6);
+        $this->actingAs($this->user());
+        $this->assertStringStartsWith('⚠ 1 page with problems (1 urgent) Patricia Manalo 🔴', (string) $this->banner($this->get('/chatbot')->getContent()));
+
+        $this->post('/chatbot/health/thresholds', ['t' => ['page_blocked_pct' => ['amber' => 0, 'red' => 10]]])->assertRedirect();
+        $this->assertStringStartsWith('⚠ 1 page with problems (1 urgent) Patricia Manalo 🟠', (string) $this->banner($this->get('/chatbot')->getContent()));
     }
 }

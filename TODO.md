@@ -1638,3 +1638,5 @@ Minor review findings, accepted (none is on a new untrusted path, and no page us
 - **Buttons saved before this change get new random ids on every editor load until the next save**, so their ports look new after a reload. Reason: they have no stored id, so no wire can point at them; decision 7 stores the id on the next save.
 - **The Test tab `tap` isn't checked against the step's buttons.** Reason: a signed-in staff member supplies it on a test run that sends nothing; the engine only matches it against the step's own payloads.
 - **Publish's same-message duplicate check (`tapProblem`, spec 229) compares raw payloads while the tap match trims**, so `OO` and `OO ` on one message pass Publish and get the "same payload" notice. Reason: spec 229's check; the notice now says "with the same payload" without claiming different messages, and the tap takes the first exit either way.
+
+- **A red % of 0 for `page_blocked_pct` makes every page with enough sends and any counted failure red, even with no restricted sends (`0 ≥ 0`).** Reason: the CEO sets it, on a trusted path, and it is the same `≥` rule as the other limits; if wanted later, treat 0 as "any restricted".

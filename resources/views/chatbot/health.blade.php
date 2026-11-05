@@ -109,7 +109,7 @@
         @else
             <p class="cb-card px-3 py-2 text-sm text-slate-600" data-list="page-problems">No page problems in the last hour.</p>
         @endif
-        <p class="text-xs text-slate-500">Last {{ \App\Services\Chatbot\BotHealth::PROBLEM_MINUTES }} minutes, per page, refreshed every minute. Red: {{ $thresholds['page_blocked']['red'] ?? '—' }}+ restricted or permission failures, or {{ $thresholds['page_failed_pct']['red'] ?? '—' }}%+ failed with {{ $thresholds['page_min_sends']['amber'] }}+ sends, or {{ \App\Services\Chatbot\ChatEchoes::limit('unanswered_customers') }}+ customers not answered in {{ \App\Services\Chatbot\ChatEchoes::limit('unanswered_minutes') }} min. Amber: {{ $thresholds['page_blocked']['amber'] }}+ restricted or permission failures, or {{ $thresholds['page_failed_pct']['amber'] }}%+ failed with {{ $thresholds['page_min_sends']['amber'] }}+ sends. "Customer not reachable" does not count; skipped sends (paused) are left out.</p>
+        <p class="text-xs text-slate-500">Last {{ \App\Services\Chatbot\BotHealth::PROBLEM_MINUTES }} minutes, per page, refreshed every minute. Red: {{ $thresholds['page_blocked']['red'] ?? '—' }}+ restricted or permission failures, or {{ $thresholds['page_blocked_pct']['red'] ?? '—' }}%+ of sends restricted or permission failures with {{ $thresholds['page_min_sends']['amber'] }}+ sends, or {{ $thresholds['page_failed_pct']['red'] ?? '—' }}%+ failed with {{ $thresholds['page_min_sends']['amber'] }}+ sends, or {{ \App\Services\Chatbot\ChatEchoes::limit('unanswered_customers') }}+ customers not answered in {{ \App\Services\Chatbot\ChatEchoes::limit('unanswered_minutes') }} min. Amber: {{ $thresholds['page_blocked']['amber'] }}+ restricted or permission failures, or {{ $thresholds['page_failed_pct']['amber'] }}%+ failed with {{ $thresholds['page_min_sends']['amber'] }}+ sends. "Customer not reachable" does not count; skipped sends (paused) are left out.</p>
     </section>
 
     {{-- Sino ang sumagot (echo ng Meta, ChatEchoes): ang hindi nasagot ng anumang app at ang dobleng sagot ng dalawang app. --}}
@@ -349,9 +349,10 @@
                     <tr data-rule="{{ $key }}">
                         <td>{{ $label }}</td>
                         <td>—</td>
-                        <td class="text-slate-600">{{ $key === 'page_min_sends' ? 'failed % counts from ' . $thresholds[$key]['amber'] . ' sends' : '≥ ' . $thresholds[$key]['amber'] . $u . ' amber' . ($thresholds[$key]['red'] !== null ? ', ≥ ' . $thresholds[$key]['red'] . $u . ' red' : '') }}</td>
+                        <td class="text-slate-600">{{ $key === 'page_min_sends' ? 'failed % counts from ' . $thresholds[$key]['amber'] . ' sends' : ($key === 'page_blocked_pct' ? ($thresholds[$key]['red'] !== null ? '≥ ' . $thresholds[$key]['red'] . '% red, with ' . $thresholds['page_min_sends']['amber'] . '+ sends; amber follows the count' : 'none') : '≥ ' . $thresholds[$key]['amber'] . $u . ' amber' . ($thresholds[$key]['red'] !== null ? ', ≥ ' . $thresholds[$key]['red'] . $u . ' red' : '')) }}</td>
                         @if($isCeo)
-                            <td><input type="number" step="any" min="0" name="t[{{ $key }}][amber]" value="{{ $thresholds[$key]['amber'] }}" class="w-24 border px-2 py-1 text-sm" aria-label="{{ $label }} {{ $key === 'page_min_sends' ? 'sends' : 'amber' }}"></td>
+                            {{-- Ang blocked % ay para sa pula lang; ang amber nito ay itinatago pero sine-save pa rin gaya ng iba. --}}
+                            <td>@if($key === 'page_blocked_pct')<input type="hidden" name="t[{{ $key }}][amber]" value="{{ $thresholds[$key]['amber'] }}">@else<input type="number" step="any" min="0" name="t[{{ $key }}][amber]" value="{{ $thresholds[$key]['amber'] }}" class="w-24 border px-2 py-1 text-sm" aria-label="{{ $label }} {{ $key === 'page_min_sends' ? 'sends' : 'amber' }}">@endif</td>
                             <td>@unless($key === 'page_min_sends')<input type="number" step="any" min="0" name="t[{{ $key }}][red]" value="{{ $thresholds[$key]['red'] }}" class="w-24 border px-2 py-1 text-sm" aria-label="{{ $label }} red">@endunless</td>
                         @endif
                     </tr>

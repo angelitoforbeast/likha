@@ -76,10 +76,12 @@ class BotHealth
     /**
      * Ang mga ilaw kada page sa "Pages with problems" (huling PROBLEM_MINUTES): key => [label, unit, amber, red (null:
      * walang red)]. Dito ang hangganan ay "≥". Ang failed % ay ang walang "Customer not reachable", at binibilang lang
-     * kapag may page_min_sends na padala ang page; ang blocked ay ang restricted at permission na pumalya.
+     * kapag may page_min_sends na padala ang page; ang blocked ay ang restricted at permission na pumalya. Ang blocked % ay
+     * para sa pula lang (ang amber ay ayon sa bilang): kaunting restricted sa maraming padala ay hindi pula.
      */
     public const PAGE_LIGHTS = [
-        'page_blocked' => ['Page: restricted or permission failures', '', 1, 3],
+        'page_blocked' => ['Page: restricted or permission failures', '', 1, 10],
+        'page_blocked_pct' => ['Page: restricted or permission failures, % of sends', '%', 0, 5],
         'page_failed_pct' => ['Page: failed (without customer not reachable)', '%', 10, 30],
         'page_min_sends' => ['Page: sends needed before its failed % counts', '', 10, null],
     ];
@@ -309,7 +311,8 @@ class BotHealth
             $blocked = $p['reasons']['restricted'] + $p['reasons']['permission'];
             $pct = round($counted / $p['sends'] * 100, 1);
             $enough = $p['sends'] >= $t['page_min_sends']['amber'];
-            $light = $at('page_blocked', 'red', $blocked) || ($enough && $at('page_failed_pct', 'red', $pct)) ? 'red'
+            $blockedPct = round($blocked / $p['sends'] * 100, 1);
+            $light = $at('page_blocked', 'red', $blocked) || ($enough && ($at('page_blocked_pct', 'red', $blockedPct) || $at('page_failed_pct', 'red', $pct))) ? 'red'
                 : ($at('page_blocked', 'amber', $blocked) || ($enough && $at('page_failed_pct', 'amber', $pct)) ? 'amber' : null);
             if ($light === null) continue;
             $reasons = array_filter($p['reasons']);

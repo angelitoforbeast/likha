@@ -86,6 +86,7 @@ class ProblemsPanelTest extends ChatblastTestCase
         DB::table('chatblast_campaigns')->update(['pages' => json_encode(['Page Uno', 'Page Dos'])]); // Page Tres: hindi pinapadalhan
         $this->check('Page Dos', ['2 flows named UPDATE SHIPPING STATUS 2026']);
         foreach (['11:20:00', '11:30:00', '11:40:00'] as $t) $this->reply('1001', '7001', '2026-10-27 ' . $t, 'failed', self::RESTRICTED);
+        for ($i = 0; $i < 7; $i++) $this->reply('1001', '7001', '2026-10-27 11:4' . $i . ':30'); // 3 of 10 (30%): pula ayon sa % ng restricted
 
         $this->actingAs($this->user());
         foreach (['/chatbot/inbox', '/chatblast/page-settings'] as $url) {
@@ -94,7 +95,7 @@ class ProblemsPanelTest extends ChatblastTestCase
         }
         $this->assertSame(['Page Uno', 'Page Dos', 'Page Tres'], array_column($p['pages'], 'page'));
         $this->assertSame(['red', 'orange', 'white'], array_column($p['pages'], 'level'));
-        $this->assertStringContainsString('🔴 Page restricted by Facebook: 3 of 3 sends failed since 11:20', $p['pages'][0]['lines'][0]['text']);
+        $this->assertStringContainsString('🔴 Page restricted by Facebook: 3 of 10 sends failed since 11:20', $p['pages'][0]['lines'][0]['text']);
         $this->assertSame(['/chatbot/health?page_id=1001#page-problems', '/chatbot/inbox?page_id=1001'], $p['pages'][0]['lines'][0]['links']);
 
         // Sarado muna, at ang pagbukas ay naaalala ng browser (localStorage, sa loob ng try/catch).

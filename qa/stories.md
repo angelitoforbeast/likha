@@ -4685,3 +4685,19 @@ Slice 237: 21 passed, 0 failed, 0 blocked, 0 skipped, 0 not run (21 cases, 29 te
 | S-237.3.3 | edge | Given a flow saved before this change, then it is unchanged and taps go to `reply` | `test_S_237_3_3_a_flow_saved_before_this_change_sends_taps_to_reply`, `test_S_237_3_3_a_flow_saved_before_this_change_cleans_unchanged_with_no_new_ports` | 2026-11-06 passed |
 | S-237.3.4 | edge | Given the editor at 390 × 844 with 3 button ports, then there is no sideways scroll | `test_S_237_3_4_the_port_rows_and_the_button_rows_fit_a_phone` | 2026-11-06 passed (markup only) |
 | S-237.3.5 | edge | Given two messages of one waiting step that share a payload, then Publish shows a notice and a tap takes the first exit | `test_S_237_3_5_a_payload_shared_by_two_messages_takes_the_first_exit_or_reply_when_only_the_second_is_wired`, `test_S_237_3_5_two_messages_of_one_step_with_the_same_payload_get_a_publish_notice` | 2026-11-06 passed |
+
+## Slice 238 – Page restricted level
+
+As the office, I want "Page restricted" to be red only when it is big (many failures, or a real share of the page's sends), with the limits editable on the Health screen, so a few restricted sends out of hundreds don't raise an urgent red.
+
+Slice 238: 6 passed, 0 failed, 0 blocked, 0 skipped, 0 not run. Threat model: the thresholds are posted only by the CEO (existing validation); the send rows come from the app's own send log. No new route or input. Risk tier: medium. Test: `tests/Feature/Chatblast/PageProblemsTest.php`.
+
+### S-238.1 Restricted level by count or % of sends (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-238.1.1 | happy | Given a page with 3 of 303 sends restricted (1%) in the last hour, when the problems are built, then its send light is amber (🟠 in the banner), not red, and the banner text stays "Page restricted by Facebook: 3 of 303 sends failed since 11:05" | `test_S_238_1_1_three_of_303_restricted_is_amber_not_red` | 2026-11-06 passed |
+| S-238.1.2 | happy | Given 10 of 303 sends restricted (3.3%), then the light is red by the count | `test_S_238_1_2_ten_of_303_restricted_is_red_by_count` | 2026-11-06 passed |
+| S-238.1.3 | happy | Given 6 of 100 sends restricted (6%), then the light is red by the percent | `test_S_238_1_3_six_of_100_restricted_is_red_by_percent` | 2026-11-06 passed |
+| S-238.1.4 | edge | Given 4 of 8 sends restricted and page_min_sends 10, then the percent rule doesn't apply and the count decides: amber | `test_S_238_1_4_with_too_few_sends_the_percent_does_not_count_and_the_count_decides` | 2026-11-06 passed |
+| S-238.1.5 | edge | Given saved thresholds without page_blocked_pct, then the default 5% applies, the Health thresholds form shows its red input with 5, and saving 10 makes 6 of 100 amber | `test_S_238_1_5_saved_thresholds_without_the_new_key_take_the_default_and_the_form_shows_and_saves_it` | 2026-11-06 passed |
+| S-238.1.6 | edge | Given a red restricted page, when the red % is raised so it goes amber, then the banner shows it 🟠 and the urgent count stays 1, because orange counts as urgent today (today's rule kept) | `test_S_238_1_6_a_page_going_from_red_to_amber_turns_orange_and_orange_still_counts_as_urgent` | 2026-11-06 passed |
