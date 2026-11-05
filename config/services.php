@@ -190,6 +190,13 @@ return [
             'slow_min_replies' => (int) env('CHATBOT_SLOW_MIN_REPLIES', 5),
             'no_chats_per_hour' => (int) env('CHATBOT_NO_CHATS_PER_HOUR', 20),
             'no_chats_minutes' => (int) env('CHATBOT_NO_CHATS_MINUTES', 30),
+            // Ang AI step na walang sagot: pula sa ai_fail_count palya sa ai_fail_minutes, o naipit nang lampas ai_stuck_seconds;
+            // isang linya para sa buong site kapag ai_site_min_pages page pataas (at lampas kalahati) ang pumalya sa ai_site_minutes.
+            'ai_fail_count' => (int) env('CHATBOT_AI_FAIL_COUNT', 3),
+            'ai_fail_minutes' => (int) env('CHATBOT_AI_FAIL_MINUTES', 15),
+            'ai_stuck_seconds' => (int) env('CHATBOT_AI_STUCK_SECONDS', 120),
+            'ai_site_minutes' => (int) env('CHATBOT_AI_SITE_MINUTES', 10),
+            'ai_site_min_pages' => (int) env('CHATBOT_AI_SITE_MIN_PAGES', 5),
         ],
     ],
 

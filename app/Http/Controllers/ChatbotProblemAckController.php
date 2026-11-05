@@ -35,7 +35,9 @@ class ChatbotProblemAckController extends Controller
             'level' => ['nullable', 'string', 'max:10'],
         ]);
         // Ang page ay dapat nasa listahan ng chatbot (hindi gumagawa ng bagong page sa settings).
-        $known = in_array($this->settings->pageKey($data['page']), array_map(fn ($p) => $this->settings->pageKey($p), BotcakeChat::pageMap()), true);
+        // Ang linya para sa buong site (ProblemsPanel::SITE) ay may sariling ack din.
+        $known = $data['page'] === ProblemsPanel::SITE
+            || in_array($this->settings->pageKey($data['page']), array_map(fn ($p) => $this->settings->pageKey($p), BotcakeChat::pageMap()), true);
         if (!$known) return response()->json(['error' => 'This page is not on the chatbot list.'], 422);
 
         $res = $this->acks->set($data['page'], $data['kind'], $data['status'], (string) ($data['note'] ?? ''), $this->until($data),
