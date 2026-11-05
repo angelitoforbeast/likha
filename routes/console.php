@@ -150,18 +150,7 @@ Schedule::command('botcake:prune-chats')
     ->dailyAt('04:25')
     ->withoutOverlapping();
 
-// Botcake PSID import: kusa kada oras (lahat ng settings, walang cutoff), maliban sa 03:00.
-// 03:00 Manila: binubura muna sa sheet ang mga row na naitala na sa botcake_psids, saka ang import (tahimik na oras,
-// tuloy-tuloy ang dagdag ng Botcake). Naka-queue ang trabaho; ang lock sa job ang pumipigil sa dalawang sabay, kasama ang button.
-Schedule::command('botcake:psid-import')
-    ->timezone('Asia/Manila')
-    ->cron('0 0-2,4-23 * * *')
-    ->withoutOverlapping();
-
-Schedule::command('botcake:psid-import --clean-sheet')
-    ->timezone('Asia/Manila')
-    ->dailyAt('03:00')
-    ->withoutOverlapping();
+// Botcake PSID sheet import: manual na lang (button o botcake:psid-import), dahil galing na sa chats at Botcake API ang PSID.
 
 // Botcake customers mula sa API (mga page na may botcake.page_id at token), saka matching ng orders.
 // 01:00 Manila: Lunes hanggang Sabado ang by date (mula sa huling malinis na petsa ng bawat page), Linggo ang 45 araw
