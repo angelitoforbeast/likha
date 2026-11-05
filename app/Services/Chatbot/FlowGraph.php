@@ -40,6 +40,8 @@ class FlowGraph
     public const MAX_BUTTON_TEXT = 640;
     public const MAX_PAYLOAD = 1000;
     public const BUTTON_TYPES = ['postback', 'web_url'];
+    // Ang id ng button o quick reply (ginagawa ng editor, hindi galing sa title o puwesto): ang port nito ay tap_<id>.
+    public const TAP_ID = '/^[a-z0-9]{6,16}$/';
 
     /** Ang mga port na palabas ng node, ayon sa uri at config. */
     public static function ports(array $node): array
@@ -49,11 +51,29 @@ class FlowGraph
         return match ($node['type'] ?? '') {
             'start', 'set', 'sequence', 'clear_ai' => ['next'],
             'condition' => array_merge(array_map(fn ($i) => 'row_' . ($i + 1), array_keys(array_values((array) ($config['rows'] ?? [])))), ['no']),
-            'send' => !empty($config['wait']) ? (self::skipMinutes($config) ? ['reply', 'skipped'] : ['reply']) : ['continue'],
+            'send' => !empty($config['wait']) ? array_merge(['reply'], array_keys(self::tapPorts((array) ($config['items'] ?? []))), self::skipMinutes($config) ? ['skipped'] : []) : ['continue'],
             'ai' => ['success', 'failed'],
             'sheet', 'encode_order', 'upload_macro', 'encode_macro' => ['next', 'failed'],
             default => [],
         };
+    }
+
+    /**
+     * Ang mga exit ng tap ng isang Send, sa ayos ng form (bawat item: ang mga button, saka ang mga quick reply): tap_<id> =>
+     * ang button o quick reply. Ang postback at quick reply na may id lang; ang link ay walang tap kaya walang port.
+     */
+    public static function tapPorts(array $items): array
+    {
+        $out = [];
+        foreach ($items as $i) {
+            if (!is_array($i)) continue;
+            foreach (array_merge((array) ($i['buttons'] ?? []), (array) ($i['quick_replies'] ?? [])) as $t) {
+                if (!is_array($t) || ($t['type'] ?? 'postback') !== 'postback' || !is_string($t['id'] ?? null) || !preg_match(self::TAP_ID, $t['id'])) continue;
+                $out['tap_' . $t['id']] ??= $t;
+            }
+        }
+
+        return $out;
     }
 
     /** Isang bagong flow: Start lang. */
@@ -122,10 +142,10 @@ class FlowGraph
                 'value' => $text($r['value'] ?? ''),
             ], array_slice(array_filter((array) ($c['rows'] ?? []), 'is_array'), 0, self::MAX_ROWS)))],
             'send' => [
-                'items' => array_values(array_map(fn ($i) => self::cleanTaps($i, $id, [
+                'items' => self::uniqueTapIds(array_values(array_map(fn ($i) => self::cleanTaps($i, $id, [
                     'type' => ($i['type'] ?? '') === 'image' ? 'image' : 'text',
                     'value' => $text($i['value'] ?? ''),
-                ] + (($i['ai'] ?? null) === true ? ['ai' => true] : [])), array_slice(array_filter((array) ($c['items'] ?? []), 'is_array'), 0, self::MAX_ITEMS))),
+                ] + (($i['ai'] ?? null) === true ? ['ai' => true] : [])), array_slice(array_filter((array) ($c['items'] ?? []), 'is_array'), 0, self::MAX_ITEMS))), $id),
                 'wait' => !empty($c['wait']),
                 'save_to' => $field($c['save_to'] ?? ''),
             ] + (!empty($c['wait']) && ($skip = self::cleanSkip($c['skip_after'] ?? null)) ? ['skip_after' => $skip] : []),
@@ -195,13 +215,15 @@ class FlowGraph
 
             return $t;
         };
+        // Ang id (kapag tama ang anyo lang) ang pangalan ng port; ang link ay may id din, para bumalik ang port kapag ginawang postback.
+        $tapId = fn ($t) => is_string($t['id'] ?? null) && preg_match(self::TAP_ID, $t['id']) ? ['id' => $t['id']] : [];
         $buttons = [];
         foreach (array_filter(is_array($raw['buttons'] ?? null) ? $raw['buttons'] : [], 'is_array') as $b) {
             if (!in_array($b['type'] ?? null, self::BUTTON_TYPES, true)) continue;
             $buttons[] = ['title' => $title($b['title'] ?? ''), 'type' => $b['type']]
-                + ($b['type'] === 'web_url' ? ['url' => $str($b['url'] ?? '', self::MAX_TEXT)] : ['payload' => $str($b['payload'] ?? '', self::MAX_PAYLOAD)]);
+                + ($b['type'] === 'web_url' ? ['url' => $str($b['url'] ?? '', self::MAX_TEXT)] : ['payload' => $str($b['payload'] ?? '', self::MAX_PAYLOAD)]) + $tapId($b);
         }
-        $quick = array_values(array_map(fn ($q) => ['title' => $title($q['title'] ?? ''), 'payload' => $str($q['payload'] ?? '', self::MAX_PAYLOAD)],
+        $quick = array_values(array_map(fn ($q) => ['title' => $title($q['title'] ?? ''), 'payload' => $str($q['payload'] ?? '', self::MAX_PAYLOAD)] + $tapId($q),
             array_filter(is_array($raw['quick_replies'] ?? null) ? $raw['quick_replies'] : [], 'is_array')));
 
         if (count($buttons) > self::MAX_BUTTONS) throw new InvalidArgumentException($step . 'can have at most ' . self::MAX_BUTTONS . ' buttons on a message.');
@@ -211,6 +233,19 @@ class FlowGraph
         if ($buttons && mb_strlen($item['value']) > self::MAX_BUTTON_TEXT) throw new InvalidArgumentException($step . 'has a message with buttons over ' . self::MAX_BUTTON_TEXT . ' characters.');
 
         return $item + ($buttons ? ['buttons' => $buttons] : []) + ($quick ? ['quick_replies' => $quick] : []);
+    }
+
+    /** Ang mga item ng isang Send kung walang id na umuulit sa step (iisang port ang bawat id); hindi ito naaabot sa editor. */
+    private static function uniqueTapIds(array $items, string $id): array
+    {
+        $ids = [];
+        foreach ($items as $i) foreach (array_merge($i['buttons'] ?? [], $i['quick_replies'] ?? []) as $t) {
+            if (!isset($t['id'])) continue;
+            if (isset($ids[$t['id']])) throw new InvalidArgumentException('Send message step ' . ($id !== '' ? $id . ' ' : '') . 'has two buttons or quick replies with the same id.');
+            $ids[$t['id']] = true;
+        }
+
+        return $items;
     }
 
     /** Ang default na payload ng isang title: naka-uppercase, bawat pagitan na hindi letra o numero ay _ ("Oo po!" → OO_PO). */
@@ -271,7 +306,26 @@ class FlowGraph
         $noWait = array_column(array_filter($graph['nodes'] ?? [], fn ($n) => ($n['type'] ?? '') === 'send' && empty($n['config']['wait']) && self::hasTaps((array) ($n['config']['items'] ?? []))), 'id');
         if ($noWait) $notes[] = 'Send message step ' . implode(', ', $noWait) . ' has a button or quick reply to tap but does not wait for the reply: a tap starts the flow again from Start. (In a sequence step a tap always goes to the page\'s main flow.)';
 
+        // Ang exit ng tap: walang wire = sa "reply"; iisang payload sa dalawang mensahe = ang una ang laging sinusundan.
+        $wired = [];
+        foreach ($graph['edges'] ?? [] as $e) $wired[$e['from'] . ':' . $e['port']] = true;
+        foreach ($graph['nodes'] ?? [] as $n) {
+            if (($n['type'] ?? '') !== 'send' || empty($n['config']['wait'])) continue;
+            $taps = self::tapPorts((array) ($n['config']['items'] ?? []));
+            $loose = array_map(fn ($t) => (string) ($t['title'] ?? ''), array_filter($taps, fn ($port) => !isset($wired[$n['id'] . ':' . $port]), ARRAY_FILTER_USE_KEY));
+            if ($loose) $notes[] = 'Send message step ' . $n['id'] . ' has button or quick reply exits with no wire (' . implode(', ', $loose) . '): a tap there leaves by "reply".';
+            $payloads = array_map(fn ($t) => self::tapPayload((string) ($t['payload'] ?? '')), $taps);
+            $twice = array_keys(array_filter(array_count_values(array_filter($payloads, fn ($p) => $p !== '')), fn ($c) => $c > 1));
+            if ($twice) $notes[] = 'Send message step ' . $n['id'] . ' has two buttons or quick replies with the same payload on different messages (' . implode(', ', $twice) . '): a tap always takes the first one\'s exit.';
+        }
+
         return $notes ? implode(' ', $notes) : null;
+    }
+
+    /** Ang payload gaya ng pagdating nito mula sa gateway (trim, hanggang 1000): ang ikinukumpara sa tap. */
+    public static function tapPayload(string $payload): string
+    {
+        return mb_substr(trim($payload), 0, self::MAX_PAYLOAD);
     }
 
     /** May button na postback o quick reply ba (ang may tap na dumarating bilang sagot)? Ang web_url ay walang tap. */
