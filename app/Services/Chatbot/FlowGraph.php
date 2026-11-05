@@ -40,8 +40,9 @@ class FlowGraph
     public const MAX_BUTTON_TEXT = 640;
     public const MAX_PAYLOAD = 1000;
     public const BUTTON_TYPES = ['postback', 'web_url'];
-    // Ang id ng button o quick reply (ginagawa ng editor, hindi galing sa title o puwesto): ang port nito ay tap_<id>.
-    public const TAP_ID = '/^[a-z0-9]{6,16}$/';
+    // Ang id ng button o quick reply (ginagawa ng editor, hindi galing sa title o puwesto): ang port nito ay tap_<id>. Ang D:
+    // ang $ ay hindi tumatanggap ng newline sa dulo (gaya ng ChatbotButtons sa editor).
+    public const TAP_ID = '/^[a-z0-9]{6,16}$/D';
 
     /** Ang mga port na palabas ng node, ayon sa uri at config. */
     public static function ports(array $node): array
@@ -316,7 +317,7 @@ class FlowGraph
             if ($loose) $notes[] = 'Send message step ' . $n['id'] . ' has button or quick reply exits with no wire (' . implode(', ', $loose) . '): a tap there leaves by "reply".';
             $payloads = array_map(fn ($t) => self::tapPayload((string) ($t['payload'] ?? '')), $taps);
             $twice = array_keys(array_filter(array_count_values(array_filter($payloads, fn ($p) => $p !== '')), fn ($c) => $c > 1));
-            if ($twice) $notes[] = 'Send message step ' . $n['id'] . ' has two buttons or quick replies with the same payload on different messages (' . implode(', ', $twice) . '): a tap always takes the first one\'s exit.';
+            if ($twice) $notes[] = 'Send message step ' . $n['id'] . ' has two buttons or quick replies with the same payload (' . implode(', ', $twice) . '): a tap always takes the first one\'s exit.';
         }
 
         return $notes ? implode(' ', $notes) : null;

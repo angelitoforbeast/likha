@@ -119,6 +119,11 @@ class ChatbotButtonPortsTest extends ChatblastTestCase
             'the link button' => [$this->buttons(self::ORDER, self::SITE), 'tap_site0001'],
             'a malformed id' => [$this->buttons(['id' => 'BAD ID!'] + self::ORDER), 'tap_BAD ID!'],
             'an id that is not a string' => [$this->buttons(['id' => 12345678] + self::ORDER), 'tap_12345678'],
+            'an id with a trailing newline' => [$this->buttons(['id' => "abcdef
+"] + self::ORDER), "tap_abcdef
+"],
+            'an id of 5 characters' => [$this->buttons(['id' => 'abcde'] + self::ORDER), 'tap_abcde'],
+            'an id of 17 characters' => [$this->buttons(['id' => str_repeat('a', 17)] + self::ORDER), 'tap_' . str_repeat('a', 17)],
             'a step that does not wait' => [$this->buttons(self::ORDER), 'tap_ordr0001', ['wait' => false]],
         ];
         foreach ($bad as $why => $case) {
@@ -141,13 +146,22 @@ class ChatbotButtonPortsTest extends ChatblastTestCase
         $postback = FlowGraph::clean($this->graph($this->buttons(['type' => 'postback', 'payload' => 'SITE'] + self::SITE), edges: [['from' => 'n2', 'port' => 'tap_site0001', 'to' => 'n3']]));
         $this->assertSame(['reply', 'tap_site0001'], FlowGraph::ports($this->send($postback)));
 
-        $this->assertSame(1, preg_match(FlowGraph::TAP_ID, 'a1b2c3d4'));
-        try {
-            FlowGraph::clean($this->graph([['type' => 'text', 'value' => 'Una', 'buttons' => [self::ORDER]], ['type' => 'text', 'value' => 'Ikalawa', 'quick_replies' => [['title' => 'Oo', 'payload' => 'OO', 'id' => 'ordr0001']]]]));
-            $this->fail('expected a refusal of the repeated id');
-        } catch (InvalidArgumentException $e) {
-            $this->assertStringContainsString('Send message step n2', $e->getMessage());
-            $this->assertStringContainsString('same id', $e->getMessage());
+        // Ang hangganan ng haba: 6 at 16 ay tinatanggap.
+        $edge = FlowGraph::clean($this->graph($this->buttons(['id' => 'abcdef'] + self::ORDER, ['id' => str_repeat('z', 16)] + self::ASK)));
+        $this->assertSame(['reply', 'tap_abcdef', 'tap_' . str_repeat('z', 16)], FlowGraph::ports($this->send($edge)));
+
+        $repeats = [
+            'a button and a quick reply' => [['type' => 'text', 'value' => 'Una', 'buttons' => [self::ORDER]], ['type' => 'text', 'value' => 'Ikalawa', 'quick_replies' => [['title' => 'Oo', 'payload' => 'OO', 'id' => 'ordr0001']]]],
+            'a link and a postback' => $this->buttons(self::ORDER, ['id' => 'ordr0001'] + self::SITE),
+        ];
+        foreach ($repeats as $why => $items) {
+            try {
+                FlowGraph::clean($this->graph($items));
+                $this->fail('expected a refusal of the repeated id: ' . $why);
+            } catch (InvalidArgumentException $e) {
+                $this->assertStringContainsString('Send message step n2', $e->getMessage(), $why);
+                $this->assertStringContainsString('same id', $e->getMessage(), $why);
+            }
         }
     }
 
@@ -180,6 +194,6 @@ class ChatbotButtonPortsTest extends ChatblastTestCase
             ['type' => 'text', 'value' => 'Ikalawa?', 'buttons' => [['title' => 'Oo po', 'type' => 'postback', 'payload' => 'OO', 'id' => 'oo000002']]]],
             edges: [['from' => 'n2', 'port' => 'tap_oo000001', 'to' => 'n3'], ['from' => 'n2', 'port' => 'tap_oo000002', 'to' => 'n4']]));
 
-        $this->assertStringContainsString('Send message step n2 has two buttons or quick replies with the same payload on different messages (OO): a tap always takes the first one\'s exit.', (string) FlowGraph::publishNotice($graph));
+        $this->assertStringContainsString('Send message step n2 has two buttons or quick replies with the same payload (OO): a tap always takes the first one\'s exit.', (string) FlowGraph::publishNotice($graph));
     }
 }

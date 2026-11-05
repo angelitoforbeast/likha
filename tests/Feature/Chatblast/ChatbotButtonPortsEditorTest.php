@@ -120,7 +120,10 @@ class ChatbotButtonPortsEditorTest extends ChatblastTestCase
 
     public function test_S_237_1_6_editor_ids_follow_the_server_rule_are_made_on_add_load_restore_and_discard_and_survive_a_type_switch(): void
     {
-        $this->assertSame(FlowGraph::TAP_ID, '/' . $this->value('idRule') . '/');
+        // Ang /D ng PHP: ang $ ay hindi tumatanggap ng newline sa dulo, gaya ng $ ng JS.
+        $this->assertSame(FlowGraph::TAP_ID, '/' . $this->value('idRule') . '/D');
+        $this->assertSame(0, preg_match(FlowGraph::TAP_ID, "abcdef
+"));
 
         // 20 button na walang id, may sira, at may umuulit: bawat isa ay may bagong tamang id na hindi umuulit sa step.
         $buttons = array_map(fn ($i) => ['title' => 'B' . $i, 'type' => 'postback', 'payload' => 'B' . $i], range(1, 20));

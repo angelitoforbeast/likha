@@ -237,6 +237,30 @@ class ChatbotButtonPortsTapTest extends ChatblastTestCase
         $this->assertStringNotContainsString('ordr0001', json_encode($bodies[0]) . $content[0]);
     }
 
+    public function test_S_237_3_5_a_payload_shared_by_two_messages_takes_the_first_exit_or_reply_when_only_the_second_is_wired(): void
+    {
+        $shared = fn (array $wired) => FlowGraph::clean(['nodes' => [
+            ['id' => 'n1', 'type' => 'start'],
+            ['id' => 'n2', 'type' => 'send', 'config' => ['items' => [
+                ['type' => 'text', 'value' => 'Una?', 'buttons' => [['title' => 'Oo', 'type' => 'postback', 'payload' => 'OO', 'id' => 'oo000001']]],
+                ['type' => 'text', 'value' => 'Ikalawa?', 'buttons' => [['title' => 'Oo po', 'type' => 'postback', 'payload' => 'OO', 'id' => 'oo000002']]]], 'wait' => true]],
+            ['id' => 'n4', 'type' => 'send', 'config' => ['items' => [['type' => 'text', 'value' => 'Una']]]],
+            ['id' => 'n5', 'type' => 'send', 'config' => ['items' => [['type' => 'text', 'value' => 'Sige po']]]],
+            ['id' => 'n7', 'type' => 'send', 'config' => ['items' => [['type' => 'text', 'value' => 'Ikalawa']]]],
+        ], 'edges' => array_merge([['from' => 'n1', 'port' => 'next', 'to' => 'n2'], ['from' => 'n2', 'port' => 'reply', 'to' => 'n5']], $wired)]);
+
+        $this->flow->update(['graph' => $shared([['from' => 'n2', 'port' => 'tap_oo000001', 'to' => 'n4'], ['from' => 'n2', 'port' => 'tap_oo000002', 'to' => 'n7']])]);
+        $this->ask();
+        $this->runChat($this->postback('Oo po', 'OO'));
+        $this->assertSame(['n2', 'n4'], $this->sent());
+
+        // Ang una ang laging sinusundan (gaya ng paalala ng Publish): walang wire ito, kaya sa reply, hindi sa ikalawa.
+        $this->flow->update(['graph' => $shared([['from' => 'n2', 'port' => 'tap_oo000002', 'to' => 'n7']])]);
+        $this->ask();
+        $this->runChat($this->postback('Oo po', 'OO'));
+        $this->assertSame(['n2', 'n4', 'n2', 'n5'], $this->sent());
+    }
+
     public function test_S_237_3_3_a_flow_saved_before_this_change_sends_taps_to_reply(): void
     {
         $this->flow->update(['graph' => $this->withoutIds($this->graph())]);
