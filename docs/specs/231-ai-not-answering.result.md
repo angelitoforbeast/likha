@@ -2,7 +2,14 @@
 
 ## Status
 
-Plan written, waiting for the reviewer's "go". No code yet. Branch `feat/231-ai-not-answering` from `b26149a5`.
+Done, not pushed, not deployed. No migration. Branch `feat/231-ai-not-answering` from `b26149a5`, built after the
+reviewer's "go" (site line under "All pages" with its own Acknowledge; up to 3 chats as Inbox links). One review
+(skeptic-reviewer, standard): no blocker, no major; 5 minors accepted in `TODO.md`.
+
+Merge danger: low, a two-way door. Blast radius: the problems banner on every Chatbot/Chatblast screen (one more
+cached source, wrapped in `safely()` like the others) and the ack route (one more accepted page name, "All pages").
+Nothing changes how the AI step or any send behaves. Revert: revert the commit; acks saved under "All pages" stay as
+inert page settings rows.
 
 ## Plan
 
@@ -86,12 +93,40 @@ test per case named `test_S_231_x_y_…`, written red first.
 | T3 | Banner behaviour: Acknowledge 1 h / Done for an AI line, a database error inside `ai()` leaves the rest of the banner, the line markup wraps at phone width; the "All pages" ack in the controller | backend | medium | S-231.5.1–.4 | (with T2) |
 | T4 | Measurement and result: seed 50,000 AI rows in a throwaway test, time a cold banner build, `EXPLAIN QUERY PLAN` of each query (sqlite), full suite vs. the baseline, case table, rulings | — | low | done-when items | main session runs lint and tests |
 
-Developers: `backend-developer` (sonnet) per task; `skeptic-reviewer` (sonnet, standard). The browser check
+Developers: `backend-developer` (sonnet) per task; `skeptic-reviewer` (sonnet, standard). (As built: no
+`backend-developer` agent was available in the session, see Summary.) The browser check
 (S-231.5.4 at 390 × 844) is optional; the test checks the markup (`break-words`, no fixed width), like S-184.9.
 
 ## Summary
 
-(filled in when done)
+What shipped, per task (one `feat:` commit, `8cf12545`, test and code together):
+
+- **T1 – the red lines and the site line.** `ProblemsPanel::ai()` is a new source in the cached part of the banner
+  (60 s, `safely()`). One grouped query over the last `ai_fail_minutes` of `chatbot_ai_requests` (`GROUP BY page_id,
+  error`, with a `SUM(CASE …)` for the `ai_site_minutes` window) gives each page's asked/failed counts and its most
+  common error. A grouped query on `status IN (pending, sending)` gives the stuck lines. Lines:
+  - red `AI not answering: 3 of 9 AI replies failed in 15 min (OpenAI gave an empty answer)` + Chat 1–3 + Flow;
+  - red `AI stuck: 2 replies waiting over 2 min` + Inbox;
+  - red, under "All pages": `AI is failing on 6 of 10 pages: OpenAI or the key may be down` + Health. It replaces the
+    per-page failure and orange lines; the stuck lines stay.
+  Config `services.chatbot.problems.ai_fail_count / ai_fail_minutes / ai_stuck_seconds / ai_site_minutes /
+  ai_site_min_pages` (3 / 15 / 120 / 10 / 5), env `CHATBOT_AI_*`, also in `.env.example`.
+- **T2 – the orange no-fallback line.** For pages with 1–2 failures, the failure rows (one query, newest first,
+  at most 500) are checked against the flow version that ran (`aiWired()`: versions by time, then the live graph
+  if published before the request, else "not wired"). Line: `AI failed with no fallback: 1 customer got no reply
+  in 15 min (OpenAI gave an empty answer)` + Chat links + Flow. A failure whose failed port is wired shows nothing.
+- **T3 – banner behaviour.** The lines use `line()` with `window` (failures, site) or `since` (stuck, the oldest
+  waiting request), so Acknowledge and Done work as for the other lines. `ChatbotProblemAckController` accepts
+  `ProblemsPanel::SITE` ("All pages") besides the chatbot pages, so the site line can be acknowledged too.
+- **T4 – measurement, stories, result.** Slice 231 in `qa/stories.md` (18 cases, all passed), 50,000-row timing and
+  query plans below, full suite, accepted minors in `TODO.md`.
+
+How it was built: this session had no `backend-developer` agent type available, so the main session wrote the
+tests and code itself (red first, see Checks), and the `skeptic-reviewer` (sonnet, standard) reviewed the diff.
+T1–T3 touch the same file and went into one commit and one review instead of three. The browser check was skipped:
+it needs a running app with seeded AI rows and a signed-in user. S-231.5.4 checks the markup instead.
+
+Docs: no behaviour doc covers the banner beyond `qa/stories.md`, which has the slice.
 
 ## Checks (command and output)
 
@@ -107,9 +142,98 @@ FAILED  Tests\Feature\Item\ItemTableFitScriptTest > every catalog column id has 
 
 These 3 are pre-existing (red before any change of this spec).
 
+**Red runs.** `php.bat artisan test tests/Feature/Chatblast/AiProblemsTest.php` before any production code: 13
+failed because the lines were missing (e.g. S-231.1.1 `Failed asserting that two arrays are identical.` with an
+empty list of AI lines; S-231.5.2 `Failed asserting that 422 is identical to 200.` because no line had a kind to
+acknowledge). 5 passed at once: the negatives S-231.1.2, .1.3, .2.2, .4.2 and S-231.5.3, which check that nothing
+shows (or nothing breaks), true of the old code too. With the code in place but the ack-controller change taken out,
+the site-line Acknowledge failed: `Failed asserting that 422 is identical to 200.` (S-231.3.1 and .3.3).
+
+**Banner tests after the change:**
+`php.bat artisan test tests/Feature/Chatblast/AiProblemsTest.php tests/Feature/Chatblast/ProblemsPanelTest.php tests/Feature/Chatblast/PageProblemsTest.php`
+→ `Tests: 43 warnings (217 assertions)`, no failures. (The "warnings" are tests that pass with a
+`file_get_contents` warning, as in the baseline's 4,283.)
+
+**Lint:** `php.bat -l` on `ProblemsPanel.php`, `ChatbotProblemAckController.php`, `config/services.php`,
+`AiProblemsTest.php` → `No syntax errors detected` for each.
+
+**Full suite after the change** (`php.bat artisan test`):
+
+```
+FAILED  Tests\Feature\ExampleTest > the application returns a successful response
+FAILED  Tests\Feature\Item\ItemTableFitScriptTest > every catalog column id has a minimum width and a place in th…
+Tests:    2 failed, 4302 warnings, 206 passed (77476 assertions)
+Duration: 763.41s
+```
+
+No new failures: both are pre-existing. The third baseline failure (`BigBroadcastTest` S-167.1, 5,000 messages
+timed) passed this time; it's timing-sensitive and untouched by this change. Totals: 4,492 tests on the baseline,
+4,510 now, which is the 18 new ones.
+
+**Measurement on 50,000 seeded AI rows** (throwaway test, sqlite in memory, deleted afterwards). 50,000 rows over the
+last 24 hours on 60 pages (about 520 in the last 15 minutes), 1 in 2,500 failed, plus failures on 4 pages in the
+window and 2 stuck requests so every branch runs. Lines produced: 2 stuck, 3 red "AI not answering: 3 of 12 …", and
+1 orange "AI failed with no fallback: 1 customer …".
+
+```
+rows: 50010
+ai() ms (5 runs): 21.8, 17.1, 17.3, 14.9, 15.5
+cold panel() ms (5 runs, cache flushed each time): 41.1, 21.9, 18.3, 19.2, 20
+```
+
+So the whole banner builds in about 20 ms cold (41 ms on the first run), and the AI check takes about 15–22 ms of
+that. Warm, the 60 s cache serves it.
+
+**Query plans** (sqlite `EXPLAIN QUERY PLAN`):
+
+```
+window counts (no statistics yet): SCAN chatbot_ai_requests USING INDEX chatbot_ai_requests_page_id_psid_index | USE TEMP B-TREE FOR GROUP BY
+window counts (after ANALYZE):     SEARCH chatbot_ai_requests USING INDEX chatbot_ai_requests_created_at_index (created_at>?) | USE TEMP B-TREE FOR GROUP BY
+stuck:                             SEARCH chatbot_ai_requests USING INDEX chatbot_ai_requests_status_next_at_index (status=?) | USE TEMP B-TREE FOR GROUP BY
+failure rows:                      SEARCH chatbot_ai_requests USING INDEX chatbot_ai_requests_created_at_index (created_at>?)
+```
+
+The window query uses the `created_at` index once the table has statistics, which a fresh sqlite table in a test
+lacks and MySQL InnoDB always has (see Rulings and Open questions). The version and flow lookups are `whereIn` on
+primary keys and `(flow_id, id)`, and run only when a page has 1–2 failures.
+
+### Case table
+
+| Case | Test | Result |
+|---|---|---|
+| S-231.1.1 | `test_S_231_1_1_three_failures_in_15_min_make_one_red_line_with_count_error_and_links` | pass |
+| S-231.1.2 | `test_S_231_1_2_two_failures_make_no_red_line` | pass |
+| S-231.1.3 | `test_S_231_1_3_three_failures_over_20_min_with_two_in_the_window_make_no_red_line` | pass |
+| S-231.1.4 | `test_S_231_1_4_failures_on_two_pages_make_one_line_each` | pass |
+| S-231.1.5 | `test_S_231_1_5_empty_and_did_not_answer_count_and_no_ai_load_does_not` | pass |
+| S-231.2.1 | `test_S_231_2_1_a_request_waiting_over_2_min_is_red_ai_stuck` | pass |
+| S-231.2.2 | `test_S_231_2_2_a_request_waiting_90_seconds_shows_nothing` | pass |
+| S-231.2.3 | `test_S_231_2_3_once_answered_the_stuck_line_is_gone_on_the_next_refresh` | pass |
+| S-231.3.1 | `test_S_231_3_site_wide_line_by_pages_failing` data set "S-231.3.1 failures on 6 of 10 pages: one site line" | pass |
+| S-231.3.2 | `test_S_231_3_site_wide_line_by_pages_failing` data set "S-231.3.2 failures on 3 of 10 pages: per-page lines" | pass |
+| S-231.3.3 | `test_S_231_3_site_wide_line_by_pages_failing` data set "S-231.3.3 failures on 5 of 9 pages: one site line" | pass |
+| S-231.4.1 | `test_S_231_4_1_one_failure_with_the_failed_port_not_wired_is_orange` | pass |
+| S-231.4.2 | `test_S_231_4_2_one_failure_with_the_failed_port_wired_shows_nothing` | pass |
+| S-231.4.3 | `test_S_231_4_3_the_check_uses_the_flow_version_that_ran` | pass |
+| S-231.5.1 | `test_S_231_5_1_acknowledge_for_an_hour_hides_the_ai_line_and_it_comes_back_after` | pass |
+| S-231.5.2 | `test_S_231_5_2_done_hides_the_ai_line_until_a_new_failure` | pass |
+| S-231.5.3 | `test_S_231_5_3_a_database_error_in_the_ai_check_leaves_the_rest_of_the_banner` | pass |
+| S-231.5.4 | `test_S_231_5_4_the_ai_lines_wrap_in_the_banner_list` (markup; no browser at 390 × 844) | pass |
+
+All 18 are listed as passed in the full-suite run above (`! s 231 …`, passed with the environment's warning).
+
+### Done when
+
+- [x] Cases S-231.1 to S-231.5 pass, each with a test named after it (case table).
+- [x] The full suite adds no new failures compared with b26149a5 (2 failed, both pre-existing).
+- [x] `qa/stories.md` has slice 231 (18 cases, all "2026-11-05 passed").
+- [x] The result is filled in, with the query plans and the banner build time on 50,000 seeded AI rows (above).
+
 ## Rulings
 
-Proposed with the plan (the reviewer may change them with the "go"):
+Given with the "go": the site line sits under "All pages" and can be acknowledged; up to 3 affected chats as Inbox
+links; no migration; the version found by `created_at`; stuck lines kept under the site line. Proposed with the
+plan and accepted:
 
 - Ruling: a failure is `error IS NOT NULL` and not `ChatbotAiLoad::ERROR`; the empty answer is detected by its
   error text, not by `answer` — `answer` is never stored on sync rows and is nulled after 2 days, while every
@@ -142,19 +266,41 @@ Proposed with the plan (the reviewer may change them with the "go"):
 - Ruling: no migration — `chatbot_ai_requests` already has an index on `created_at` (and on `status, next_at` for
   the stuck query) — cost if wrong: none; the measured plan goes in Checks.
 
+Made while building:
+
+- Ruling: the grouped window query stays as decision 8 says, without an index hint — with table statistics sqlite
+  plans it on `chatbot_ai_requests_created_at_index`, and MySQL InnoDB always keeps statistics; the
+  `(page_id, psid)` index can't serve `GROUP BY page_id, error`, so a full index scan loses to a range of a few
+  hundred rows — cost if wrong: a full scan of the table once a minute (the banner cache); see Open questions for the
+  one-line check on production.
+- Ruling: "asked" (the M in "N of M", and the pages that asked AI for the site rule) leaves out "No AI load" skips —
+  a skipped step never called the AI, so counting it would dilute the share — cost if wrong: none for the red rule
+  (it counts failures, not a share).
+- Ruling: the site window is capped at the page window (`min(ai_site_minutes, ai_fail_minutes)`) — one grouped query
+  counts both — cost if wrong: a config with a site window longer than 15 minutes is read as 15.
+- Ruling: the orange line names the most common error among the customers with no reply (newest on a tie), the red
+  line the most common error of the page — the orange line is about those customers — cost if wrong: none.
+- Ruling: the 50,000-row measurement ran as a throwaway test and was deleted, not committed — it takes seconds of
+  seeding and proves timing, not behaviour — cost if wrong: the timing is not re-checked automatically.
+
 ## Story changes
 
-None yet. The spec's cases go into `qa/stories.md` as given.
+- The slice header line in `qa/stories.md` names the threat model, the tier and the test file, like the other
+  slices. S-231.3.1–.3 are one table test (`#[DataProvider]` with one data set per case ID) rather than three tests,
+  following the test rules (variants in a table). No case's Given/When/Then was changed.
 
 ## Open questions
 
-1. The site-wide line needs a page to sit under for Acknowledge/Done. The plan uses a fixed "All pages" entry and
-   lets the ack controller accept that one name. Alternative: the site line cannot be acknowledged (no buttons).
-   Which one?
-2. Should the Inbox links be up to 3 affected chats ("Chat 1"…"Chat 3", like the double-reply examples) or one link
-   to the page's Inbox? The plan uses up to 3 chats.
+Resolved with the "go": the "All pages" ack (built) and up to 3 chats as links (built).
+
+1. For whoever deploys: a read-only check on production that the window query uses the `created_at` index:
+   `EXPLAIN SELECT page_id, error, COUNT(*) AS n, SUM(CASE WHEN created_at >= NOW() - INTERVAL 10 MINUTE THEN 1 ELSE 0 END) AS recent FROM chatbot_ai_requests WHERE created_at >= NOW() - INTERVAL 15 MINUTE AND model <> 'order-encode' GROUP BY page_id, error;`
+   should show `key: chatbot_ai_requests_created_at_index`, `type: range`. I could only check sqlite.
 
 ## Proposed tasks
 
 - A step deep link in the flow editor (`/chatbot/flows/{id}?node=n5` selects and centres the step), so the banner's
   "Flow" link lands on the AI step. UI task, not in this spec.
+- A stable Acknowledge/Done key for all banner lines (no plural or error text in the hashed part), so a line does
+  not come back as "new" when "1 customer" becomes "2 customers" (accepted minor, `TODO.md`).
+- A per-page bound for the orange candidates' rows instead of the site-wide 500 (accepted minor, `TODO.md`).
