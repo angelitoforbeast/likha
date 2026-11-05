@@ -33,6 +33,13 @@ class FlowGraph
     public const MAX_PROMPT = 10000;
     public const MAX_HISTORY = 100;
     public const MAX_SKIP_MINUTES = 23 * 60; // ang padala pagkatapos ng skip ay dapat nasa 24 oras ng Messenger pa
+    // Ang mga hangganan ng Messenger sa button at quick reply (gaya ng send API ng gateway).
+    public const MAX_BUTTONS = 3;
+    public const MAX_QUICK_REPLIES = 13;
+    public const MAX_TITLE = 20;
+    public const MAX_BUTTON_TEXT = 640;
+    public const MAX_PAYLOAD = 1000;
+    public const BUTTON_TYPES = ['postback', 'web_url'];
 
     /** Ang mga port na palabas ng node, ayon sa uri at config. */
     public static function ports(array $node): array
@@ -78,7 +85,7 @@ class FlowGraph
             $nodes[$id] = [
                 'id' => $id, 'type' => $type,
                 'x' => max(-20000, min(20000, (int) ($n['x'] ?? 0))), 'y' => max(-20000, min(20000, (int) ($n['y'] ?? 0))),
-                'config' => self::cleanConfig($type, is_array($n['config'] ?? null) ? $n['config'] : []),
+                'config' => self::cleanConfig($type, is_array($n['config'] ?? null) ? $n['config'] : [], $id),
             ];
         }
         if ($starts !== 1) throw new InvalidArgumentException('A flow has exactly one Start.');
@@ -101,7 +108,7 @@ class FlowGraph
     }
 
     /** Ang config ng isang uri, na may allow-list ng mga key at hangganan ng haba. */
-    public static function cleanConfig(string $type, array $c): array
+    public static function cleanConfig(string $type, array $c, string $id = ''): array
     {
         $text = fn ($v, int $max = self::MAX_TEXT) => mb_substr(is_scalar($v) ? (string) $v : '', 0, $max);
         $field = fn ($v) => ChatbotVars::norm(is_scalar($v) ? (string) $v : '');
@@ -115,10 +122,10 @@ class FlowGraph
                 'value' => $text($r['value'] ?? ''),
             ], array_slice(array_filter((array) ($c['rows'] ?? []), 'is_array'), 0, self::MAX_ROWS)))],
             'send' => [
-                'items' => array_values(array_map(fn ($i) => [
+                'items' => array_values(array_map(fn ($i) => self::cleanTaps($i, $id, [
                     'type' => ($i['type'] ?? '') === 'image' ? 'image' : 'text',
                     'value' => $text($i['value'] ?? ''),
-                ] + (($i['ai'] ?? null) === true ? ['ai' => true] : []), array_slice(array_filter((array) ($c['items'] ?? []), 'is_array'), 0, self::MAX_ITEMS))),
+                ] + (($i['ai'] ?? null) === true ? ['ai' => true] : [])), array_slice(array_filter((array) ($c['items'] ?? []), 'is_array'), 0, self::MAX_ITEMS))),
                 'wait' => !empty($c['wait']),
                 'save_to' => $field($c['save_to'] ?? ''),
             ] + (!empty($c['wait']) && ($skip = self::cleanSkip($c['skip_after'] ?? null)) ? ['skip_after' => $skip] : []),
@@ -169,6 +176,48 @@ class FlowGraph
             ],
             default => [],
         };
+    }
+
+    /**
+     * Ang mga button (Text lang) at quick reply ng isang item ng Send, idinadagdag sa $item kapag may laman lang (ang lumang
+     * graph ay hindi nagkakaroon ng bagong key). Bawat isa: title, type at payload o url lang; ang hindi kilalang type ay
+     * tinatanggal. Tinatanggihan ang lampas sa hangganan ng Messenger na hindi maaabot sa editor; ang kulang na maaabot
+     * habang gumagawa (walang title, mali ang link, wala sa huling item) ay sa Publish (publishProblems).
+     */
+    private static function cleanTaps(array $raw, string $id, array $item): array
+    {
+        $str = fn ($v, int $max) => mb_substr(is_scalar($v) ? (string) $v : '', 0, $max);
+        $step = 'Send message step ' . ($id !== '' ? $id . ' ' : '');
+        $title = function ($v) use ($str, $step) {
+            $t = is_scalar($v) ? (string) $v : '';
+            if (mb_strlen($t) > self::MAX_TITLE) throw new InvalidArgumentException($step . 'has a button or quick reply title over ' . self::MAX_TITLE . ' characters.');
+
+            return $t;
+        };
+        $buttons = [];
+        foreach (array_filter(is_array($raw['buttons'] ?? null) ? $raw['buttons'] : [], 'is_array') as $b) {
+            if (!in_array($b['type'] ?? null, self::BUTTON_TYPES, true)) continue;
+            $buttons[] = ['title' => $title($b['title'] ?? ''), 'type' => $b['type']]
+                + ($b['type'] === 'web_url' ? ['url' => $str($b['url'] ?? '', self::MAX_TEXT)] : ['payload' => $str($b['payload'] ?? '', self::MAX_PAYLOAD)]);
+        }
+        $quick = array_values(array_map(fn ($q) => ['title' => $title($q['title'] ?? ''), 'payload' => $str($q['payload'] ?? '', self::MAX_PAYLOAD)],
+            array_filter(is_array($raw['quick_replies'] ?? null) ? $raw['quick_replies'] : [], 'is_array')));
+
+        if (count($buttons) > self::MAX_BUTTONS) throw new InvalidArgumentException($step . 'can have at most ' . self::MAX_BUTTONS . ' buttons on a message.');
+        if (count($quick) > self::MAX_QUICK_REPLIES) throw new InvalidArgumentException($step . 'can have at most ' . self::MAX_QUICK_REPLIES . ' quick replies on a message.');
+        if ($buttons && $quick) throw new InvalidArgumentException($step . 'has buttons and quick replies on one message: use one or the other (both is not allowed).');
+        if ($buttons && $item['type'] === 'image') throw new InvalidArgumentException($step . 'has buttons on an Image link: buttons go on a Text message.');
+        if ($buttons && mb_strlen($item['value']) > self::MAX_BUTTON_TEXT) throw new InvalidArgumentException($step . 'has a message with buttons over ' . self::MAX_BUTTON_TEXT . ' characters.');
+
+        return $item + ($buttons ? ['buttons' => $buttons] : []) + ($quick ? ['quick_replies' => $quick] : []);
+    }
+
+    /** Ang default na payload ng isang title: naka-uppercase, bawat pagitan na hindi letra o numero ay _ ("Oo po!" → OO_PO). */
+    public static function payloadFor(string $title): string
+    {
+        $p = trim((string) preg_replace('/[^\p{L}\p{N}]+/u', '_', mb_strtoupper($title)), '_');
+
+        return $p !== '' ? mb_substr($p, 0, self::MAX_PAYLOAD) : 'BUTTON';
     }
 
     /**
