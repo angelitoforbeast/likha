@@ -168,7 +168,9 @@ class ChatbotFlowController extends Controller
 
         $encode = app(\App\Services\OrderEncode\Settings::class);
 
-        return view('chatbot.editor', ['flow' => $flow, 'repliesOn' => BotcakeOutbox::enabled(), 'encodeModels' => ['extract' => $encode->modelExtract(), 'checker' => $encode->modelChecker()]]);
+        return view('chatbot.editor', ['flow' => $flow, 'repliesOn' => BotcakeOutbox::enabled(), 'encodeModels' => ['extract' => $encode->modelExtract(), 'checker' => $encode->modelChecker()],
+            // Ang mga page na text lang ang makukuha (babala sa mensaheng may button o quick reply).
+            'textOnlyPages' => \App\Services\Chatbot\ButtonPages::textOnly($flow->id)]);
     }
 
     /**

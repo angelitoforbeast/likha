@@ -55,7 +55,8 @@
      data-test-url="{{ route('chatbot.test', ['flow' => $flow->id, 'version' => 'draft']) }}"
      data-sheet-url="{{ route('chatbot.sheet.info') }}" data-sheet-customers-url="{{ route('chatbot.flows.sheet-customers', $flow->id) }}"
      data-sheet-preview-url="{{ route('chatbot.flows.sheet-preview', $flow->id) }}" data-max-columns="{{ \App\Services\Chatbot\FlowGraph::MAX_COLUMNS }}"
-     data-encode-models="{{ json_encode($encodeModels) }}" data-encode-url="{{ \Illuminate\Support\Facades\Route::has('order-encode.index') ? route('order-encode.index') : '' }}">
+     data-encode-models="{{ json_encode($encodeModels) }}" data-encode-url="{{ \Illuminate\Support\Facades\Route::has('order-encode.index') ? route('order-encode.index') : '' }}"
+     data-text-only-pages="{{ json_encode($textOnlyPages) }}">
     {{-- Ang draft: ang mga pagbabago ay hindi live hanggang Publish. --}}
     <div class="mb-2 flex flex-wrap items-center gap-2 text-sm">
         <span id="chip" class="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700" aria-live="polite">…</span>
@@ -172,6 +173,7 @@
     </div>
 </div>
 
+<script src="{{ asset('js/chatbot-buttons.js') }}?v={{ substr(md5_file(public_path('js/chatbot-buttons.js')), 0, 10) }}"></script>
 <script>
 (function () {
     const ed = document.getElementById('ed'), $ = id => document.getElementById(id);
@@ -546,7 +548,8 @@
         const draw = () => {
             box.replaceChildren(...items.map((it, i) => el('div', {class: 'rounded-md border border-slate-200 p-2'}, [make(it, i),
                 el('button', {type: 'button', class: 'mt-1 text-xs text-red-700 hover:underline', text: 'Remove'})])));
-            box.querySelectorAll('button').forEach((b, i) => b.addEventListener('click', () => { items.splice(i, 1); draw(); }));
+            // Ang sariling Remove lang ng bawat row (hindi ang mga button sa loob ng row, hal. ang + Button ng Send message).
+            box.querySelectorAll(':scope > div > button').forEach((b, i) => b.addEventListener('click', () => { items.splice(i, 1); draw(); }));
             if (items.length < max) {
                 const add = el('button', {type: 'button', class: 'cb-btn cb-btn-sm', text: addText});
                 add.addEventListener('click', () => { items.push(make.blank()); draw(); });
@@ -578,20 +581,78 @@
         if (n.type === 'send') {
             // Ang AI-output variable: ang save_to ng mga AI step; ang mensaheng may ganito ay sariling sagot ng AI ang naaalala nito.
             const aiOutputIn = text => { const outs = graph.nodes.filter(x => x.type === 'ai' && x.config?.save_to).map(x => x.config.save_to.toLowerCase().replace(/[\s_]+/g, ' ').trim()); return [...String(text || '').matchAll(/\{\{\s*([^{}]{1,100}?)\s*\}\}/g)].some(m => outs.includes(m[1].toLowerCase().replace(/[\s_]+/g, ' ').trim())); };
-            const make = it => {
+            // Ang mga button (Text lang) at quick reply (huling mensahe lang) ng isang mensahe: ChatbotButtons ang mga patakaran.
+            const B = ChatbotButtons, textOnly = JSON.parse(ed.dataset.textOnlyPages || '[]');
+            const waitBox = el('input', {type: 'checkbox', checked: !!c.wait});
+            const waitNote = el('p', {class: 'hidden text-xs text-amber-700', text: 'Wait turned on: a tap is a reply. The step\'s continue wire is removed when you press Done.'});
+            const tapAdded = () => { if (ChatbotButtons.needsWait(c.items) && !c.wait) { c.wait = true; waitBox.checked = true; waitNote.classList.remove('hidden'); } };
+            const tapRow = (it, key, t, k, redraw) => {
+                let follow = !t.payload || t.payload === B.payloadFor(t.title); // ang payload ay sumusunod sa title hanggang baguhin
+                const title = input({placeholder: key === 'buttons' ? 'e.g. Yes' : 'e.g. Medium', 'aria-label': key === 'buttons' ? 'Button title' : 'Quick reply title'}, t.title);
+                const payload = input({maxlength: 1000, 'aria-label': 'Payload'}, t.payload);
+                const url = input({type: 'url', maxlength: 2000, placeholder: 'https://…', 'aria-label': 'Link (https://)'}, t.url);
+                title.addEventListener('input', () => {
+                    const v = B.clampTitle(title.value);
+                    if (v !== title.value) title.value = v; // hanggang 20 letra (ang emoji ay isa)
+                    t.title = v;
+                    if (follow && t.type !== 'web_url') payload.value = t.payload = B.payloadFor(v);
+                });
+                payload.addEventListener('input', () => { t.payload = payload.value; follow = false; });
+                url.addEventListener('input', () => { t.url = url.value; });
+                [title, payload, url].forEach(f => f.addEventListener('change', redraw)); // ang mga paalala ay binabasa ulit
+                const cell = (text, control) => el('div', {class: 'w-full min-w-0 sm:w-40'}, label(text, control));
+                const parts = [cell(key === 'buttons' ? 'Button title' : 'Quick reply title', title)];
+                if (key === 'buttons') {
+                    const type = el('select', {class: 'w-full rounded-md border border-slate-300 px-2 py-1 text-sm', 'aria-label': 'Button type'},
+                        [el('option', {value: 'postback', text: 'Postback (a tap is a reply)', selected: t.type !== 'web_url'}), el('option', {value: 'web_url', text: 'Link (opens a page)', selected: t.type === 'web_url'})]);
+                    type.addEventListener('change', () => {
+                        t.type = type.value;
+                        if (t.type === 'web_url') { delete t.payload; t.url = t.url || ''; } else { delete t.url; t.payload = t.payload || B.payloadFor(t.title); }
+                        tapAdded(); redraw();
+                    });
+                    parts.push(cell('Type', type));
+                }
+                parts.push(t.type === 'web_url' ? cell('Link (https://)', url) : cell('Payload', payload));
+                const remove = el('button', {type: 'button', class: 'text-xs text-red-700 hover:underline', text: key === 'buttons' ? 'Remove button' : 'Remove quick reply'});
+                remove.addEventListener('click', () => { it[key].splice(k, 1); if (!it[key].length) delete it[key]; redraw(); });
+                return el('div', {class: 'flex flex-wrap items-end gap-2 min-w-0'}, [...parts, remove]);
+            };
+            const taps = (it, i) => {
+                const box = el('div', {class: 'min-w-0 space-y-1 sm:col-span-2'});
+                const draw = () => {
+                    const rows = [...(it.buttons || []).map((b, k) => tapRow(it, 'buttons', b, k, draw)), ...(it.quick_replies || []).map((q, k) => tapRow(it, 'quick_replies', q, k, draw))];
+                    const cb = B.canAddButton(it), cq = B.canAddQuick(c.items, i);
+                    const addB = el('button', {type: 'button', class: 'cb-btn cb-btn-sm' + (it.type === 'image' ? ' hidden' : ''), text: '+ Button', title: cb.why || null, disabled: !cb.ok});
+                    const addQ = el('button', {type: 'button', class: 'cb-btn cb-btn-sm', text: '+ Quick reply', title: cq.why || null, disabled: !cq.ok});
+                    addB.addEventListener('click', () => { (it.buttons = it.buttons || []).push({title: '', type: 'postback', payload: ''}); tapAdded(); draw(); });
+                    addQ.addEventListener('click', () => { (it.quick_replies = it.quick_replies || []).push({title: '', payload: ''}); tapAdded(); draw(); });
+                    const notes = B.notes(c.items, i).map(t => el('p', {class: 'text-xs text-red-700', text: t}));
+                    const why = [cb, cq].filter(x => !x.ok && x.why && !(it.type === 'image' && x === cb)).map(x => el('p', {class: 'text-xs text-slate-500', text: x.why}));
+                    const warn = rows.length && textOnly.length ? el('p', {class: 'text-xs text-amber-700', text: 'Botcake pages get the text only (no buttons or quick replies): ' + textOnly.join(', ')}) : null;
+                    box.replaceChildren(...[...rows, el('div', {class: 'flex flex-wrap gap-2'}, [addB, addQ]), ...(rows.length || it.type === 'image' ? [] : why), ...notes, warn].filter(Boolean));
+                };
+                box.draw = draw;
+                draw();
+                return box;
+            };
+            const make = (it, i) => {
                 const note = el('p', {class: 'text-xs text-slate-500 sm:col-span-2', text: 'The AI remembers only its own answer here'});
                 const box = el('label', {class: 'flex items-center gap-2 text-xs text-slate-600 sm:col-span-2'}, [bind(el('input', {type: 'checkbox', checked: it.ai === true}), v => { if (v) it.ai = true; else delete it.ai; }, true), 'Show this message to the AI']);
                 const sync = () => { const own = aiOutputIn(it.value); note.classList.toggle('hidden', !own); box.classList.toggle('hidden', own); };
                 sync();
+                const tapsBox = taps(it, i), typeNote = el('p', {class: 'text-xs text-amber-700 sm:col-span-2'});
+                const text = input({tag: 'textarea', rows: 3, maxlength: 2000}, it.value);
+                text.addEventListener('change', () => tapsBox.draw());
                 return el('div', {class: 'grid gap-2 sm:grid-cols-[8rem_1fr]'}, [
-                    label('Type', bind(el('select', {class: 'w-full rounded-md border border-slate-300 px-2 py-1 text-sm'}, [el('option', {value: 'text', text: 'Text', selected: it.type !== 'image'}), el('option', {value: 'image', text: 'Image link', selected: it.type === 'image'})]), v => it.type = v)),
-                    label('Text or image link (variables allowed)', bind(input({tag: 'textarea', rows: 3, maxlength: 2000}, it.value), v => { it.value = v; sync(); })),
-                    note, box,
+                    label('Type', bind(el('select', {class: 'w-full rounded-md border border-slate-300 px-2 py-1 text-sm'}, [el('option', {value: 'text', text: 'Text', selected: it.type !== 'image'}), el('option', {value: 'image', text: 'Image link', selected: it.type === 'image'})]), v => { typeNote.textContent = B.setType(it, v); tapsBox.draw(); })),
+                    // Ang text na may button ay hanggang 640 letra sa Messenger.
+                    label('Text or image link (variables allowed)', bind(text, v => { const w = B.clampText(it, v); if (w !== v) text.value = w; it.value = w; sync(); })),
+                    note, box, typeNote, tapsBox,
                 ]);
             };
             make.blank = () => ({type: 'text', value: ''});
             body.append(rowsEditor(c.items = c.items || [], make, 10, '+ Message'));
-            body.append(el('label', {class: 'flex items-center gap-2 text-sm'}, [bind(el('input', {type: 'checkbox', checked: !!c.wait}), v => c.wait = v, true), 'Wait for the reply (exits on "reply")']));
+            body.append(el('label', {class: 'flex items-center gap-2 text-sm'}, [bind(waitBox, v => c.wait = v, true), 'Wait for the reply (exits on "reply")']), waitNote);
             // Skip: walang sagot sa takdang oras → "skipped". Hanggang 23 oras (ang padala ay nasa 24 oras ng Messenger pa).
             const skip = c.skip_after || {amount: '', unit: 'hours'};
             const amount = input({type: 'number', min: 1, max: skip.unit === 'hours' ? 23 : 1380, placeholder: 'never', 'aria-label': 'Skip after', class: 'w-24 rounded-md border border-slate-300 px-2 py-1 text-sm'}, skip.amount);
