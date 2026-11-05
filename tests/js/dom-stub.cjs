@@ -30,6 +30,7 @@ class El {
   setAttribute(k, v) { this.attrs[k] = String(v); if (k === 'value') this.value = String(v); if (k === 'checked') this.checked = true; }
   getAttribute(k) { return k in this.attrs ? this.attrs[k] : null; }
   hasAttribute(k) { return k in this.attrs; }
+  removeAttribute(k) { delete this.attrs[k]; }
   _wrap(c) { return typeof c === 'string' || typeof c === 'number' ? new Text(c) : c; }
   _add(n, front) { if (n.parentNode) n.parentNode.childNodes = n.parentNode.childNodes.filter(x => x !== n); n.parentNode = this; front ? this.childNodes.unshift(n) : this.childNodes.push(n); }
   append(...cs) { cs.forEach(c => this._add(this._wrap(c))); }

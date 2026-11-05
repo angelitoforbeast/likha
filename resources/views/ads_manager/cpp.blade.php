@@ -95,6 +95,10 @@
     #pageDd .page-dd-count {
       font-size: 11px; color: #64748b; padding: 4px 0 6px;
     }
+    /* Ang naka-sort na column (public/js/cpp-sort.js): ▼ pinakamataas muna, ▲ pataas. Galing sa aria-sort, kaya hindi
+       kasama sa text na kinokopya ng Copy Table. */
+    th[aria-sort="descending"]::after { content: " ▼"; }
+    th[aria-sort="ascending"]::after { content: " ▲"; }
   </style>
 
   {{-- Filter Controls --}}
@@ -214,6 +218,7 @@
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels"></script>
+  <script src="{{ asset('js/cpp-sort.js') }}?v={{ substr(md5_file(public_path('js/cpp-sort.js')), 0, 10) }}"></script>
 
   <script>
     // --- Data from server ---
@@ -223,6 +228,8 @@
     const srvEnd    = @json($end ?? null);
     // Ad-based na page => [{label, kind, cells: {date: cell}}]: ang mga row kada ad group (gaya ng cell ng rawData).
     const adGroupRows = @json($adGroupRows ?? []);
+    // Ang sort ng bawat table (page, date, single) sa pagbisitang ito; inilalapat ulit sa bawat re-render, hindi sine-save.
+    const cppSorts = {};
     const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
 
     // Ang kabuuan ng isang row sa mga araw: gaya ng row ng page. gate = ang mga cell ng page: ang orders at TCPR ay
@@ -597,7 +604,7 @@
           const totalItems       = modeItemsText(totalModeLines);
           const totalPrices      = modePriceText(totalModeLines);
           summaryHtml += `
-            <tr class="bg-blue-50 font-bold border-t-2 border-blue-300">
+            <tr class="bg-blue-50 font-bold border-t-2 border-blue-300" data-sort-fixed>
               <td class="border px-2 py-1">TOTAL (${pagesShown} pages)</td>
               <td class="border px-2 py-1">₱${totalSpent.toFixed(2)}</td>
               <td class="border px-2 py-1">${totalOrders}</td>
@@ -616,7 +623,7 @@
         // 2) Performance by Date (all pages)
         let dateHtml = `
           <h2 class="font-bold text-lg mb-2">All Pages – Performance by Date</h2>
-          <table class="w-full table-auto border text-sm">
+          <table id="cppDateTable" class="w-full table-auto border text-sm">
             <thead class="bg-gray-200">
               <tr>
                 <th class="border px-2 py-1">Date</th>
@@ -665,7 +672,7 @@
 
           dateHtml += `
             <tr>
-              <td class="border px-2 py-1 text-center">${fmtISO(date)}</td>
+              <td class="border px-2 py-1 text-center" data-sort="${date}">${fmtISO(date)}</td>
               <td class="border px-2 py-1 text-center">₱${sumSpent.toFixed(2)}</td>
               <td class="border px-2 py-1 text-center">${sumOrders}</td>
               <td class="border px-2 py-1 text-center">${cpp != null ? `₱${cpp.toFixed(2)}` : '—'}</td>
@@ -682,6 +689,8 @@
         // Content-width (w-auto) ang summary kaya kasya sa 2/3 panel nang walang
         // stretch/gap; may overflow-x-auto fallback lang kung sobrang liit ng screen.
         tableRight.innerHTML = summaryHtml + dateHtml;
+        CppSort.attach(document.getElementById('summaryOfAdsTable'), cppSorts, 'page');
+        CppSort.attach(document.getElementById('cppDateTable'), cppSorts, 'date');
         multiPageTables.innerHTML = '';
       }
     }
@@ -732,7 +741,7 @@
 
           html += `
             <tr>
-              <td class="border px-2 py-1 text-center">${fmtISO(date)}</td>
+              <td class="border px-2 py-1 text-center" data-sort="${date}">${fmtISO(date)}</td>
               <td class="border px-2 py-1 text-center">₱${r.spent.toFixed(2)}</td>
               <td class="border px-2 py-1 text-center">${r.orders ?? '—'}</td>
               <td class="border px-2 py-1 text-center">${r.cpp != null ? `₱${r.cpp.toFixed(2)}` : '—'}</td>
@@ -763,7 +772,7 @@
         const totalTCPR = totalOrders > 0 ? (totalFail / totalOrders) : null;
 
         html += `
-          <tr class="bg-gray-100 font-bold">
+          <tr class="bg-gray-100 font-bold" data-sort-fixed>
             <td class="border px-2 py-1 text-center">TOTAL</td>
             <td class="border px-2 py-1 text-center">₱${totalSpent.toFixed(2)}</td>
             <td class="border px-2 py-1 text-center">${totalOrders}</td>
@@ -776,6 +785,7 @@
 
         html += `</tbody></table>`;
         tableRight.innerHTML = html;
+        CppSort.attach(document.getElementById('singlePageTable'), cppSorts, 'single');
     }
 
     // Charts
