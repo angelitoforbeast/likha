@@ -109,11 +109,24 @@
     $('t-write-sheet').addEventListener('change', () => localStorage.setItem(SHEET_KEY, $('t-write-sheet').checked ? '1' : '0'));
     const base = () => ({page_name: $('t-page').value, flow_id: $('t-flow').value, version: $('t-version').value, ad_group: $('t-group').value, ad: $('t-ad').value, write_sheet: $('t-write-sheet').checked});
 
+    // Ang mga button at quick reply ng isang mensahe: ang tap ay ipinapadala ang title, gaya ng chat ng totoong tap. Ang link
+    // ay https lang (ang Test ay tumatakbo sa draft, na hindi pa dumaan sa Publish); ang iba ay text lang.
+    function taps(m) {
+        const tap = 'rounded-full border border-blue-300 bg-white px-3 py-1 text-xs text-blue-700 hover:bg-blue-50';
+        const list = [...(m.buttons || []), ...(m.quick_replies || [])].map(t => {
+            if (t.type === 'web_url') return /^https:\/\//i.test(t.url || '') ? el('a', {href: t.url, target: '_blank', rel: 'noopener noreferrer', class: tap, text: t.title + ' ↗'}) : el('span', {class: tap, text: t.title});
+            const b = el('button', {type: 'button', class: tap, text: t.title});
+            b.addEventListener('click', () => say(t.title));
+            return b;
+        });
+        return list.length ? el('div', {class: 'flex max-w-[80%] flex-wrap gap-1'}, list) : null;
+    }
+
     function render(data) {
         // Ang napiling ad at ang group nito (o Default), gaya ng sa takbo.
         if (data.ad_note) log(el('div', {class: 'text-xs text-slate-500', text: data.ad_note}));
-        (data.sends || []).forEach(s => s.messages.forEach(m => log(el('div', {class: 'flex'}, el('div', {class: 'max-w-[80%] whitespace-pre-line break-words rounded-lg bg-white px-3 py-1.5 shadow-sm'},
-            m.type === 'image' ? [el('img', {src: m.url, alt: '', referrerpolicy: 'no-referrer', class: 'max-h-40 rounded'}), el('div', {class: 'break-all text-xs text-slate-500', text: m.url})] : m.text)))));
+        (data.sends || []).forEach(s => s.messages.forEach(m => log(el('div', {class: 'flex flex-col items-start gap-1'}, [el('div', {class: 'max-w-[80%] whitespace-pre-line break-words rounded-lg bg-white px-3 py-1.5 shadow-sm'},
+            m.type === 'image' ? [el('img', {src: m.url, alt: '', referrerpolicy: 'no-referrer', class: 'max-h-40 rounded'}), el('div', {class: 'break-all text-xs text-slate-500', text: m.url})] : m.text), taps(m)]))));
         (data.sheet_rows || []).forEach(r => log(r.error
             ? el('div', {class: 'rounded-md border border-red-300 bg-red-50 px-2 py-1 text-xs text-red-800'}, [el('div', {class: 'font-semibold', text: 'Sheet row not written: ' + r.tab}), el('div', {class: 'break-words', text: r.error})])
             : el('div', {class: 'rounded-md border border-green-300 bg-green-50 px-2 py-1 text-xs'}, [el('div', {class: 'font-semibold', text: r.note || ('Sheet row (not written): ' + r.tab)}), el('div', {class: 'break-words', text: r.row.join(' | ')})])));
@@ -150,16 +163,20 @@
     }
     $('t-skip-now').addEventListener('click', () => skip(true));
 
-    $('t-form').addEventListener('submit', async ev => {
+    $('t-form').addEventListener('submit', ev => {
         ev.preventDefault();
         const msg = $('t-msg').value;
+        $('t-msg').value = '';
+        say(msg);
+    });
+    // Isang mensahe ng test customer: ang isinulat, o ang title ng button na pinindot.
+    async function say(msg) {
         stopSkip(); // a reply cancels the timer, as live
         log(el('div', {class: 'flex justify-end'}, el('div', {class: 'max-w-[80%] whitespace-pre-line break-words rounded-lg bg-blue-600 px-3 py-1.5 text-white', text: msg || '(empty)'})));
-        $('t-msg').value = '';
         const {ok, data} = await post(box.dataset.sendUrl, {...base(), message: msg});
         if (!ok) return log(el('div', {class: 'text-xs text-red-700', text: data.error || data.message || 'Could not run.'}));
         render(data);
-    });
+    }
     function renderFields(f) {
         const entries = Object.entries(f || {});
         $('t-fields').replaceChildren(...(entries.length ? entries.flatMap(([k, v]) => [el('dt', {class: 'font-mono text-slate-500 break-words', text: k}), el('dd', {class: 'break-words', text: v})]) : [el('dd', {class: 'text-slate-500', text: 'None'})]));
