@@ -45,6 +45,7 @@ class SendStatus
         // Walang naihatid sa customer: kung ang padala ay ang tanong na hinihintay pa ang sagot, itatanong ulit.
         if ($status === 'failed' || ($status === 'partial' && $s['sent_count'] === 0)) $this->unsent($reply);
         app(PageRestriction::class)->note((int) $reply->page_id, $status === 'failed' ? 'failed' : 'sent', $set['error'] ?? null);
+        if ($status === 'failed') CustomerReach::note((int) $reply->page_id, (string) $reply->psid, $set['error'] ?? null);
         // Ang palya ng koneksyon ng page sa Meta (hal. #190) ay ebidensya ng lipat, gaya ng palya sa mismong padala.
         if ($status !== 'sent') {
             try {

@@ -715,7 +715,7 @@ class ChatbotSequences
     /**
      * Ang pagsusuri bago ang tawag (sa pool, sa oras ng padala): hawak pa ng subscription ang ticket (active, parehong step;
      * ang sumagot na customer ay inalis na), active ang sequence, On ang page, naka-on ang mga sagot, hindi naka-pause ang bot,
-     * at bukas pa ang 24 oras. null = ipadala.
+     * naaabot ang customer (CustomerReach), at bukas pa ang 24 oras. null = ipadala.
      * @return array{code: string, reason: string}|null
      */
     public function sendCheck(object $row): ?array
@@ -733,6 +733,7 @@ class ChatbotSequences
         if (!BotcakeOutbox::enabled()) return $no('switched_off', BotcakeOutbox::SWITCHED_OFF);
         $fields = new CustomerFields((int) $row->page_id, (int) $row->psid);
         if ($fields->get(CustomerFields::BOT_PAUSED) === '1') return $no('bot_paused', 'The bot was paused before the send went out');
+        if (($why = CustomerReach::skipReason($row->page_id, $row->psid)) !== null) return $no('unreachable', $why);
         $last = BotcakeChat::active()->where('page_id', (string) $row->page_id)->where('psid', (string) $row->psid)->orderByDesc('id')->first();
         $at = $this->lastMessageAt($last, $fields);
         if (!$at || $at->lte(now()->subHours(self::WINDOW_HOURS))) return $no('outside_24h', 'The 24-hour window closed before the send went out');

@@ -341,6 +341,12 @@ class BotcakeSendPool extends TicketPool
             $this->forget($id);
             return null;
         }
+        // Ang ulit (429) ng padalang walang chat: ang ibang padala sa customer ay maaaring sinagot ng #551 habang naghihintay ito.
+        if ($row->kind === 'chatbot' && $job['attempt'] > 0 && ($why = $this->unreachable($row)) !== null) {
+            $this->forget($id);
+            BotcakeSendQueue::finishChatbot($row, $this->owner, ['status' => 'skipped', 'error' => $why, 'http' => null]);
+            return null;
+        }
         if ($row->kind === 'chatbot' && $job['attempt'] === 0) {
             // Naghintay sa lane: ang pause ng tao at ang emergency stop ay sinusuri ngayon, bago lumabas ang padala.
             if (($skip = $this->skipNow($row)) !== null) {
@@ -474,13 +480,19 @@ class BotcakeSendPool extends TicketPool
         parent::stop();
     }
 
-    /** Ang dahilan kung bakit hindi na ipapadala ngayon (naka-off ang mga sagot, o tao na ang sumasagot), o null. */
+    /** Ang dahilan kung bakit hindi na ipapadala ngayon (naka-off ang mga sagot, tao na ang sumasagot, o hindi maabot ang customer), o null. */
     private function skipNow(object $row): ?string
     {
         if (!BotcakeOutbox::enabled()) return BotcakeOutbox::SWITCHED_OFF;
         $paused = (new CustomerFields((int) $row->page_id, (int) $row->psid))->get(CustomerFields::BOT_PAUSED);
 
-        return $paused === '1' ? 'The bot was paused before the send went out' : null;
+        return $paused === '1' ? 'The bot was paused before the send went out' : $this->unreachable($row);
+    }
+
+    /** Ang padalang walang chat (hal. ang wait na lumampas) sa customer na hindi maabot (CustomerReach); ang sagot sa chat ay hindi kailanman. */
+    private function unreachable(object $row): ?string
+    {
+        return $row->chat_id === null ? CustomerReach::skipReason($row->page_id, $row->psid) : null;
     }
 
     /** Pumalya ang pool sa ticket (hal. database): chatbot → failed port; chatblast → gaya ng error ng job (unknown o failed). */

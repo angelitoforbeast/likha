@@ -175,6 +175,8 @@ class BotcakeSendQueue
         $q = DB::table(self::TABLE)->where('id', $row->id);
         if ($owner !== null) $q->where('status', 'sending')->where('claimed_by', $owner);
         else $q->where('status', 'pending');
+        // Ang marka ng hindi maabot ay bago bitawan ang ticket: ang susunod na padala sa customer ay makikita na ito.
+        if ($o['status'] === 'failed') CustomerReach::note($row->page_id, $row->psid, $o['error'], $o['raw'] ?? null);
         $ok = $q->update(['status' => $o['status'] === 'failed' ? 'failed' : 'done', 'result' => json_encode($o, JSON_UNESCAPED_UNICODE),
             'error' => $o['error'] === null ? null : mb_substr($o['error'], 0, 255), 'http' => $o['http'], 'done_at' => now(), 'updated_at' => now()]);
         if ($ok !== 1) return false;
@@ -453,6 +455,8 @@ class BotcakeSendQueue
         $called = isset($o['via'], $o['ref']) ? [] : (array) json_decode((string) DB::table(self::TABLE)->where('id', $row->id)->value('result'), true);
         $o += ['via' => $called['via'] ?? ChatbotProvider::BOTCAKE, 'ref' => $called['client_ref'] ?? null, 'at' => now()->format('Y-m-d H:i:s')];
         if (!isset($o['route']) && isset($called['route'])) $o['route'] = $called['route'];
+        // Gaya ng finishChatbot: ang marka bago bitawan ang ticket.
+        if ($o['status'] === 'failed') CustomerReach::note($row->page_id, $row->psid, $o['error'], $o['raw'] ?? null);
         $ok = $q->update(['status' => $o['status'] === 'failed' ? 'failed' : 'done', 'result' => json_encode($o, JSON_UNESCAPED_UNICODE),
             'error' => $o['error'] === null ? null : mb_substr($o['error'], 0, 255), 'http' => $o['http'], 'done_at' => now(), 'updated_at' => now()]);
         if ($ok !== 1) return false;

@@ -64,6 +64,10 @@ class BotcakeOutbox implements Outbox
         // Ang daan ng page (Botcake o ang Forbeast Gateway): ChatbotProvider. RESPONSE lang ang sagot sa chat ng customer;
         // ang sequence at ang takbong walang chat (hal. ang wait na lumampas) ay UPDATE.
         $type = $run->chatId !== null && $run->startedBy === null ? MessagingProvider::RESPONSE : MessagingProvider::UPDATE;
+        // Ang hindi maabot na customer (CustomerReach): ang UPDATE lang ang nilalaktawan; ang sagot sa chat niya ay laging ipinapadala.
+        if ($type === MessagingProvider::UPDATE && !$run->test && ($why = CustomerReach::skipReason($run->pageId, $run->psid())) !== null) {
+            return $this->log($run, $nodeId, 'send', $messages, 'skipped', $why);
+        }
         $provider = ChatbotProvider::for($run->pageName);
         $o = $provider->send($run->pageName, $run->pageId, $run->psid(), $messages, $ref = ChatbotProvider::ref(), $type);
         // Nasagot ng Forbeast ang chat: ang standby na kopya ng Botcake ay hindi na kailangan (ForbeastWatch).
@@ -163,6 +167,8 @@ class BotcakeOutbox implements Outbox
         ChatbotTags::storeRows($reply, $tags);
         // Ang #2022 ng page (PageRestriction). Ang "sent" ng gateway ay tinanggap pa lang, kaya ang send_status ang bibilang nito.
         if ($kind === 'send' && ($status === 'failed' || !in_array($via, Gateways::ALL, true))) app(PageRestriction::class)->note($pageId, $status, $error);
+        // Ang customer na hindi maabot (#551, #10 ng window): wala nang padalang hindi sagot hanggang sumulat siya (CustomerReach).
+        if ($kind === 'send' && $status === 'failed') CustomerReach::note($pageId, $psid, $error, $raw);
 
         return ['status' => $status, 'error' => $error];
     }

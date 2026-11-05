@@ -413,10 +413,13 @@ class FlowEngine
     private function afterSend(array $node, array $c, FlowRun $run, ?array $res): array
     {
         $note = 'Nothing to send';
+        $unreachable = false;
         if ($res !== null) {
             $messages = (array) $res['messages'];
             $run->sends[] = ['node' => $node['id'], 'messages' => $messages, 'status' => $res['status'], 'error' => $res['error']];
-            if ($res['status'] === 'skipped') $run->event('skipped', $node['id'], ['reason' => 'replies off']);
+            // Ang laktaw dahil hindi maabot ang customer (CustomerReach) ay may sariling dahilan: hindi ito ang emergency stop.
+            $unreachable = $res['status'] === 'skipped' && str_starts_with((string) $res['error'], CustomerReach::REASON);
+            if ($res['status'] === 'skipped') $run->event('skipped', $node['id'], ['reason' => $unreachable ? (string) $res['error'] : 'replies off']);
             $note = $res['status'] === 'failed' ? 'Send failed: ' . $res['error'] . '; continued'
                 : count($messages) . ' message' . (count($messages) === 1 ? '' : 's') . ' ' . $res['status'];
         }
@@ -428,7 +431,8 @@ class FlowEngine
         }
         if (!empty($c['wait'])) {
             $run->fields->set(CustomerFields::WAIT, $run->flowId . ':' . $node['id']);
-            if (($res['status'] ?? null) === 'failed') $run->fields->set(CustomerFields::WAIT_UNSENT, $run->flowId . ':' . $node['id']);
+            // Hindi naihatid ang tanong (pumalya, o nilaktawan dahil hindi maabot): ang susunod na mensahe ay hindi sagot nito.
+            if (($res['status'] ?? null) === 'failed' || $unreachable) $run->fields->set(CustomerFields::WAIT_UNSENT, $run->flowId . ':' . $node['id']);
             // Ang deadline ng skip (live lang: ang test customer ay walang tick). Ang wait na walang skip ay walang timer.
             $minutes = FlowGraph::skipMinutes($c);
             if (!$run->test) {

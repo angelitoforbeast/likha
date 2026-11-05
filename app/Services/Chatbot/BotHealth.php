@@ -8,6 +8,7 @@ use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Schema;
 
 /**
  * /chatbot/health: gaano kabilis sumagot ang bot, ilang padala ang pumalya at bakit, at ang AI calls: ngayon laban sa
@@ -404,6 +405,7 @@ class BotHealth
             'real' => $real,
             'slow' => $slow,
             'failures' => $this->failures($f, $pages, $names),
+            'unreachable_skips' => $this->unreachableSkips($today, $pages, $names),
             'compare' => $this->compare($f['page_id'], $botOf, $yesterday, $today),
         ];
     }
@@ -636,7 +638,7 @@ class BotHealth
     {
         $out = [];
         $rows = DB::table('chatbot_replies')->whereIn('kind', ['send', 'sheet'])->where('sent_at', '>=', $startAt)->where('sent_at', '<', $endAt)
-            ->when($pages !== null, fn ($q) => $q->whereIn('page_id', $pages))
+            ->when($pages !== null, fn ($q) => $q->whereIn('page_id', $pages))->where(self::notUnreachableSkip(...))
             ->selectRaw('DATE(sent_at) as d, kind, ' . self::reasonSql() . ' as reason, COUNT(*) as n')->groupBy('d', 'kind', 'reason')->get();
         foreach ($rows as $r) {
             $day = &$out[$r->d];
@@ -745,6 +747,41 @@ class BotHealth
     }
 
     /**
+     * Ang padalang nilaktawan dahil hindi maabot ang customer (CustomerReach) ay hindi pumalya: wala ito sa failed, sa mga
+     * ilaw at sa listahan; may sariling bilang (unreachableSkips). Ang ibang skipped (hal. switched off) ay gaya ng dati.
+     */
+    private static function notUnreachableSkip($q): void
+    {
+        $q->where('status', '<>', 'skipped')->orWhereNull('error')->orWhere('error', 'not like', CustomerReach::REASON . '%');
+    }
+
+    /**
+     * Ngayon, kada page: ilang padala ng bot (chatbot_replies) at ng Chatblast (botcake_messages) ang nilaktawan dahil hindi
+     * maabot ang customer. Ang Chatblast ay kada page sa index (page_name, status, updated_at). Pinakamarami muna.
+     * @return array<int, array{page: string, page_id: string, bot: int, chatblast: int}>
+     */
+    private function unreachableSkips(string $today, ?array $pages, array $names): array
+    {
+        [$from, $to] = [$today . ' 00:00:00', CarbonImmutable::parse($today)->addDay()->toDateString() . ' 00:00:00'];
+        $like = CustomerReach::REASON . '%';
+        $bot = DB::table('chatbot_replies')->where('kind', 'send')->where('status', 'skipped')->where('error', 'like', $like)
+            ->where('sent_at', '>=', $from)->where('sent_at', '<', $to)->when($pages !== null, fn ($q) => $q->whereIn('page_id', $pages))
+            ->groupBy('page_id')->selectRaw('page_id, COUNT(*) as n')->pluck('n', 'page_id');
+        $out = [];
+        $blasts = Schema::hasTable('botcake_messages');
+        foreach ($names as $id => $name) {
+            if ($pages !== null && !in_array((int) $id, $pages, true)) continue;
+            $blast = $blasts ? DB::table('botcake_messages')->where('page_name', $name)->where('status', 'skipped')
+                ->where('updated_at', '>=', $from)->where('updated_at', '<', $to)->where('reason', 'like', $like)->count() : 0;
+            $n = (int) ($bot[$id] ?? 0);
+            if ($n + $blast > 0) $out[] = ['page' => $name, 'page_id' => (string) $id, 'bot' => $n, 'chatblast' => $blast];
+        }
+        usort($out, fn ($a, $b) => ($b['bot'] + $b['chatblast']) <=> ($a['bot'] + $a['chatblast']) ?: strcmp($a['page'], $b['page']));
+
+        return $out;
+    }
+
+    /**
      * Ngayon kada oras: reply time ayon sa oras ng dating ng mensahe, at ang mga pumalya ayon sa oras ng padala. May
      * send_status na ($real): ang totoong oras (ang hindi pa kumpirmado ay wala); kung wala pa, ang oras ng pagtanggap.
      */
@@ -755,7 +792,7 @@ class BotHealth
             $s = $real ? $r['real'] : $r['secs'];
             if ($s !== null && str_starts_with($r['at'], $today)) $hours[(int) substr($r['at'], 11, 2)]['secs'][] = $s;
         }
-        $failed = DB::table('chatbot_replies')->where('kind', 'send')->where('status', '<>', 'sent')
+        $failed = DB::table('chatbot_replies')->where('kind', 'send')->where('status', '<>', 'sent')->where(self::notUnreachableSkip(...))
             ->where('sent_at', '>=', $today . ' 00:00:00')->where('sent_at', '<', CarbonImmutable::parse($today)->addDay()->toDateString() . ' 00:00:00')
             ->when($pages !== null, fn ($q) => $q->whereIn('page_id', $pages))->pluck('sent_at');
         foreach ($failed as $at) $hours[(int) substr($at, 11, 2)]['failed']++;
@@ -809,7 +846,7 @@ class BotHealth
     /** Ang pinakabagong 20 pumalyang send sa range, may dahilan. Walang text ng customer: ang error ng Botcake lang. */
     private function failures(array $f, ?array $pages, array $names): array
     {
-        $rows = DB::table('chatbot_replies')->where('kind', 'send')->where('status', '<>', 'sent')
+        $rows = DB::table('chatbot_replies')->where('kind', 'send')->where('status', '<>', 'sent')->where(self::notUnreachableSkip(...))
             ->where('sent_at', '>=', $f['from'] . ' 00:00:00')->where('sent_at', '<', CarbonImmutable::parse($f['to'])->addDay()->toDateString() . ' 00:00:00')
             ->when($pages !== null, fn ($q) => $q->whereIn('page_id', $pages))->orderByDesc('sent_at')->orderByDesc('id')->limit(self::LIST_LIMIT)
             ->selectRaw('id, page_id, node_id, error, http, sent_at, ' . self::reasonSql() . ' as reason')->get();

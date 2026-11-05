@@ -4556,3 +4556,41 @@ Slice 233: 12 passed, 0 failed, 0 blocked, 0 skipped, 0 not run (S-233.3.1 and S
 | Case | Type | Given / When / Then | Test | Last run |
 |------|------|---------------------|------|----------|
 | S-233.4.1 | happy | Given pages never renamed, when the existing matcher, Chatblast, ad group, Inbox and PsidCoverage tests run unchanged, then they pass | the existing test files, unchanged | 2026-11-05 passed |
+
+## Slice 234 – Stop after #551
+
+As the owner of the pages, I want the bot to stop sending scheduled messages to a customer Meta says can't be reached (#551, or #10 outside the messaging window) until that customer writes again, so sends are not wasted and the pages don't look like spam to Meta.
+
+Slice 234: 18 cases, 18 passed, 0 failed, 0 blocked, 0 skipped, 0 not run (31 tests; variants in tables). Threat model: untrusted = Meta, Botcake and gateway error texts and response bodies (parsed with bounded, anchored patterns, never logged), and the inbound chat and gateway event bodies (behind the existing chat key and HMAC). Trusted: config (`services.chatbot.stop_unreachable`), the repo. Risk tier: high. Tests: `tests/Feature/Chatblast/CustomerReachTest.php`, `CustomerReachSendTest.php`, `CustomerReachChatblastTest.php`, `CustomerReachInboundTest.php`, `CustomerReachHealthTest.php`.
+
+### S-234.1 A customer who can't be reached is marked (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-234.1.1 | happy | Given a send to page + PSID, when it fails with (#551) (bot send or Chatblast send_flow), then the customer is marked on that page with the time and 551 | `test_S_234_1_1_a_send_that_fails_with_551_marks_the_customer_with_the_time_and_551`, `test_S_234_1_1_a_chatblast_send_flow_refused_with_551_marks_the_customer` | 2026-11-05 passed |
+| S-234.1.2 | happy | Given a send, when it fails with the #10 of the messaging window ("outside of allowed window" or subcode 2018278, in the error or the raw answer), then the customer is marked with 10 | `test_S_234_1_2_a_send_that_fails_with_the_window_10_marks_the_customer_with_10` | 2026-11-05 passed |
+| S-234.1.3 | negative | Given a send that fails with #100, #2022, a timeout, a restriction, the page-level #10 (permission, a bare code 10, or subcode 1893063: "sendMessage failed (code 10, subcode 1893063)"), #1000, #5510 or code 5512, or a send that is sent, then there is no mark | `test_S_234_1_3_other_errors_do_not_mark` | 2026-11-05 passed |
+| S-234.1.4 | edge | Given Botcake's wording ("This person isn't available", straight or curly apostrophe) or the gateway's ("sendMessage failed (code 551…)", also as the later send_status), then both mark; "isn't available" without "person" does not | `test_S_234_1_4_the_botcake_and_gateway_wordings_are_both_recognised`, `test_S_234_1_4_the_gateway_send_status_failure_marks_and_the_1893063_one_does_not` | 2026-11-05 passed |
+| S-234.1.5 | edge | Given a #10, when it carries the window text or subcode 2018278 it marks; when it carries 1893063 or no window sign it does not | the window and page-level rows of the S-234.1.2 and S-234.1.3 tables | 2026-11-05 passed |
+
+### S-234.2 Scheduled sends skip a marked customer (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-234.2.1 | happy | Given a marked customer, when a sequence step goes out through the sequence pool, then it is skipped and recorded in chatbot_replies as skipped with "Customer can't be reached (#551) since …", with no call to Botcake or the gateway, and the step finishes | `test_S_234_2_1_a_sequence_step_to_a_marked_customer_is_skipped_recorded_and_not_called` | 2026-11-05 passed |
+| S-234.2.2 | happy | Given a marked customer, when a Chatblast (job or pool start), a follow-up sent by the waiting job, or a wait timeout (direct or through the reply pool) would go out, then each is skipped with the reason and not called. Chatblast records it in botcake_messages (status skipped, dedupe_key kept), also when the order's page name differs only in case. A skipped question with a wait counts as unsent | `test_S_234_2_2_a_chatblast_to_a_marked_customer_is_skipped_with_the_reason_and_no_botcake_call`, `test_S_234_2_2_the_pool_skips_a_chatblast_whose_customer_was_marked_while_it_waited`, `test_S_234_2_2_a_page_name_from_the_order_that_differs_only_in_case_still_marks_and_skips`, `test_S_234_2_2_a_follow_up_sent_by_the_waiting_job_is_skipped_too`, `test_S_234_2_2_a_wait_timeout_send_without_a_chat_is_skipped_and_the_question_counts_as_unsent`, `test_S_234_2_2_the_reply_pool_skips_a_wait_timeout_ticket_of_a_marked_customer` | 2026-11-05 passed |
+| S-234.2.3 | edge | Given a customer marked on page A, when a step is due on page A and on page B, then only page B is called | `test_S_234_2_3_a_customer_marked_on_page_a_is_still_messaged_on_page_b` | 2026-11-05 passed |
+| S-234.2.4 | edge | Given three sends for one customer in the pool, when the first fails with #551, then the other two are skipped with no call. A 429 retry after another send stored the mark is skipped too | `test_S_234_2_4_after_a_551_the_next_sends_of_that_customer_in_the_pool_are_all_skipped`, `test_S_234_2_4_a_429_retry_after_another_send_stored_the_mark_is_skipped` | 2026-11-05 passed |
+| S-234.2.5 | negative | Given a marked customer, when the bot answers a chat of that customer, then it is sent. When the switch is off, scheduled sends go out and no new mark is stored. A mark older than 30 days no longer skips | `test_an_answer_to_the_customer_is_never_skipped_even_while_marked`, `test_the_switch_off_sends_to_a_marked_customer`, `test_the_switch_off_stops_new_marks`, `test_a_mark_older_than_30_days_no_longer_skips` | 2026-11-05 passed |
+
+### S-234.3 A new message from the customer clears the mark (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-234.3.1 | happy | Given a marked customer, when they write to the page (Botcake route), then the mark is cleared and the bot answers; also when the page's bot is Off (nothing stored, the mark is still cleared) | `test_S_234_3_1_a_marked_customer_who_writes_to_the_page_is_unmarked_and_the_bot_answers`, `test_S_234_3_1_the_mark_is_cleared_even_when_the_page_bot_is_off` | 2026-11-05 passed |
+| S-234.3.2 | happy | Given the customer wrote after the mark, when a later sequence step is due, then it is sent | `test_S_234_3_2_after_the_customer_wrote_a_later_sequence_step_is_sent_normally` | 2026-11-05 passed |
+| S-234.3.3 | edge | Given a marked customer on the gateway, when a message, postback or quick-reply tap comes in (also on a Botcake-route page or with the bot Off), then the mark is cleared; an ad open (referral) or the page's own echo does not clear it | `test_S_234_3_3_a_gateway_postback_or_quick_reply_also_clears_the_mark`, `test_S_234_3_3_a_gateway_message_to_a_page_on_the_botcake_route_clears_the_mark`, `test_S_234_3_3_a_gateway_message_clears_the_mark_on_a_page_whose_bot_is_off` | 2026-11-05 passed |
+| S-234.3.4 | edge | Given a marked customer, when a flow runs "clear all fields", then the mark stays | `test_S_234_3_4_clear_all_fields_keeps_the_mark` | 2026-11-05 passed |
+
+### S-234.4 It shows (P2)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-234.4.1 | happy | Given skips today, when staff open /chatbot/health, then a table "Skipped today: customer can't be reached" shows per page the bot sends, the Chatblast and the total | `test_S_234_4_1_health_shows_the_skipped_sends_per_page_today` | 2026-11-05 passed |
+| S-234.4.2 | edge | Given skipped rows with that reason in chatbot_replies and botcake_messages (and other skipped rows, yesterday's rows, a failed #551), then the count per page today is exactly the rows with status skipped and that reason, and these skips are not in the failed tiles, the hourly failed graph or the failures list | `test_S_234_4_2_the_count_per_page_today_matches_the_skipped_rows_with_that_reason`, `test_S_234_4_2_these_skips_are_not_counted_as_failed_sends` | 2026-11-05 passed |
