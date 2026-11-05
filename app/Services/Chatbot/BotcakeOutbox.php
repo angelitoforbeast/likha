@@ -26,10 +26,35 @@ class BotcakeOutbox implements Outbox
         return (bool) config('services.chatbot.replies_enabled');
     }
 
-    /** Ang mga mensahe bilang ipinapadala sa Botcake/Forbeast: walang "ai" at "ai_text" na marka (sa ating talaan lang iyon). */
-    public static function wire(array $messages): array
+    /**
+     * Ang mga mensahe bilang ipinapadala sa Botcake/Forbeast: walang marka ng ating talaan (ai, ai_text, text_cut, left_out,
+     * at ang cut ng bawat button). Ang button at quick reply ay sa address lang ng gateway na nasa services.gateway.buttons
+     * ($route, Gateways::buttonsOn): ang text na may button ay {type: buttons, text, buttons}. Sa iba (Botcake, walang
+     * $route, o wala sa listahan) ay tinatanggal ang mga iyon: ang text o larawan lang, gaya ng dati.
+     */
+    public static function wire(array $messages, ?string $route = null): array
     {
-        return array_map(fn ($m) => is_array($m) ? array_diff_key($m, ['ai' => 1, 'ai_text' => 1]) : $m, array_values($messages));
+        $on = Gateways::buttonsOn($route);
+        $plain = fn (array $list) => array_values(array_map(fn ($t) => is_array($t) ? array_diff_key($t, ['cut' => 1]) : $t, $list));
+
+        return array_map(function ($m) use ($on, $plain) {
+            if (!is_array($m)) return $m;
+            $buttons = is_array($m['buttons'] ?? null) ? $m['buttons'] : [];
+            $quick = is_array($m['quick_replies'] ?? null) ? $m['quick_replies'] : [];
+            $m = array_diff_key($m, ['ai' => 1, 'ai_text' => 1, 'text_cut' => 1, 'left_out' => 1, 'buttons' => 1, 'quick_replies' => 1]);
+            if (!$on) return $m;
+            if ($buttons && ($m['type'] ?? '') === 'text') return ['type' => 'buttons', 'text' => (string) ($m['text'] ?? ''), 'buttons' => $plain($buttons)];
+
+            return $m + ($quick ? ['quick_replies' => $plain($quick)] : []);
+        }, array_values($messages));
+    }
+
+    /** Ang talaan ng padala: ang mensaheng may button o quick reply na hindi naipadala kasama ang mga iyon ay may left_out. */
+    private static function leftOut(array $messages, ?string $via, ?string $route): array
+    {
+        if (in_array($via, Gateways::ALL, true) && Gateways::buttonsOn($route)) return $messages;
+
+        return array_map(fn ($m) => is_array($m) && (!empty($m['buttons']) || !empty($m['quick_replies'])) ? $m + ['left_out' => true] : $m, $messages);
     }
 
     public function send(FlowRun $run, string $nodeId, array $messages): array
@@ -128,6 +153,7 @@ class BotcakeOutbox implements Outbox
     public static function record(int $pageId, int $psid, ?int $chatId, ?int $flowId, string $nodeId, string $kind, array $content, string $status, ?string $error = null, ?int $http = null, ?string $raw = null, ?array $tags = null, ?string $via = null, ?string $clientRef = null, ?string $route = null): array
     {
         $now = now();
+        if ($kind === 'send') $content = self::leftOut($content, $via, $route);
         $reply = ChatbotReply::create([
             'page_id' => $pageId, 'psid' => $psid, 'chat_id' => $chatId, 'flow_id' => $flowId,
             'node_id' => $nodeId, 'kind' => $kind, 'content' => $content, 'status' => $status, 'error' => $error === null ? null : mb_substr($error, 0, 255),

@@ -261,14 +261,19 @@ class FlowEngine
             // maliban kung "Show this message to the AI" (ai: true). Hindi ito ipinapadala sa Botcake/Forbeast (BotcakeOutbox::wire).
             $aiText = ($item['ai'] ?? null) === false ? null : $this->aiText($run, (string) ($item['value'] ?? ''));
             $mark = $aiText !== null ? ['ai_text' => $aiText] : ['ai' => ($item['ai'] ?? null) === true];
+            $taps = $this->taps($run, $item);
             if (($item['type'] ?? 'text') === 'image') {
                 if (!self::isUrl($v)) continue;
-                $messages[] = ['type' => 'image', 'url' => $v] + $mark;
+                $messages[] = ['type' => 'image', 'url' => $v] + array_diff_key($taps, ['buttons' => 1]) + $mark;
             } else {
-                $messages[] = ['type' => 'text', 'text' => mb_substr($v, 0, 2000)] + $mark;
+                // Ang text na may button ay hanggang 640 sa Messenger: ang lumampas dahil sa variable ay pinuputol, hindi tinatanggihan.
+                $max = isset($taps['buttons']) ? FlowGraph::MAX_BUTTON_TEXT : 2000;
+                $messages[] = ['type' => 'text', 'text' => mb_substr($v, 0, $max)] + (mb_strlen($v) > $max && isset($taps['buttons']) ? ['text_cut' => true] : []) + $taps + $mark;
             }
             $templates[] = (string) ($item['value'] ?? '');
         }
+        // Ang quick reply ay sa huling mensahe lang ipinapakita ng Messenger.
+        foreach (array_keys(array_slice($messages, 0, -1, true)) as $k) unset($messages[$k]['quick_replies']);
 
         if (!$messages) return $this->afterSend($node, $c, $run, null);
         if ($stop = $this->mismatch($run, $node['id'])) return $stop;
@@ -285,6 +290,37 @@ class FlowEngine
         $res = SequenceAttempt::around($run->sequenceTicket !== null ? fn () => ChatbotSequences::markSending($run) : null, fn () => $outbox->send($run, $node['id'], $messages));
 
         return $this->afterSend($node, $c, $run, ['messages' => $messages, 'status' => $res['status'], 'error' => $res['error']]);
+    }
+
+    /**
+     * Ang mga button at quick reply ng isang item, may laman na ang mga variable ng title: laging tatanggapin ng Messenger
+     * (ang title na lampas 20 ay pinuputol at may marka na cut; tinatanggal ang walang title, ang title o payload na
+     * naulit, at ang link na hindi https). Ang payload ay gaya ng naka-save. [] kapag wala.
+     */
+    private function taps(FlowRun $run, array $item): array
+    {
+        $out = [];
+        foreach (['buttons', 'quick_replies'] as $key) {
+            $titles = [];
+            $payloads = [];
+            $list = [];
+            foreach ((array) ($item[$key] ?? []) as $t) {
+                if (!is_array($t)) continue;
+                $title = trim($run->text((string) ($t['title'] ?? '')));
+                $cut = mb_strlen($title) > FlowGraph::MAX_TITLE;
+                if ($cut) $title = rtrim(mb_substr($title, 0, FlowGraph::MAX_TITLE));
+                $link = ($t['type'] ?? '') === 'web_url';
+                $payload = $link ? null : (string) ($t['payload'] ?? '');
+                if ($title === '' || isset($titles[mb_strtolower($title)]) || ($link ? !FlowGraph::httpsUrl((string) ($t['url'] ?? '')) : ($payload === '' || isset($payloads[$payload])))) continue;
+                $titles[mb_strtolower($title)] = true;
+                if (!$link) $payloads[$payload] = true;
+                $list[] = ['title' => $title] + ($key === 'buttons' ? ['type' => $link ? 'web_url' : 'postback'] : [])
+                    + ($link ? ['url' => (string) $t['url']] : ['payload' => $payload]) + ($cut ? ['cut' => true] : []);
+            }
+            if ($list) $out[$key] = $list;
+        }
+
+        return $out;
     }
 
     /**

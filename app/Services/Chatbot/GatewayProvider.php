@@ -73,7 +73,7 @@ class GatewayProvider implements MessagingProvider
         $this->lastRoute = $route;
 
         return ['gateway' => $gw, 'route' => $route, 'url' => $url . '/v1/pages/' . rawurlencode($pageId) . '/messages', 'key' => $key, 'timeout' => max(1, $c['timeout']),
-            'body' => ['psid' => $psid, 'messages' => BotcakeOutbox::wire($messages), 'messaging_type' => $messagingType === self::UPDATE ? self::UPDATE : self::RESPONSE, 'client_ref' => $clientRef]];
+            'body' => ['psid' => $psid, 'messages' => BotcakeOutbox::wire($messages, $route), 'messaging_type' => $messagingType === self::UPDATE ? self::UPDATE : self::RESPONSE, 'client_ref' => $clientRef]];
     }
 
     /**
