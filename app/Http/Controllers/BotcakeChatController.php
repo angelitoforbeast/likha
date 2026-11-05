@@ -7,6 +7,7 @@ use App\Services\BotcakeChatGuard;
 use App\Services\Chatbot\ChatbotInbound;
 use App\Services\Chatbot\ChatbotProvider;
 use App\Services\Chatbot\ChatMessageCleaner;
+use App\Services\Chatbot\CustomerReach;
 use App\Services\PageSettings;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -121,6 +122,8 @@ class BotcakeChatController extends Controller
         // (6b) Naka-Off ang bot ng page sa /chatbot: sumasagot pero walang iniimbak (binibilang).
         if ($guard->botOff($pageName)) {
             $guard->count('bot_off');
+            // Sumulat ang customer: naaabot na ulit (ang Chatblast ng page ay tumatakbo kahit Off ang bot).
+            if ($f['psid'] !== null) CustomerReach::clear($f['page_id'], $f['psid']);
             return response()->json(['ok' => true]);
         }
 

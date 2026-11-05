@@ -21,6 +21,8 @@ class ChatbotInbound
 
     public static function afterStore(BotcakeChat $chat, string $pageName): void
     {
+        // Sumulat ang customer: naaabot na ulit sa page (CustomerReach), bago ang takbo na sasagot sa kanya.
+        CustomerReach::clear((string) $chat->page_id, (string) $chat->psid);
         // Sumagot ang customer: alisin sa mga sequence ng page na may "exit when the customer replies".
         try {
             if (ctype_digit((string) $chat->page_id) && ctype_digit((string) $chat->psid)) {

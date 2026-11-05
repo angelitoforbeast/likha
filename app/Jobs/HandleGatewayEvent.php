@@ -10,6 +10,7 @@ use App\Services\Chatbot\ChatbotProvider;
 use App\Services\Chatbot\ChatEchoes;
 use App\Services\Chatbot\ChatMessageCleaner;
 use App\Services\Chatbot\CommentReplies;
+use App\Services\Chatbot\CustomerReach;
 use App\Services\Chatbot\ForbeastWatch;
 use App\Services\Chatbot\Gateways;
 use App\Services\Chatbot\SendStatus;
@@ -142,6 +143,9 @@ class HandleGatewayEvent implements ShouldQueue
             self::count('unknown_page');
             return;
         }
+        // Sumulat ang customer (mensahe, postback o quick reply; hindi ang pagbukas ng ad): naaabot na ulit, alinman ang daan
+        // ng page o kahit Off ang bot, dahil ang Chatblast ay tumatakbo pa rin sa mga iyon.
+        if ($e['type'] !== 'referral') CustomerReach::clear((string) $e['page_id'], (string) $e['psid']);
         // Ang page na nasa Botcake: doon nanggagaling ang takbo; binibilang lang ito (para sa paghahambing balang araw).
         if (ChatbotProvider::name($pageName) !== ChatbotProvider::GATEWAY) {
             self::count('botcake_page');
