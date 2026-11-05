@@ -114,12 +114,15 @@ class SetupProblemsBannerTest extends ChatblastTestCase
             DB::table('chatbot_replies')->insert(['page_id' => 1002, 'psid' => 7001, 'node_id' => 'n2', 'kind' => 'send', 'status' => 'failed',
                 'error' => 'Botcake said "You are temporarily restricted from sending messages" (HTTP 200)', 'http' => 200, 'sent_at' => '2026-10-27 ' . $t]);
         }
+        for ($i = 0; $i < 7; $i++) { // 3 of 10 (30%): pula ayon sa % ng restricted
+            DB::table('chatbot_replies')->insert(['page_id' => 1002, 'psid' => 7001, 'node_id' => 'n2', 'kind' => 'send', 'status' => 'sent', 'sent_at' => '2026-10-27 11:4' . $i . ':30']);
+        }
         $this->check('Page Uno', ['ok' => false, 'x' => ['2 flows named UPDATE SHIPPING STATUS 2026']]);
 
         $this->actingAs($this->user());
         $html = $this->get('/chatbot/inbox')->assertOk()->getContent();
         // Spec 184: iisang banner; ang pulang page ang nauuna.
-        $this->assertSame('⚠ 2 pages with problems (2 urgent) Page Dos 🔴 Page restricted by Facebook: 3 of 3 sends failed since 11:20 Health Inbox '
+        $this->assertSame('⚠ 2 pages with problems (2 urgent) Page Dos 🔴 Page restricted by Facebook: 3 of 10 sends failed since 11:20 Health Inbox '
             . 'Page Uno 🟠 Setup: 2 flows named UPDATE SHIPPING STATUS 2026 Page settings', $this->banner($html));
     }
 }
