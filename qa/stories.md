@@ -4522,3 +4522,38 @@ Slice 231: 18 passed, 0 failed, 0 blocked, 0 skipped, 0 not run (18 cases, 18 te
 | S-231.5.2 | happy | Given an AI line marked Done, then it stays hidden until a new failure | `test_S_231_5_2_done_hides_the_ai_line_until_a_new_failure` | 2026-11-05 passed |
 | S-231.5.3 | edge | Given a database error inside the AI check, then the rest of the banner still shows | `test_S_231_5_3_a_database_error_in_the_ai_check_leaves_the_rest_of_the_banner` | 2026-11-05 passed |
 | S-231.5.4 | edge | Given the banner HTML at 390 × 844, then the new lines wrap, with no sideways scroll | `test_S_231_5_4_the_ai_lines_wrap_in_the_banner_list` | 2026-11-05 passed |
+
+## Slice 235 – CBB and unknown codes
+
+As staff watching the chatbot, I want "CBB" to mean Chatbot Builder only, so the Likha bot's own replies through Botcake are not reported as doubles, and I want the auto-switch to notice Meta error codes it does not know, so a new kind of send failure moves a page off a broken gateway or at least shows in the banner.
+
+Threat model: the Meta error code and subcode come from the gateway's send answer and send_status event (signed gateway webhooks, behind existing validation); echoes come from Meta through the gateway. Config (`services.gateway.auto_switch.unknown_*`) and the repo are trusted. Risk tier: high (it decides when live pages switch bots). Tests: `tests/Feature/Chatblast/CbbEchoTest.php`, `tests/Feature/Chatblast/UnknownMetaCodeTest.php`.
+
+### S-235.1 CBB is Chatbot Builder only (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-235.1.1 | happy | Given a Botcake-route page, a new customer, 4 Likha main-flow sends and 4 Botcake-stamped echoes, when Health builds, then no "Main flow double" and no leftover | `test_S_235_1_1_botcake_echoes_of_likha_sends_are_not_a_main_flow_double` | not run |
+| S-235.1.2 | happy | Given the same plus a Chatbot Builder echo, then "Main flow double" shows | `test_S_235_1_2_a_chatbot_builder_echo_with_likha_sends_is_a_main_flow_double` | not run |
+| S-235.1.3 | edge | Given a gateway page with a Botcake-stamped echo, then it is labelled Botcake in the Inbox and Health, and never counted as CBB | `test_S_235_1_3_a_botcake_echo_on_a_gateway_page_is_labelled_botcake_and_never_cbb` | not run |
+
+### S-235.2 Unknown Meta codes in a 10-minute window (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-235.2.1 | happy | Given 12 RESPONSE sends on a gateway page, 4 failed with unknown #9999 (in any order), then the page is switched with condition unknown_error and the reason names #9999 | `test_S_235_2_1_four_of_twelve_replies_failing_with_an_unknown_code_switch_the_page` | not run |
+| S-235.2.2 | negative | Given 12 RESPONSE sends, 2 failed with #9999, then no switch | `test_S_235_2_2_two_of_twelve_replies_failing_do_not_switch` | not run |
+| S-235.2.3 | negative | Given 20 UPDATE sends, 15 failed with #551, then no switch and no line (a customer code) | `test_S_235_2_3_customer_code_failures_make_no_switch_and_no_line` | not run |
+| S-235.2.4 | happy | Given 20 UPDATE sends, 15 failed with #9999 (in any order), then one orange line "New Meta error #9999 on <page>: N of M updates failed in 10 min", no switch | `test_S_235_2_4_most_updates_failing_with_an_unknown_code_show_an_orange_line` | not run |
+| S-235.2.5 | edge | Given fewer than 10 sends, all failed with #9999, then no switch and no orange line (the white line of S-235.4.1 still shows on the first sighting of the day) | `test_S_235_2_5_fewer_than_ten_sends_make_no_switch_and_no_orange_line` | not run |
+| S-235.2.6 | edge | Given 5 or more gateway pages each tripping the RESPONSE threshold on the same unknown code in the window, then none of them switches and one orange site line shows | `test_S_235_2_6_a_meta_wide_unknown_code_switches_no_page_and_shows_one_site_line` | not run |
+| S-235.2.7 | edge | Given the unknown_response_pct and unknown_update_pct set to 0, then no switch and no orange line | `test_S_235_2_7_zero_percent_turns_the_switch_and_the_line_off` | not run |
+
+### S-235.3 #10 subcodes (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-235.3.1 | happy | Given #10 subcode 1893063 failures, then cause restricted (not customer), not counted as unknown, no failed_sends switch, and counted for "Page restricted" | `test_S_235_3_1_code_10_subcode_1893063_is_a_restriction_that_never_switches` | not run |
+| S-235.3.2 | happy | Given #10 subcode 2018278, then a customer cause, as today | `test_S_235_3_2_code_10_subcode_2018278_stays_a_customer_cause` | not run |
+
+### S-235.4 New code info line (P2)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-235.4.1 | happy | Given the first #9999 of the day, then one white info line under All pages, and no second one that day | `test_S_235_4_1_the_first_unknown_code_of_the_day_shows_one_white_line` | not run |
