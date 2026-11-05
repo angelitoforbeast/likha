@@ -9,6 +9,7 @@ use App\Services\BotcakeMock;
 use App\Services\Chatblast;
 use App\Services\ChatblastSetupCheck;
 use App\Services\ChatbotFields;
+use App\Services\OrderEncode\FlowEncode;
 use App\Services\PageSettings;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -33,6 +34,11 @@ class ProblemsPanel
     public const ORDER_DAYS = 14;
     /** Ang mga kulay, pinakamabigat muna; ang puti ay hindi urgent. */
     public const LEVELS = ['red' => '🔴', 'orange' => '🟠', 'white' => '⚪'];
+    /** Ang "page" ng linyang para sa buong site (hal. pumapalya ang AI sa karamihan ng page): may sariling Acknowledge/Done. */
+    public const SITE = 'All pages';
+    /** Ilang chat ang naka-link sa linya ng AI, at ilang palyang row ang binabasa para sa mga link at sa failed port. */
+    public const AI_CHATS = 3;
+    public const AI_ROWS = 500;
 
     public function __construct(private PageSettings $settings)
     {
@@ -59,12 +65,13 @@ class ProblemsPanel
             'same_ids' => $this->safely(fn () => $this->sameIds(), []),
             // Ang mga page na may order sa huling ORDER_DAYS araw (isang naka-group na query); null kapag hindi nabasa.
             'selling' => $this->safely(fn () => $this->selling(), null),
+            'ai' => $this->safely(fn () => $this->ai(), []),
         ]);
         $echoes = $this->safely(fn () => $this->echoes(), []);
         $lines = array_merge(
             $this->safely(fn () => $this->sends(), []),
             $echoes,
-            $own['events'], $own['slow'], $own['quiet'],
+            $own['events'], $own['slow'], $own['quiet'], $own['ai'] ?? [],
             $this->safely(fn () => $this->setup($own['sending'], $own['selling'] ?? null), []),
             $own['same_ids'] ?? [],
         );
@@ -293,6 +300,176 @@ class ProblemsPanel
             return ['median' => array_map(fn ($l) => (int) round(BotHealth::median($l)), array_filter($secs, fn ($l) => count($l) >= $min)),
                 'chats' => array_map(fn ($n) => (int) round($n / self::USUAL_DAYS), $chats)];
         });
+    }
+
+    /**
+     * Ang AI step na walang sagot. Palya = may error, maliban sa "No AI load" (ipinapakita sa Forbeast); ang walang lamang
+     * sagot ay may error na rin. Ilang naka-group na query sa huling ai_fail_minutes ng AI queue (index sa created_at), hindi
+     * isa kada page:
+     * - pula: ai_fail_count palya pataas ng page sa window, o may naghihintay nang lampas ai_stuck_seconds;
+     * - pula, isang linya (SITE): ai_site_min_pages page pataas, at lampas kalahati ng humingi ng AI, ang pumalya sa huling
+     *   ai_site_minutes: ang OpenAI o ang key ang malamang na sira, kaya walang linya ng palya kada page (ang naipit ay meron);
+     * - orange: 1 hanggang ai_fail_count - 1 palya na hindi naka-wire ang failed port sa flow version na tumakbo, kaya walang
+     *   sagot ang customer. Ang naka-wire (lumabas ang fallback) ay hindi ipinapakita.
+     */
+    private function ai(): array
+    {
+        if (!Schema::hasTable(ChatbotAiQueue::TABLE)) return [];
+        $c = config('services.chatbot.problems');
+        $count = max(1, (int) ($c['ai_fail_count'] ?? 3));
+        $minutes = max(1, (int) ($c['ai_fail_minutes'] ?? 15));
+        // Ang window ng site ay nasa loob ng window ng page: iisang query ang bumibilang sa dalawa.
+        $siteMinutes = max(1, min($minutes, (int) ($c['ai_site_minutes'] ?? 10)));
+        $from = now()->subMinutes($minutes)->format('Y-m-d H:i:s');
+        $pages = [];
+        // Ang hinihintay ng Encode order ay hindi tawag sa AI (gaya ng BotHealth); ang "No AI load" ay hindi rin humingi ng AI.
+        foreach (DB::table(ChatbotAiQueue::TABLE)->where('created_at', '>=', $from)->where('model', '<>', FlowEncode::MODEL)->groupBy('page_id', 'error')
+            ->selectRaw('page_id, error, COUNT(*) AS n, SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) AS recent', [now()->subMinutes($siteMinutes)->format('Y-m-d H:i:s')])
+            ->get() as $r) {
+            $id = (string) $r->page_id;
+            if ($r->error === ChatbotAiLoad::ERROR || BotcakeMock::isTestId($id)) continue;
+            $p = &$pages[$id];
+            $p ??= ['asked' => 0, 'asked_recent' => 0, 'failed' => 0, 'failed_recent' => 0, 'errors' => []];
+            $p['asked'] += (int) $r->n;
+            $p['asked_recent'] += (int) $r->recent;
+            if ($r->error !== null) {
+                $p['failed'] += (int) $r->n;
+                $p['failed_recent'] += (int) $r->recent;
+                $p['errors'][(string) $r->error] = (int) $r->n;
+            }
+            unset($p);
+        }
+
+        $out = $this->aiStuck($c);
+        $asked = count(array_filter($pages, fn ($p) => $p['asked_recent'] > 0));
+        $failing = count(array_filter($pages, fn ($p) => $p['failed_recent'] > 0));
+        if ($failing >= max(1, (int) ($c['ai_site_min_pages'] ?? 5)) && $failing * 2 > $asked) {
+            $out[] = self::line(self::SITE, 'red', 'AI is failing on ' . $failing . ' of ' . $asked . ' pages: OpenAI or the key may be down',
+                [['Health', '/chatbot/health']], null, $siteMinutes);
+            return $out;
+        }
+        $failed = array_filter($pages, fn ($p) => $p['failed'] > 0);
+        if (!$failed) return $out;
+
+        // Ang mga palyang row (pinakabago muna): ang mga chat na ili-link at ang failed port ng flow version na tumakbo.
+        $rows = [];
+        foreach (DB::table(ChatbotAiQueue::TABLE)->where('created_at', '>=', $from)->whereNotNull('error')->where('error', '<>', ChatbotAiLoad::ERROR)
+            ->where('model', '<>', FlowEncode::MODEL)->orderByDesc('created_at')->orderByDesc('id')->limit(self::AI_ROWS)
+            ->get(['id', 'page_id', 'psid', 'flow_id', 'node_id', 'error', 'created_at']) as $r) {
+            $rows[(string) $r->page_id][] = $r;
+        }
+        $wired = $this->aiWired(array_merge(...array_values(array_intersect_key($rows, array_filter($failed, fn ($p) => $p['failed'] < $count)))));
+        foreach ($failed as $id => $p) {
+            $id = (string) $id;
+            $list = $rows[$id] ?? [];
+            if ($p['failed'] >= $count) {
+                ksort($p['errors']);
+                arsort($p['errors']);
+                $out[] = self::line(self::name($id), 'red', 'AI not answering: ' . $p['failed'] . ' of ' . $p['asked'] . ' AI replies failed in ' . $minutes . ' min'
+                    . self::why((string) array_key_first($p['errors'])), self::aiLinks($id, $list), null, $minutes);
+                continue;
+            }
+            $missed = array_values(array_filter($list, fn ($r) => !($wired[$r->id] ?? false)));
+            if (!$missed) continue;
+            $customers = count(array_unique(array_map(fn ($r) => (string) $r->psid, $missed)));
+            // Ang pinakamadalas na error ng mga walang sagot; kapag pareho ang bilang, ang pinakabago.
+            $errors = array_count_values(array_map(fn ($r) => (string) $r->error, $missed));
+            arsort($errors);
+            $out[] = self::line(self::name($id), 'orange', 'AI failed with no fallback: ' . $customers . ' ' . ($customers === 1 ? 'customer' : 'customers')
+                . ' got no reply in ' . $minutes . ' min' . self::why((string) array_key_first($errors)), self::aiLinks($id, $missed), null, $minutes);
+        }
+
+        return $out;
+    }
+
+    /** Ang naghihintay pa (hindi pa sinagot o pumalya) nang lampas ai_stuck_seconds: iilan lang, dahil ginagawang failed ng sweep sa deadline. */
+    private function aiStuck(array $c): array
+    {
+        $seconds = max(1, (int) ($c['ai_stuck_seconds'] ?? 120));
+        $out = [];
+        foreach (DB::table(ChatbotAiQueue::TABLE)->whereIn('status', ['pending', 'sending'])->where('created_at', '<=', now()->subSeconds($seconds)->format('Y-m-d H:i:s'))
+            ->groupBy('page_id')->selectRaw('page_id, COUNT(*) AS n, MIN(created_at) AS since')->get() as $r) {
+            $id = (string) $r->page_id;
+            if (BotcakeMock::isTestId($id)) continue;
+            $n = (int) $r->n;
+            $out[] = self::line(self::name($id), 'red', 'AI stuck: ' . $n . ' ' . ($n === 1 ? 'reply' : 'replies') . ' waiting over '
+                . ($seconds % 60 === 0 ? intdiv($seconds, 60) . ' min' : $seconds . ' s'), [self::inbox($id)], (string) $r->since);
+        }
+
+        return $out;
+    }
+
+    /** Ang error sa loob ng panaklong, walang tuldok sa dulo. */
+    private static function why(string $error): string
+    {
+        $error = mb_substr(rtrim(trim($error), '.'), 0, 80);
+
+        return $error !== '' ? ' (' . $error . ')' : '';
+    }
+
+    /** Hanggang AI_CHATS na chat (pinakabago muna) sa Inbox, at ang flow na pinakamadalas sa mga row. */
+    private static function aiLinks(string $pageId, array $rows): array
+    {
+        $links = [];
+        foreach (array_slice(array_values(array_unique(array_map(fn ($r) => (string) $r->psid, $rows))), 0, self::AI_CHATS) as $i => $psid) {
+            $links[] = ['Chat ' . ($i + 1), route('chatbot.inbox', ['page_id' => $pageId, 'psid' => $psid], false)];
+        }
+        $flows = array_count_values(array_map(fn ($r) => (string) $r->flow_id, array_filter($rows, fn ($r) => (int) $r->flow_id > 0)));
+        arsort($flows);
+        if ($flows) $links[] = ['Flow', '/chatbot/flows/' . array_key_first($flows)];
+
+        return $links ?: [self::inbox($pageId)];
+    }
+
+    /**
+     * Naka-wire ba ang failed port ng AI step sa flow version na tumakbo: ang pinakabagong Publish ng flow
+     * (chatbot_flow_versions) na hindi lampas sa oras ng request, dahil ang AI row ay walang version. Walang ganoong version
+     * (na-publish bago nagkaroon ng versions, o lampas na sa huling 50): ang live graph kapag na-publish ito bago ang request.
+     * Hindi mahanap = hindi naka-wire: mas mabuting maingay kaysa matago ang customer na walang sagot.
+     * @param array<int, object> $rows
+     * @return array<int, bool> id ng AI row => naka-wire
+     */
+    private function aiWired(array $rows): array
+    {
+        if (!$rows) return [];
+        $flowIds = array_values(array_unique(array_map(fn ($r) => (int) $r->flow_id, $rows)));
+        $versions = Schema::hasTable('chatbot_flow_versions')
+            ? DB::table('chatbot_flow_versions')->whereIn('flow_id', $flowIds)->orderBy('id')->get(['id', 'flow_id', 'created_at'])->groupBy('flow_id')->all() : [];
+        $ran = [];
+        foreach ($rows as $r) {
+            $ran[$r->id] = null;
+            foreach ($versions[(int) $r->flow_id] ?? [] as $v) {
+                if ((string) $v->created_at <= (string) $r->created_at) $ran[$r->id] = (int) $v->id;
+            }
+        }
+        $graphs = [];
+        $ids = array_values(array_unique(array_filter($ran)));
+        if ($ids) {
+            foreach (DB::table('chatbot_flow_versions')->whereIn('id', $ids)->get(['id', 'graph']) as $g) $graphs[(int) $g->id] = json_decode((string) $g->graph, true);
+        }
+        $live = [];
+        $missing = array_values(array_unique(array_map(fn ($r) => (int) $r->flow_id, array_filter($rows, fn ($r) => $ran[$r->id] === null))));
+        if ($missing && Schema::hasColumn('chatbot_flows', 'published_at')) {
+            foreach (DB::table('chatbot_flows')->whereIn('id', $missing)->get(['id', 'graph', 'published_at']) as $f) $live[(int) $f->id] = $f;
+        }
+        $out = [];
+        foreach ($rows as $r) {
+            $f = $live[(int) $r->flow_id] ?? null;
+            $graph = $ran[$r->id] !== null ? ($graphs[$ran[$r->id]] ?? null)
+                : ($f !== null && $f->published_at !== null && (string) $f->published_at <= (string) $r->created_at ? json_decode((string) $f->graph, true) : null);
+            $out[$r->id] = is_array($graph) && self::hasEdge($graph, (string) $r->node_id, 'failed');
+        }
+
+        return $out;
+    }
+
+    private static function hasEdge(array $graph, string $node, string $port): bool
+    {
+        foreach ((array) ($graph['edges'] ?? []) as $e) {
+            if (is_array($e) && (string) ($e['from'] ?? '') === $node && ($e['port'] ?? null) === $port && (string) ($e['to'] ?? '') !== '') return true;
+        }
+
+        return false;
     }
 
     /**

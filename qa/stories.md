@@ -4478,3 +4478,47 @@ Slice 232: 3 passed, 0 failed, 0 blocked, 0 skipped, 0 not run. Threat model: no
 | S-232.1.1 | happy | Given the app's schedule, when `php artisan schedule:list` loads it, then there is no `botcake:psid-import` line, and `botcake:sync-customers` and `botcake:prune-chats` are still listed | `test_S_232_1_1_the_sheet_import_is_not_scheduled_and_the_api_sync_and_chat_prune_still_are` | 2026-11-05 passed |
 | S-232.1.2 | happy | Given a signed-in staff member on the PSID import page, when they press the import button, then a run is created and the import job is queued on `psid` | `test_S_232_1_2_the_manual_import_button_still_queues_the_job` | 2026-11-05 passed |
 | S-232.1.3 | edge | Given no schedule, when `php artisan botcake:psid-import --clean-sheet` is run by hand, then it succeeds, creates a run and queues the import with the clean-sheet flag | `test_S_232_1_3_the_command_run_by_hand_creates_a_run_and_queues_the_import` | 2026-11-05 passed |
+
+## Slice 231 – AI not answering
+
+As staff watching the chatbot, I want the problems banner to say when a page's AI step gets no answer (repeated failures, stuck requests, a site-wide outage, or a failure with no fallback), so customers left without a reply are noticed within minutes.
+
+Slice 231: 18 passed, 0 failed, 0 blocked, 0 skipped, 0 not run (18 cases, 18 tests; S-231.3.1–.3 are one table test; S-231.5.4 checks the markup, not a browser at 390 × 844). Threat model: no new input; the check reads the AI queue (`chatbot_ai_requests`), the flow versions and the flows. The ack route takes one more page name ("All pages"), behind its existing validation. Config (`services.chatbot.problems.ai_*`) and the repo are trusted. Risk tier: medium. Tests: `tests/Feature/Chatblast/AiProblemsTest.php`.
+
+### S-231.1 Repeated AI failures on a page are red (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-231.1.1 | happy | Given 3 failures on page P within 15 min, when the banner builds, then one red line for P with the count and the most common error, plus Inbox and flow links | `test_S_231_1_1_three_failures_in_15_min_make_one_red_line_with_count_error_and_links` | 2026-11-05 passed |
+| S-231.1.2 | negative | Given 2 failures, then no red line (see S-231.4 for orange) | `test_S_231_1_2_two_failures_make_no_red_line` | 2026-11-05 passed |
+| S-231.1.3 | negative | Given 3 failures spread over 20 min (only 2 inside the window), then no red line | `test_S_231_1_3_three_failures_over_20_min_with_two_in_the_window_make_no_red_line` | 2026-11-05 passed |
+| S-231.1.4 | edge | Given failures on 2 pages, then one line each, never merged | `test_S_231_1_4_failures_on_two_pages_make_one_line_each` | 2026-11-05 passed |
+| S-231.1.5 | edge | Given an empty answer and a "did not answer", then both count; "No AI load" skips do not | `test_S_231_1_5_empty_and_did_not_answer_count_and_no_ai_load_does_not` | 2026-11-05 passed |
+
+### S-231.2 Stuck AI requests are red (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-231.2.1 | happy | Given a request older than 2 min with no answer and no error, then a red "AI stuck" line for its page | `test_S_231_2_1_a_request_waiting_over_2_min_is_red_ai_stuck` | 2026-11-05 passed |
+| S-231.2.2 | negative | Given a request waiting 90 seconds, then nothing | `test_S_231_2_2_a_request_waiting_90_seconds_shows_nothing` | 2026-11-05 passed |
+| S-231.2.3 | edge | Given a stuck request, when it is answered, then the line is gone on the next banner refresh | `test_S_231_2_3_once_answered_the_stuck_line_is_gone_on_the_next_refresh` | 2026-11-05 passed |
+
+### S-231.3 Site-wide failure is one line (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-231.3.1 | happy | Given failures on 6 of 10 pages that asked AI in 10 min, then one site-wide red line and no per-page AI failure lines | `test_S_231_3_site_wide_line_by_pages_failing` (6 of 10) | 2026-11-05 passed |
+| S-231.3.2 | negative | Given failures on 3 of 10 pages, then per-page rules only | `test_S_231_3_site_wide_line_by_pages_failing` (3 of 10) | 2026-11-05 passed |
+| S-231.3.3 | edge | Given failures on 5 of 9 pages, then the site-wide line (more than half and at least 5) | `test_S_231_3_site_wide_line_by_pages_failing` (5 of 9) | 2026-11-05 passed |
+
+### S-231.4 A failure the customer never saw a reply for is orange (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-231.4.1 | happy | Given 1 failure where the AI step's failed port is not wired, then an orange line naming 1 customer with no reply | `test_S_231_4_1_one_failure_with_the_failed_port_not_wired_is_orange` | 2026-11-05 passed |
+| S-231.4.2 | negative | Given 1 failure where failed is wired, then nothing | `test_S_231_4_2_one_failure_with_the_failed_port_wired_shows_nothing` | 2026-11-05 passed |
+| S-231.4.3 | edge | Given the flow was republished since, then the check uses the flow version that ran (by time); with no version found, the port counts as not wired | `test_S_231_4_3_the_check_uses_the_flow_version_that_ran` | 2026-11-05 passed |
+
+### S-231.5 It behaves like the other banner lines (P2)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-231.5.1 | happy | Given an AI line, when it is acknowledged for 1 hour, then it is hidden and comes back after | `test_S_231_5_1_acknowledge_for_an_hour_hides_the_ai_line_and_it_comes_back_after` | 2026-11-05 passed |
+| S-231.5.2 | happy | Given an AI line marked Done, then it stays hidden until a new failure | `test_S_231_5_2_done_hides_the_ai_line_until_a_new_failure` | 2026-11-05 passed |
+| S-231.5.3 | edge | Given a database error inside the AI check, then the rest of the banner still shows | `test_S_231_5_3_a_database_error_in_the_ai_check_leaves_the_rest_of_the_banner` | 2026-11-05 passed |
+| S-231.5.4 | edge | Given the banner HTML at 390 × 844, then the new lines wrap, with no sideways scroll | `test_S_231_5_4_the_ai_lines_wrap_in_the_banner_list` | 2026-11-05 passed |
