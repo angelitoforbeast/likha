@@ -46,6 +46,7 @@ abstract class BotcakePsidTestCase extends TestCase
                 'database/migrations/2026_10_17_100200_add_last_seen_and_stop_reason_for_botcake_sync.php',
                 'database/migrations/2026_10_17_100300_add_ad_and_match_keys_to_botcake_psids.php',
                 'database/migrations/2026_10_17_100400_add_botcake_ad_id_to_macro_output.php',
+                'database/migrations/2026_11_05_200000_add_page_id_to_botcake_psids.php',
             ],
         ]);
 

@@ -89,6 +89,7 @@ abstract class BotcakeApiTestCase extends TestCase
             'database/migrations/2026_10_18_100000_add_read_kind_and_start_batch_to_botcake_psid_import_runs.php',
             'database/migrations/2026_10_18_200000_add_sync_all_columns_to_botcake_psid_import_runs.php',
             'database/migrations/2026_10_19_100000_add_subscribed_dates_to_botcake_psid_import_runs.php',
+            'database/migrations/2026_11_05_200000_add_page_id_to_botcake_psids.php',
         ]]);
 
         $this->clock = new FakeBotcakeClock();
