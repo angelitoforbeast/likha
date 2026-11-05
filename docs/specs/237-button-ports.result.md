@@ -197,7 +197,7 @@ All runs use `"/c/Users/Forbeast/.config/herd/bin/php.bat" vendor/bin/phpunit`. 
 - `php -l` on every changed PHP file: no syntax errors. `node --check public/js/chatbot-buttons.js`: ok.
 - New test files: `ChatbotButtonPortsTest` 9 tests, `ChatbotButtonPortsTapTest` 12, `ChatbotButtonPortsEditorTest` 6, `ChatbotButtonPortsTestTabTest` 2: all pass.
 - `tests/Feature/Chatblast` after T3: `OK, but there were issues! Tests: 2076, Assertions: 56359, PHPUnit Deprecations: 53, Skipped: 2.`
-- Full suite, once, on `2514606d`: `FAILURES! Tests: 4650, Assertions: 78006, Failures: 2, PHPUnit Deprecations: 95, Skipped: 6.` The two red tests are the pre-existing ones the spec names: `TestsFeaturexampleTest::test_the_application_returns_a_successful_response` and `TestsFeatureItemItemTableFitScriptTest::test_every_catalog_column_id_has_a_minimum_width_and_a_place_in_the_drop_order`. No new failures; the flaky BigBroadcastTest and AstraAddressRulesTest S-26.18 passed this run.
+- Full suite, once, on `2514606d`: `FAILURES! Tests: 4650, Assertions: 78006, Failures: 2, PHPUnit Deprecations: 95, Skipped: 6.` The two red tests are the pre-existing ones the spec names: `Tests\Feature\ExampleTest::test_the_application_returns_a_successful_response` and `Tests\Feature\Item\ItemTableFitScriptTest::test_every_catalog_column_id_has_a_minimum_width_and_a_place_in_the_drop_order`. No new failures; the flaky BigBroadcastTest and AstraAddressRulesTest S-26.18 passed this run.
 
 ### Red lines (watched before the code)
 
