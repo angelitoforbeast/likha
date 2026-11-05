@@ -4646,3 +4646,42 @@ Slice 236: 5 passed, 0 failed, 0 blocked, 0 skipped, 0 not run (S-236.1.5 is the
 | S-236.1.5 | happy | Given the spec 230 CPP tables, when CppSortTest runs, then it still passes | `tests/Feature/CPP/CppSortTest.php` (11 tests) | 2026-11-06 passed |
 
 Wiring (no case of its own): `test_S_236_the_popup_headers_sort_by_click_enter_or_space_and_show_the_arrow`: every header is in the Tab order, sorts on click, Enter or Space, and takes its ▲/▼ from `aria-sort`.
+
+## Slice 237 – An exit for each button and quick reply
+
+As staff, I want each postback button and quick reply of a waiting Send message step to be its own exit on the node, so "Order na" can go to one step and "Magtanong" to another without a Condition step.
+
+Slice 237: not run yet. Threat model: tap payloads from gateway events and graphs posted to the flow save API are untrusted; staff flow content once saved and validated, config and the repo are trusted. Risk tier: high. Tests: `tests/Feature/Chatblast/ChatbotButtonPorts*Test.php`.
+
+### S-237.1 Each button and quick reply has a port (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-237.1.1 | happy | Given a waiting step with postback "Order na", postback "Magtanong" and web_url "Site", then its ports are `reply`, one for each postback, `skipped` when a skip time is set, and none for the link | | not run |
+| S-237.1.2 | happy | Given 3 quick replies, then there are 3 ports in order | | not run |
+| S-237.1.3 | edge | Given a wired button, when it is renamed, or the buttons are reordered, then its port and wire stay | | not run |
+| S-237.1.4 | edge | Given a wired button, when it is deleted, then its port and wire are removed | | not run |
+| S-237.1.5 | negative | Given a graph posted with a wire to a port that doesn't exist, then cleanConfig refuses it like other bad wires | | not run |
+| S-237.1.6 | edge | Given a button switched Link → Postback, then it keeps its id, so its port and wire come back; every generated id matches the server rule | | not run |
+
+### S-237.2 A tap follows its port (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-237.2.1 | happy | Given "Order na" wired to A, when the customer taps it, then the run continues at A and the field holds "Order na" | | not run |
+| S-237.2.2 | happy | Given a quick reply wired to A, when the customer taps it, then the run continues at A and the field holds its title | | not run |
+| S-237.2.3 | negative | Given a waiting step with button ports, when the customer types text instead, then the run leaves by `reply` | | not run |
+| S-237.2.4 | edge | Given a button whose port has no wire, when it is tapped, then the run leaves by `reply` | | not run |
+| S-237.2.5 | edge | Given a tap with a payload that matches no button, then the run leaves by `reply` | | not run |
+| S-237.2.6 | edge | Given the wait has ended, when a button is tapped, then it is a new message, as today | | not run |
+| S-237.2.7 | edge | Given the same tap delivered twice, then the run moves once | | not run |
+| S-237.2.8 | negative | Given a Botcake chat whose params include `postback` (or `quick_reply`) matching a button, then the run leaves by `reply` | | not run |
+| S-237.2.9 | edge | Given a graph payload with a leading or trailing space, when the (trimmed) tap arrives, then it still follows its port | | not run |
+| S-237.2.10 | edge | Given a step whose buttons have ids, when it sends, then the gateway body and `chatbot_replies.content` are byte-identical to the same graph without ids | | not run |
+
+### S-237.3 Publish, Test tab and old flows (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-237.3.1 | happy | Given an unwired button port, when the flow is published, then Publish shows a notice and publishes | | not run |
+| S-237.3.2 | happy | Given the Test tab, when a shown button is clicked, then the run follows its port | | not run |
+| S-237.3.3 | edge | Given a flow saved before this change, then it is unchanged and taps go to `reply` | | not run |
+| S-237.3.4 | edge | Given the editor at 390 × 844 with 3 button ports, then there is no sideways scroll | | not run |
+| S-237.3.5 | edge | Given two messages of one waiting step that share a payload, then Publish shows a notice and a tap takes the first exit | | not run |
