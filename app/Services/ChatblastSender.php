@@ -6,7 +6,6 @@ use App\Jobs\SendChatblastMessage;
 use App\Services\Chatbot\BotcakeSendQueue;
 use App\Services\Chatbot\CustomerReach;
 use App\Models\AppSetting;
-use App\Models\BotcakeChat;
 use App\Models\BotcakeMessage;
 use App\Models\ChatblastCampaign;
 use Carbon\Carbon;
@@ -372,9 +371,13 @@ class ChatblastSender
     /** Ang dahilan ng laktaw kapag hindi maabot ang customer sa page (CustomerReach), o null. */
     private function unreachable(BotcakeMessage $m): ?string
     {
-        $pageId = array_search($m->page_name, BotcakeChat::pageMap(), true);
+        return CustomerReach::skipReason($this->pageId($m), (string) $m->psid);
+    }
 
-        return $pageId === false ? null : CustomerReach::skipReason((string) $pageId, (string) $m->psid);
+    /** Ang page ID ng mensahe mula sa page settings (gaya ng config(): hindi mahalaga ang laki ng titik ng pangalan mula sa order). */
+    private function pageId(BotcakeMessage $m): string
+    {
+        return trim((string) $this->settings->get($m->page_name, 'botcake', 'page_id'));
     }
 
     /** Tapos na ang pool sa mensahe: ang gap ng customer, saka ang lock na kinuha ng pool. */
@@ -531,8 +534,7 @@ class ChatblastSender
         // Ang sagot ng Facebook sa flow o sa field step na hindi maabot ang customer (#551, #10 ng window): may marka (CustomerReach).
         if ($status === 'failed' && $steps) {
             $said = implode("\n", array_map(fn ($s) => is_array($s) && in_array($s['step'] ?? '', ['flow', 'write'], true) ? (string) ($s['response'] ?? '') : '', $steps));
-            $pageId = array_search($m->page_name, BotcakeChat::pageMap(), true);
-            if ($pageId !== false) CustomerReach::note((string) $pageId, (string) $m->psid, $said);
+            CustomerReach::note($this->pageId($m), (string) $m->psid, $said);
         }
     }
 

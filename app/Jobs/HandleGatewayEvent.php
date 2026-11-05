@@ -143,16 +143,18 @@ class HandleGatewayEvent implements ShouldQueue
             self::count('unknown_page');
             return;
         }
-        // Sumulat ang customer (mensahe, postback o quick reply; hindi ang pagbukas ng ad): naaabot na ulit, alinman ang daan
-        // ng page o kahit Off ang bot, dahil ang Chatblast ay tumatakbo pa rin sa mga iyon.
-        if ($e['type'] !== 'referral') CustomerReach::clear((string) $e['page_id'], (string) $e['psid']);
+        // Sumulat ang customer (mensahe, postback o quick reply; hindi ang pagbukas ng ad) sa page na hindi tatakbo rito: naaabot
+        // na ulit, dahil ang Chatblast ay tumatakbo pa rin sa mga iyon. Ang chat na iimbak ay inaalis sa afterStore (pagkatapos ng ulit).
+        $reached = fn () => $e['type'] !== 'referral' ? CustomerReach::clear((string) $e['page_id'], (string) $e['psid']) : null;
         // Ang page na nasa Botcake: doon nanggagaling ang takbo; binibilang lang ito (para sa paghahambing balang araw).
         if (ChatbotProvider::name($pageName) !== ChatbotProvider::GATEWAY) {
             self::count('botcake_page');
+            $reached();
             return;
         }
         if ($guard->botOff($pageName)) {
             self::count('bot_off');
+            $reached();
             return;
         }
 

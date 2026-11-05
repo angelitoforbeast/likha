@@ -139,6 +139,7 @@ class CustomerReachInboundTest extends ChatblastTestCase
             'message' => [['text' => 'Hi'], false],
             'postback' => [['type' => 'postback', 'text' => null, 'postback' => ['title' => 'Order', 'payload' => 'ORDER']], false],
             'quick reply' => [['text' => 'Yes', 'quick_reply_payload' => 'YES'], false],
+            'the page own send (echo) is not the customer' => [['is_echo' => true, 'app_id' => '123456', 'text' => 'Thanks po'], true],
             'ad open (referral) is not a message' => [['type' => 'referral', 'mid' => null, 'text' => null, 'referral' => ['ad_id' => '6045246247433', 'source' => 'ADS']], true],
         ];
     }
@@ -151,6 +152,15 @@ class CustomerReachInboundTest extends ChatblastTestCase
         $this->gatewayEvent($event);
 
         $this->assertSame($stillMarked, $this->marked('1002', '8001'));
+    }
+
+    public function test_S_234_3_3_a_gateway_message_to_a_page_on_the_botcake_route_clears_the_mark(): void
+    {
+        $this->mark('1001', '7001');
+
+        $this->gatewayEvent(['page_id' => '1001', 'psid' => '7001', 'text' => 'Hi']);
+
+        $this->assertFalse($this->marked('1001', '7001'));
     }
 
     public function test_S_234_3_3_a_gateway_message_clears_the_mark_on_a_page_whose_bot_is_off(): void

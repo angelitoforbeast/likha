@@ -92,6 +92,20 @@ class CustomerReachChatblastTest extends ChatblastTestCase
         $this->assertSame('skipped', $m->fresh()->status);
     }
 
+    public function test_S_234_2_2_a_page_name_from_the_order_that_differs_only_in_case_still_marks_and_skips(): void
+    {
+        BotcakeMessage::query()->update(['page_name' => 'PAGE UNO']);
+        $this->botcake(['success' => false, 'message' => "(#551) This person isn't available right now."]);
+        app(ChatblastSender::class)->queue([$this->row('WB-001')->id], 1);
+        $this->assertNotNull(CustomerReach::skipReason('1001', '7001'), 'may marka kahit iba ang laki ng titik');
+
+        BotcakeMessage::whereKey($this->row('WB-001')->id)->update(['status' => 'ready']);
+        $this->travel(10)->minutes(); // lampas sa gap ng customer pagkatapos ng unang padala
+        app(ChatblastSender::class)->queue([$this->row('WB-001')->id], 1);
+
+        $this->assertSame('skipped', $this->row('WB-001')->status);
+    }
+
     public function test_a_mark_older_than_30_days_no_longer_skips(): void
     {
         $this->botcake();
