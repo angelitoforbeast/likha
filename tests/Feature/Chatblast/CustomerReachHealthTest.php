@@ -63,6 +63,15 @@ class CustomerReachHealthTest extends ChatblastTestCase
         ], $out['unreachable_skips']);
     }
 
+    public function test_S_234_4_1_health_shows_the_skipped_sends_per_page_today(): void
+    {
+        $this->actingAs($this->user('CEO', 'ceo@example.test'));
+
+        $res = $this->get('/chatbot/health')->assertOk();
+
+        $res->assertSeeInOrder(["Skipped today: customer can't be reached", 'Page Uno', '2', '1', '3', 'Page Dos', '1', '0', '1']);
+    }
+
     public function test_S_234_4_2_these_skips_are_not_counted_as_failed_sends(): void
     {
         $out = app(BotHealth::class)->output([]);

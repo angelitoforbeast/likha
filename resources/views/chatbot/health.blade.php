@@ -194,7 +194,7 @@
                 <div class="mt-1 text-xs text-slate-400">{{ $lights['queue']['rule'] }}</div>
             </div>
         </div>
-        <p class="text-xs text-slate-500">Failed replies count every send that is not "sent" (failed and skipped). "Not answered" messages ({{ $t['not_answered'] }} today) are left out of the reply times. AI call records are kept for 2 days only, so the AI graph is short.</p>
+        <p class="text-xs text-slate-500">Failed replies count every send that is not "sent" (failed and skipped), except the sends skipped because the customer can't be reached (their own table below). "Not answered" messages ({{ $t['not_answered'] }} today) are left out of the reply times. AI call records are kept for 2 days only, so the AI graph is short.</p>
     </section>
 
     {{-- Ang totoong padala: kailan talaga nakarating sa customer (Forbeast: send_status; Botcake: ang oras ng padala nito). --}}
@@ -293,6 +293,22 @@
             @endforeach
             </tbody>
         </table>
+    </section>
+
+    {{-- Ang mga padalang nilaktawan ngayon dahil sinabi ng Meta na hindi maabot ang customer (#551, #10 ng window). --}}
+    <section aria-labelledby="h-unreachable" class="space-y-2">
+        <h2 id="h-unreachable" class="text-lg font-semibold">Skipped today: customer can't be reached</h2>
+        <table class="cb-table cb-card max-w-2xl">
+            <thead><tr><th>Page</th><th class="text-right">Bot sends</th><th class="text-right">Chatblast</th><th class="text-right">Total</th></tr></thead>
+            <tbody>
+            @forelse($unreachable_skips as $u)
+                <tr><td>{{ $u['page'] }}</td><td class="text-right">{{ $u['bot'] }}</td><td class="text-right">{{ $u['chatblast'] }}</td><td class="text-right">{{ $u['bot'] + $u['chatblast'] }}</td></tr>
+            @empty
+                <tr><td colspan="4" class="text-slate-500">No sends skipped today.</td></tr>
+            @endforelse
+            </tbody>
+        </table>
+        <p class="text-xs text-slate-500">Sequence steps, follow-ups and Chatblast to a customer Meta said can't be reached (#551, or #10 outside the messaging window) are skipped until the customer writes to the page again, or for 30 days. Answers to the customer are never skipped. These are not counted as failed sends.</p>
     </section>
 
     {{-- Mga graph --}}
