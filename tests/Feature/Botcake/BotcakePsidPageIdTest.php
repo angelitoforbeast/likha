@@ -9,7 +9,11 @@ use App\Services\BotcakeCustomerMatcher;
 use App\Services\BotcakeCustomerSync;
 use App\Services\BotcakePsidMatcher;
 use App\Services\PageSettings;
+use App\Http\Controllers\ChatblastController;
+use App\Http\Controllers\PsidCoverageController;
 use App\Jobs\HandleGatewayEvent;
+use App\Services\Chatbot\AdGroups;
+use App\Services\PageSettingsGrid;
 use App\Models\ChatbotReply;
 use App\Services\BotcakeChatGuard;
 use App\Services\Chatbot\ChatbotTags;
@@ -40,6 +44,41 @@ class BotcakePsidPageIdTest extends ChatblastTestCase
             'database/migrations/2026_11_09_100000_add_via_to_chatbot_replies.php',
             'database/migrations/2026_11_13_100000_widen_via_on_chatbot_replies.php',
         ]]);
+    }
+
+    /**
+     * Ang mga customer (PSID) ng page ayon sa bawat page reader: Chatblast candidates, ad groups (seen), ang customers
+     * page, at ang bilang sa page settings grid (bilang ng customer, hindi PSID).
+     * @return array<int, string>|int
+     */
+    private function pageCustomers(string $reader, string $page): array|int
+    {
+        if ($reader === 'chatblast') {
+            return (fn () => $this->pageCustomers($page))->call(app(ChatblastController::class))->pluck('psid')->sort()->values()->all();
+        }
+        if ($reader === 'adGroups') {
+            $seen = (fn () => $this->seen($page))->call(app(AdGroups::class));
+            $psids = array_merge([], ...array_column($seen, 'psids'));
+            sort($psids);
+            return array_values(array_unique($psids));
+        }
+        if ($reader === 'customersPage') {
+            $customers = $this->actingAs(\App\Models\User::first() ?? $this->user())->get('/chatblast/page-settings/customers?page=' . rawurlencode($page))->assertOk()->viewData('customers');
+            return collect($customers->items())->pluck('psid')->sort()->values()->all();
+        }
+        // settingsGrid
+        $key = app(PageSettings::class)->pageKey($page);
+        return (fn () => $this->info([$key]))->call(app(PageSettingsGrid::class))[$key]['customers'];
+    }
+
+    /** Ang dahilan ng PSID coverage para sa order na walang PSID. */
+    private function coverageReason(string $page, int $orderId): ?string
+    {
+        $c = app(PsidCoverageController::class);
+        $key = app(PageSettings::class)->pageKey($page);
+        $day = now('Asia/Manila')->toDateString();
+
+        return $c->ordersQuery($key, $c->apiPageName($key), $day, $day, 'all', 'all')->get()->firstWhere('id', $orderId)?->reason;
     }
 
     /** Ang pangalang nakikita ng reader ng chat para sa customer na walang pangalan sa chat (null = wala). */
@@ -173,17 +212,49 @@ class BotcakePsidPageIdTest extends ChatblastTestCase
             'Inbox panel'             => ['inboxPanelName'],
             'LiveFeed name'           => ['liveFeedName'],
             'ChatbotTags ad'          => ['tagsAd'],
+            'Chatblast candidates'    => ['pageList', 'chatblast'],
+            'ad groups (seen)'        => ['pageList', 'adGroups'],
+            'customers page'          => ['pageList', 'customersPage'],
+            'page settings grid'      => ['pageList', 'settingsGrid'],
+            'ad groups latestAd'      => ['latestAd'],
+            'PSID coverage'           => ['coverage'],
         ];
     }
 
     /** Page "Page Uno" (id 1001) ay may mga row; pinalitan ng "Page Bago" sa page settings. */
     #[DataProvider('renameReaders')]
-    public function test_S_233_3_1_a_renamed_page_still_finds_its_old_rows(string $reader): void
+    public function test_S_233_3_1_a_renamed_page_still_finds_its_old_rows(string $reader, ?string $list = null): void
     {
         $this->pageId('Page Uno', '1001');
         $this->rename('Page Uno', 'Page Bago');
 
-        $this->{$reader . 'AfterRename'}();
+        $this->{$reader . 'AfterRename'}(...($list === null ? [] : [$list]));
+    }
+
+    private function oldApiRow(): void
+    {
+        $this->chatTables();
+        $this->psid('Page Uno', '1001', 'psid-a', 'Ana Cruz', ['phone_numbers' => ['09171234567'], 'ad_id' => '120250000000000001', 'last_interactive_at' => now()]);
+    }
+
+    private function pageListAfterRename(string $list): void
+    {
+        $this->oldApiRow();
+        $this->assertSame($list === 'settingsGrid' ? 1 : ['psid-a'], $this->pageCustomers($list, 'Page Bago'));
+    }
+
+    private function latestAdAfterRename(): void
+    {
+        $this->oldApiRow();
+        $this->assertSame('120250000000000001', app(AdGroups::class)->latestAd('1001', 'psid-a', 'Page Bago'));
+    }
+
+    private function coverageAfterRename(): void
+    {
+        $this->oldApiRow();
+        $order = $this->order('Page Bago', 'Ana Cruz');
+
+        $this->assertSame('not_synced', $this->coverageReason('Page Bago', $order->id), 'iisang customer na tugma: maikakabit');
     }
 
     private function customerMatcherAfterRename(): void
@@ -275,6 +346,7 @@ class BotcakePsidPageIdTest extends ChatblastTestCase
             'sheet records' => ['psidMatcher'],
             'the sync marks only its own rows inactive' => ['inactive'],
             'chat readers' => ['chatReaders'],
+            'page lists and coverage' => ['pageLists'],
         ];
     }
 
@@ -295,8 +367,11 @@ class BotcakePsidPageIdTest extends ChatblastTestCase
         $this->psid('Shop', '2002', 'y1', 'Ana Cruz');
         // Ang chat record ng parehong page ay hindi kandidato (API rows lang).
         $this->psid('Shop', '2002', 'y2', 'Ana Cruz', ['source' => 'chat_verify', 'status' => 'verified']);
+        // Ang ad ng PSID na nasa order na: sa row lang ng parehong page.
+        $this->psid('Shop', '1001', 'shared', 'Carla Uy', ['ad_id' => '120250000000000003']);
         $shop = $this->order('Shop', 'Ana Cruz');
         $moved = $this->order('Moved', 'Ana Cruz');
+        $hasPsid = $this->order('Shop', 'Carla Uy', null, 'shared');
 
         $m = app(BotcakeCustomerMatcher::class);
         $m->matchPage('Shop');
@@ -304,6 +379,7 @@ class BotcakePsidPageIdTest extends ChatblastTestCase
 
         $this->assertSame('y1', $shop->fresh()->botcake_psid);
         $this->assertSame('x1', $moved->fresh()->botcake_psid);
+        $this->assertNull($hasPsid->fresh()->botcake_ad_id, 'ang ad ng ibang page na kapangalan ay hindi isinusulat');
     }
 
     private function psidMatcherSameName(): void
@@ -316,6 +392,24 @@ class BotcakePsidPageIdTest extends ChatblastTestCase
 
         $this->assertSame('matched', $status);
         $this->assertSame('y-new', $order->fresh()->botcake_psid);
+    }
+
+    private function pageListsSameName(): void
+    {
+        $this->chatTables();
+        $recent = ['last_interactive_at' => now()];
+        $this->psid('Shop', '1001', 'x1', 'Ana Cruz', $recent + ['ad_id' => '120250000000000001']);
+        $this->psid('Shop', '2002', 'y1', 'Ana Cruz', $recent + ['ad_id' => '120250000000000002']);
+        $this->psid('Shop', '2002', 'y2', 'Ben Reyes', ['source' => 'chat_verify', 'status' => 'verified']);
+        $order = $this->order('Shop', 'Ana Cruz');
+
+        foreach (['chatblast', 'adGroups', 'customersPage'] as $list) {
+            $this->assertSame(['y1'], $this->pageCustomers($list, 'Shop'), $list);
+            $this->assertSame(['x1'], $this->pageCustomers($list, 'Moved'), $list);
+        }
+        $this->assertSame([1, 1], [$this->pageCustomers('settingsGrid', 'Shop'), $this->pageCustomers('settingsGrid', 'Moved')]);
+        $this->assertSame('not_synced', $this->coverageReason('Shop', $order->id), 'iisa ang tugma sa page na ito, hindi ambiguous');
+        $this->assertNull(app(AdGroups::class)->latestAd('2002', 'x1', 'Shop'));
     }
 
     private function chatReadersSameName(): void

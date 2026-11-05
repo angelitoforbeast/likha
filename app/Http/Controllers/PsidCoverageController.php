@@ -152,12 +152,16 @@ class PsidCoverageController extends Controller
         } else {
             // Bilang ng available na customer na tugma sa pangalan, sa phone, at sa dalawa; bawat isa ay index lookup,
             // at para lang sa walang PSID (ang may PSID ay 0, hindi na hinahanap).
-            $count = fn (string $where) => '(CASE WHEN ' . self::EMPTY_PSID . " THEN (SELECT COUNT(DISTINCT b.psid) FROM botcake_psids b WHERE b.source = 'api' AND b.page = ? AND b.status = 'available' AND $where) ELSE 0 END)";
+            // Ang customer ng page: ayon sa page id, o ayon sa pangalan kapag wala pang page id ang row.
+            $pageId = \App\Models\BotcakePsid::hasPageId() ? \App\Models\BotcakePsid::pageIdOf($apiPage) : null;
+            $onPage = $pageId === null ? 'b.page = ?' : '(b.page_id = ? OR (b.page_id IS NULL AND b.page = ?))';
+            $args = $pageId === null ? [$apiPage] : [$pageId, $apiPage];
+            $count = fn (string $where) => '(CASE WHEN ' . self::EMPTY_PSID . " THEN (SELECT COUNT(DISTINCT b.psid) FROM botcake_psids b WHERE b.source = 'api' AND $onPage AND b.status = 'available' AND $where) ELSE 0 END)";
             $name  = 'b.name_key = ' . $this->nameExpr();
             $phone = 'b.phone_key = ' . $this->phoneExpr();
-            $q->selectRaw($count($name) . ' AS n_name', [$apiPage])
-              ->selectRaw($count($phone) . ' AS n_phone', [$apiPage])
-              ->selectRaw($count("$name AND $phone") . ' AS n_both', [$apiPage]);
+            $q->selectRaw($count($name) . ' AS n_name', $args)
+              ->selectRaw($count($phone) . ' AS n_phone', $args)
+              ->selectRaw($count("$name AND $phone") . ' AS n_both', $args);
 
             // Gaya ng BotcakeCustomerMatcher::decide: ang "maikakabit" ay hindi pa lang dinadaanan ng matching.
             $withReason = DB::query()->fromSub($q, 'o')

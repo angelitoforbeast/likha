@@ -321,7 +321,8 @@ class ChatblastController extends Controller
     private function pageCustomers(string $page)
     {
         $trim = DB::getDriverName() === 'pgsql' ? 'BTRIM' : 'TRIM';
-        return BotcakePsid::where('source', 'api')->whereRaw("LOWER($trim(page)) = ?", [$this->settings->pageKey($page)]);
+        return BotcakePsid::where('source', 'api')
+            ->ofPage(BotcakePsid::pageIdOf($page), fn ($q) => $q->whereRaw("LOWER($trim(page)) = ?", [$this->settings->pageKey($page)]));
     }
 
     private function queueAll($query): int

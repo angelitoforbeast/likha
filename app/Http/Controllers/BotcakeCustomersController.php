@@ -52,7 +52,8 @@ class BotcakeCustomersController extends Controller
         $apiPage = $this->settings->pageQuery($page)->where('provider', 'botcake')->where('active', true)
             ->orderBy('id')->value('page_name') ?? $page;
 
-        $q = BotcakePsid::where('source', 'api')->where('page', $apiPage);
+        // Ang page id muna: nakikita pa rin ang customers bago palitan ang pangalan ng page.
+        $q = BotcakePsid::where('source', 'api')->ofPage(BotcakePsid::pageIdOf($apiPage), fn ($w) => $w->where('page', $apiPage));
         if ($status !== 'all') $q->where('status', $status);
         if ($ad === 'with') $q->whereNotNull('ad_id');
         if ($ad === 'without') $q->whereNull('ad_id');

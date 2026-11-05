@@ -285,10 +285,20 @@ class PageSettingsGrid
         $trim = DB::getDriverName() === 'pgsql' ? 'BTRIM' : 'TRIM';
         $out  = array_fill_keys($pageKeys, ['customers' => 0, 'last_sync' => null]);
 
+        // Ang row na may page id ay sa page ng id na iyon (kahit pinalitan ang pangalan); ang wala pang page id, o ang id
+        // na wala na sa page settings, ay sa pangalan, maliban kung may sariling id ang page na iyon (ibang page ang row).
+        $idPage = [];
+        foreach (\App\Models\BotcakeChat::pageMap() as $id => $name) $idPage[(string) $id] = $this->settings->pageKey((string) $name);
+        $hasId = array_flip($idPage);
+        $byId = BotcakePsid::hasPageId();
         $counts = BotcakePsid::where('source', 'api')->where('status', 'available')
-            ->selectRaw("LOWER($trim(page)) as pk, COUNT(*) as n")->groupByRaw("LOWER($trim(page))")->get();
+            ->selectRaw("LOWER($trim(page)) as pk, " . ($byId ? 'page_id' : 'NULL') . ' as pid, COUNT(*) as n')
+            ->groupByRaw("LOWER($trim(page))" . ($byId ? ', page_id' : ''))->get();
         foreach ($counts as $c) {
+            $pid = trim((string) $c->pid);
             $pk = $this->settings->pageKey((string) $c->pk);
+            if ($pid !== '' && isset($idPage[$pid])) $pk = $idPage[$pid];
+            elseif ($pid !== '' && isset($hasId[$pk])) continue;
             if (isset($out[$pk])) $out[$pk]['customers'] += (int) $c->n;
         }
 

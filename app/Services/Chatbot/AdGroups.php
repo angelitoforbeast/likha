@@ -430,9 +430,8 @@ class AdGroups
             $ad = trim((string) ($c->payload['ad_id'] ?? ''));
             if (preg_match('/^\d{1,64}\z/', $ad)) return $ad;
         }
-        $key = $this->settings->pageKey($page);
-        $ad = BotcakePsid::where('psid', (string) $psid)->whereNotNull('ad_id')->where('ad_id', '<>', '')->get(['page', 'ad_id'])
-            ->first(fn ($r) => $this->settings->pageKey((string) $r->page) === $key)?->ad_id;
+        $ad = BotcakePsid::where('psid', (string) $psid)->whereNotNull('ad_id')->where('ad_id', '<>', '')->get(BotcakePsid::withPageId(['page', 'ad_id']))
+            ->first(fn ($r) => $r->onPage((string) $pageId, $page))?->ad_id;
 
         return $ad !== null && preg_match('/^\d{1,64}\z/', (string) $ad) ? (string) $ad : null;
     }
@@ -1021,7 +1020,7 @@ class AdGroups
                 ->groupBy('payload->ad_id', 'psid')->toBase()->get()->each(fn ($r) => $add($r->ad, $r->psid, $r->last_at, $r->first_at));
         }
         $trim = DB::getDriverName() === 'pgsql' ? 'BTRIM' : 'TRIM';
-        BotcakePsid::whereRaw("LOWER($trim(page)) = ?", [$this->settings->pageKey($page)])->whereNotNull('ad_id')->where('ad_id', '<>', '')
+        BotcakePsid::ofPage($pageId, fn ($q) => $q->whereRaw("LOWER($trim(page)) = ?", [$this->settings->pageKey($page)]))->whereNotNull('ad_id')->where('ad_id', '<>', '')
             ->where(fn ($w) => $w->where('last_interactive_at', '>=', $since)->orWhere('first_seen_at', '>=', $since))
             ->toBase()->get(['psid', 'ad_id', 'last_interactive_at', 'first_seen_at'])
             ->each(fn ($r) => $add($r->ad_id, $r->psid, max((string) $r->last_interactive_at, (string) $r->first_seen_at) ?: null, $r->first_seen_at ?: null));
