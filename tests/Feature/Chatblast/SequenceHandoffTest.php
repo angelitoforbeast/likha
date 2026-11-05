@@ -271,7 +271,7 @@ class SequenceHandoffTest extends SequenceHandoffTestCase
         $watch = \Mockery::spy(ForbeastWatch::class);
         $this->app->instance(ForbeastWatch::class, $watch);
         $this->work(GatewayAfterSend::class);
-        $watch->shouldHaveReceived('afterSend')->once()->with('Page Dos', \Mockery::on(fn ($o) => $o['status'] === 'sent'), ['accepted' => true], 'forbeast');
+        $watch->shouldHaveReceived('afterSend')->once()->with('Page Dos', \Mockery::on(fn ($o) => $o['status'] === 'sent'), ['accepted' => true], 'forbeast', 'UPDATE');
     }
 
     public function test_S_215_e_3_a_gateway_that_is_not_set_up_or_fails_is_logged_failed_without_holding_a_worker(): void

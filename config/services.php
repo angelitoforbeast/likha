@@ -305,6 +305,11 @@ return [
             'hold_minutes' => (int) env('GATEWAY_SWITCH_HOLD_MINUTES', 2),
             'burst_pages' => (int) env('GATEWAY_SWITCH_BURST_PAGES', 5),
             'burst_seconds' => (int) env('GATEWAY_SWITCH_BURST_SECONDS', 60),
+            // Ang hindi kilalang error ng Meta sa 10 minuto: ilang padala man lang, at ilang % na palya bago lipat (mga sagot)
+            // o orange na linya (UPDATE). 0% = patay ang bahaging iyon.
+            'unknown_min_sends' => (int) env('GATEWAY_SWITCH_UNKNOWN_MIN_SENDS', 10),
+            'unknown_response_pct' => (int) env('GATEWAY_SWITCH_UNKNOWN_RESPONSE_PCT', 30),
+            'unknown_update_pct' => (int) env('GATEWAY_SWITCH_UNKNOWN_UPDATE_PCT', 70),
         ],
         // Ang echo (ChatEchoes): ilang minuto bago "hindi nasagot" ang mensahe ng customer, ilang customer na hindi nasagot
         // sa huling oras bago pula ang page, at ilang segundo ang layo ng dalawang app na "dobleng sagot".

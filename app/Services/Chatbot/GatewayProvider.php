@@ -136,7 +136,7 @@ class GatewayProvider implements MessagingProvider
         $o = self::outcome($r, $q['key'], $q['route']);
         // Ang bantay ng gateway (kusang lipat sa kabilang gateway o sa Botcake): hindi kailanman humaharang sa padala.
         try {
-            app(ForbeastWatch::class)->afterSend($pageName, $o, $r['body'], $q['gateway']);
+            app(ForbeastWatch::class)->afterSend($pageName, $o, $r['body'], $q['gateway'], $messagingType);
         } catch (Throwable $e) {
             report($e);
         }
