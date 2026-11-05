@@ -78,6 +78,7 @@ class ChatbotRunner
                     (string) $c->message, (string) $c->name, $c->received_at?->timezone('Asia/Manila')->format('Y-m-d H:i') ?? '');
                 $run->adGroup = $group;
                 $run->adGroupUnresolved = $unresolved;
+                $run->tap = self::tap($c);
                 // Ang lookup ng ad sa Meta na pumalya, nilaktawan o walang nakita: nasa talaan ng takbo (page values ang ginamit).
                 if ($lookupNote !== null) $run->event('ad_lookup', null, ['note' => $lookupNote]);
                 try {
@@ -93,6 +94,19 @@ class ChatbotRunner
         } finally {
             $lock->release();
         }
+    }
+
+    /**
+     * Ang payload ng tap ng chat, o null. Galing sa gateway lang: ang payload ng chat ng Botcake ay ang ibang param ng webhook
+     * nito, kaya ang param na nagkataong "postback" ang pangalan ay hindi tap (doon, ang customer ay nagsusulat lang).
+     */
+    private static function tap(BotcakeChat $c): ?string
+    {
+        $p = (array) $c->payload;
+        if (($p['source'] ?? null) !== 'gateway') return null;
+        foreach (['postback', 'quick_reply'] as $k) if (is_string($p[$k] ?? null) && $p[$k] !== '') return $p[$k];
+
+        return null;
     }
 
     /**

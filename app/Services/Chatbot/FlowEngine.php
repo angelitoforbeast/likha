@@ -154,6 +154,17 @@ class FlowEngine
             $run->fields->set($node['config']['save_to'], $run->input);
             $run->event('field', $nodeId, ['op' => 'set', 'field' => $node['config']['save_to'], 'value' => $run->input]);
         }
+        // Ang tap na tugma sa payload ng isang button o quick reply ng step (ang una sa ayos ng mga port) at may wire ang exit
+        // nito: doon. Ang iba (isinulat, hindi kilalang payload, walang wire) ay sa reply.
+        if ($run->tap !== null) {
+            foreach (FlowGraph::tapPorts((array) ($node['config']['items'] ?? [])) as $port => $t) {
+                if (FlowGraph::tapPayload((string) ($t['payload'] ?? '')) !== $run->tap) continue;
+                if (!isset($edges[$nodeId . ':' . $port])) break;
+                $run->path[] = ['node' => $nodeId, 'type' => 'send', 'port' => $port, 'note' => 'Tapped "' . (string) ($t['title'] ?? '') . '"'];
+
+                return $edges[$nodeId . ':' . $port];
+            }
+        }
         $run->path[] = ['node' => $nodeId, 'type' => 'send', 'port' => 'reply', 'note' => 'Reply received'];
 
         return $edges[$nodeId . ':reply'] ?? null;

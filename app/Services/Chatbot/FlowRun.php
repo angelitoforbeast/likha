@@ -25,6 +25,8 @@ class FlowRun
     public ?string $runId = null;
     /** Walang sagot sa takdang oras (hal. "2 h", ang hinintay talaga): nagpapatuloy ang hinihintay sa port na skipped. */
     public ?string $skippedAfter = null;
+    /** Ang payload ng tap ng customer (postback o quick reply, galing sa gateway lang): ang exit ng button sa naghihintay na step. */
+    public ?string $tap = null;
     /** Pinatakbo ng sequence (hal. "sequence X step 2"): mula sa Start, at ang __wait ng customer ay hindi ginagalaw. */
     public ?string $startedBy = null;
     /** Ilang hakbang na (ang takbong itinuloy pagkatapos ng AI ay nagpapatuloy sa bilang, para sa MAX_STEPS). */
