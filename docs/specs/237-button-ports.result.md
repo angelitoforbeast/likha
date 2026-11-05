@@ -2,7 +2,7 @@
 
 ## Status
 
-Plan written and revised after the spec review (skeptic-reviewer, spec-review mode: needs revision, items 1–3 fixed in the plan, minors 4–7 and 10 taken in, 8 noted). Waiting for "go". No code yet. Branch `feat/237-button-ports` from `b2b355ea`.
+Done, not pushed, not deployed. No migration. Branch `feat/237-button-ports` from `b2b355ea`. T0–T4b built after the reviewer's "go"; one fix loop (`0676497e`); no blocker or major open; accepted minors in `TODO.md`. Merge danger and live waiting customers: see Summary.
 
 ## Plan
 
@@ -161,24 +161,127 @@ If the commits are reverted after tap wires exist:
 
 ## Summary
 
-To be written when the work is done.
+What shipped, per task (one commit each, test and code together):
+
+| Task | Commit | What |
+|---|---|---|
+| T0 | `7b38668f` | Slice 237 in `qa/stories.md`: the spec's 16 cases plus the 5 accepted from the spec review. |
+| T1 | `80bcbe41` | `FlowGraph`: `TAP_ID`, `tapPorts()`, `tap_<id>` ports in `ports()` (between `reply` and `skipped`, only while waiting), `cleanTaps` keeps a well-formed `id` on every button and quick reply, a repeated id in a step is refused (422), `tapPayload()`, and two Publish notices. |
+| T2 | `d42d4efb` | `FlowRun::$tap`; `ChatbotRunner::tap()` reads it from a gateway chat only (`payload.source === 'gateway'`, postback, else quick reply); `FlowEngine::resumePoint` follows the first matching tap port when it is wired, else `reply`. `save_to` still gets the title. |
+| T3 | `77a494e3` | `chatbot-buttons.js`: `idRule`, `newId` (always 8 of `[a-z0-9]`), `withIds`, `tapPorts`. The editor: `ports(n)` and `portLabel` draw a port per button with its title, new buttons and quick replies get an id, and `withIds` runs on load (before the first undo snapshot) and in `replaceGraph` (Restore, Discard). |
+| fix loop 1 | `0676497e` | `TAP_ID` gets `/D` (a trailing newline was accepted by PHP's `$`); id length bounds and a link/postback repeated id tested; the tap half of S-237.3.5 pinned; the same-payload notice reworded (see Rulings). |
+| T4a | `a1226768` | `ChatbotTabsController::testSend` reads `tap` (trimmed, up to 1000) and sets `$run->tap`. |
+| T4b | `2514606d` | The Test tab's button click sends `say(t.title, t.payload)`; a typed message sends no `tap`. |
+
+Not changed: `HandleGatewayEvent`, `ChatbotInbound`, the sender (`FlowEngine::taps()` builds each sent button fresh, so ids never reach the gateway or `chatbot_replies`, pinned by S-237.2.10), skip, the Inbox, the AI history. No migration. `npm run build` not needed: `chatbot-buttons.js` is a plain file under `public/js` loaded with `asset()` and a content hash.
+
+### Merge danger
+
+A two-way door until staff draw tap wires; after that, reverting has the costs below.
+
+- **Blast radius after merge and before any flow is resaved:** none. Published graphs have no ids, so every port, tap and send behaves as today (S-237.3.3, both halves).
+- **After staff save and publish tap wires:** only taps from gateway chats on waiting steps with wired button exits change route. Typed replies, Botcake pages, unwired buttons and unknown payloads still go to `reply`.
+- **Revert after tap wires exist:**
+  - The old `clean()` refuses draft saves, Publish and History → Restore of a graph with tap wires ("Node n3 has no port tap_…"). Fix: open the step and press Done (it drops wires to ports that are gone), or delete those wires.
+  - Live flows keep running (the old engine ignores unknown edges), but taps go to `reply`, which may be unwired if a Condition step was replaced by tap wires; those customers get no answer until the flow is rewired.
+  - Emptying `GATEWAY_BUTTONS` stops new button sends at once, but not taps on buttons already sent.
+
+### Live waiting customers at deploy time
+
+Nothing changes for them at deploy. Their waiting step is in a published graph without ids, so a tap goes to `reply`, as today. If staff later publish the same step with ids and tap wires while a customer is still waiting, that customer resumes on the new graph (as for any republish). Their tap on the message sent earlier carries the same graph payload, so it follows the new wire. A step that was deleted or had Wait turned off sends the next message to Start, as today.
 
 ## Checks
 
-To be written when the work is done.
+All runs use `"/c/Users/Forbeast/.config/herd/bin/php.bat" vendor/bin/phpunit`. `php artisan test` prints a `file_get_contents` warning on every test in this worktree, old and new alike; plain phpunit runs them clean, so the warning comes from the artisan printer, not the code.
+
+- `php -l` on every changed PHP file: no syntax errors. `node --check public/js/chatbot-buttons.js`: ok.
+- New test files: `ChatbotButtonPortsTest` 9 tests, `ChatbotButtonPortsTapTest` 12, `ChatbotButtonPortsEditorTest` 6, `ChatbotButtonPortsTestTabTest` 2: all pass.
+- `tests/Feature/Chatblast` after T3: `OK, but there were issues! Tests: 2076, Assertions: 56359, PHPUnit Deprecations: 53, Skipped: 2.`
+- Full suite, once, on `2514606d`: `FAILURES! Tests: 4650, Assertions: 78006, Failures: 2, PHPUnit Deprecations: 95, Skipped: 6.` The two red tests are the pre-existing ones the spec names: `TestsFeaturexampleTest::test_the_application_returns_a_successful_response` and `TestsFeatureItemItemTableFitScriptTest::test_every_catalog_column_id_has_a_minimum_width_and_a_place_in_the_drop_order`. No new failures; the flaky BigBroadcastTest and AstraAddressRulesTest S-26.18 passed this run.
+
+### Red lines (watched before the code)
+
+| Slice | Test | First failure line |
+|---|---|---|
+| T1 | `test_S_237_1_1_…` | `Failed asserting that two arrays are identical.` (no `tap_` ports) |
+| T1 | `test_S_237_1_2_…` | `Failed asserting that two arrays are identical.` |
+| T1 | `test_S_237_1_3_…`, `1_4`, `3_1` | `Expected response status code [200] but received 422.` (the wire to `tap_ordr0001` refused) |
+| T1 | `test_S_237_1_6_…` | `Undefined array key "id"` (the id was dropped) |
+| T1 | `test_S_237_3_5_…` (notice) | `Node n2 has no port "tap_oo000001".` |
+| T2 | `test_S_237_2_1_…`, `2_7`, `2_9` | `Failed asserting that two arrays are identical. -    1 => 'n4', +    1 => 'n5',` (the tap went to `reply`) |
+| T2 | `test_S_237_2_2_…` | `-    1 => 'n7', +    1 => 'n5',` |
+| T3 | `test_S_237_1_1_editor_…`, `1_2`, `1_3`, `1_4` | `tapPorts: no function: tapPorts` |
+| T3 | `test_S_237_1_6_editor_…` | `idRule: no function: idRule` |
+| T4a | `test_S_237_3_2_a_test_tab_tap_…` | `Failed asserting that an array contains Array &0 [` (the path had `reply`) |
+| T4b | `test_S_237_3_2_page_…` | `Failed asserting that '<!DOCTYPE html>…` contains the click with the payload |
+| loop 1 | `test_S_237_1_5_…` | `expected a refusal: an id with a trailing newline` |
+| loop 1 | `test_S_237_1_6_editor_…` | `Failed asserting that two strings are identical.` (PHP `/D` vs the JS rule) |
+| loop 1 | `test_S_237_3_5_…` (notice) | the old "on different messages" wording |
+
+**Passes on today's code** (recorded as the reviewer asked, instead of a red run): `test_S_237_1_5_a_wire_to_a_port_that_does_not_exist_is_refused` (first version; the newline row was red in loop 1), `test_S_237_2_3_typing_instead_of_tapping_leaves_by_reply`, `test_S_237_2_4_tapping_a_button_whose_port_has_no_wire_leaves_by_reply`, `test_S_237_2_5_a_tap_with_an_unknown_payload_leaves_by_reply`, `test_S_237_2_6_a_tap_after_the_wait_ended_is_a_new_message`, `test_S_237_2_8_a_botcake_chat_whose_params_look_like_a_tap_leaves_by_reply`, `test_S_237_2_10_ids_never_reach_the_gateway_or_the_reply_record`, `test_S_237_3_3_a_flow_saved_before_this_change_cleans_unchanged_with_no_new_ports`, `test_S_237_3_3_a_flow_saved_before_this_change_sends_taps_to_reply`, `test_S_237_3_4_the_port_rows_and_the_button_rows_fit_a_phone`, `test_S_237_3_5_a_payload_shared_by_two_messages_takes_the_first_exit_or_reply_when_only_the_second_is_wired`. These are the "nothing changes" cases: today every tap goes to `reply`. They still guard the new code: the T2 reviewer confirmed that removing the `source` guard makes 2.8 fail, and 2.10 fails if an id is ever copied into the sent button.
+
+### Case table
+
+| Case | Test | Result |
+|---|---|---|
+| S-237.1.1 | `test_S_237_1_1_postbacks_get_a_port_each_between_reply_and_skipped_and_the_link_gets_none`, `test_S_237_1_1_editor_the_node_draws_a_port_per_postback_labelled_with_its_title_and_none_for_the_link` | pass |
+| S-237.1.2 | `test_S_237_1_2_three_quick_replies_get_three_ports_in_order`, `test_S_237_1_2_editor_three_quick_replies_draw_three_ports_in_order` | pass |
+| S-237.1.3 | `test_S_237_1_3_renaming_or_reordering_buttons_keeps_their_wires_after_save_and_reload`, `test_S_237_1_3_editor_renaming_or_removing_the_first_of_three_keeps_the_other_ports` | pass |
+| S-237.1.4 | `test_S_237_1_4_a_deleted_button_has_no_port_and_a_wire_left_to_it_is_refused`, `test_S_237_1_4_editor_a_removed_button_has_no_port_and_done_drops_its_wire` | pass |
+| S-237.1.5 | `test_S_237_1_5_a_wire_to_a_port_that_does_not_exist_is_refused` | pass |
+| S-237.1.6 | `test_S_237_1_6_a_link_keeps_its_id_so_switching_to_postback_brings_the_port_back_and_ids_repeat_nowhere_in_a_step`, `test_S_237_1_6_editor_ids_follow_the_server_rule_are_made_on_add_load_restore_and_discard_and_survive_a_type_switch` | pass |
+| S-237.2.1 | `test_S_237_2_1_tapping_a_wired_button_continues_at_its_step_and_saves_the_title` | pass |
+| S-237.2.2 | `test_S_237_2_2_tapping_a_wired_quick_reply_continues_at_its_step_and_saves_the_title` | pass |
+| S-237.2.3 | `test_S_237_2_3_typing_instead_of_tapping_leaves_by_reply` | pass (passes on today's code) |
+| S-237.2.4 | `test_S_237_2_4_tapping_a_button_whose_port_has_no_wire_leaves_by_reply` | pass (passes on today's code) |
+| S-237.2.5 | `test_S_237_2_5_a_tap_with_an_unknown_payload_leaves_by_reply` | pass (passes on today's code) |
+| S-237.2.6 | `test_S_237_2_6_a_tap_after_the_wait_ended_is_a_new_message` | pass (passes on today's code) |
+| S-237.2.7 | `test_S_237_2_7_the_same_tap_delivered_twice_moves_the_run_once` | pass |
+| S-237.2.8 | `test_S_237_2_8_a_botcake_chat_whose_params_look_like_a_tap_leaves_by_reply` | pass (passes on today's code) |
+| S-237.2.9 | `test_S_237_2_9_a_graph_payload_with_spaces_still_matches_the_trimmed_tap` | pass |
+| S-237.2.10 | `test_S_237_2_10_ids_never_reach_the_gateway_or_the_reply_record` | pass (passes on today's code) |
+| S-237.3.1 | `test_S_237_3_1_an_unwired_button_exit_publishes_with_a_notice` | pass |
+| S-237.3.2 | `test_S_237_3_2_a_test_tab_tap_follows_its_port_and_typed_text_leaves_by_reply`, `test_S_237_3_2_page_the_shown_button_sends_its_title_and_payload` | pass |
+| S-237.3.3 | `test_S_237_3_3_a_flow_saved_before_this_change_cleans_unchanged_with_no_new_ports`, `test_S_237_3_3_a_flow_saved_before_this_change_sends_taps_to_reply` | pass (passes on today's code) |
+| S-237.3.4 | `test_S_237_3_4_the_port_rows_and_the_button_rows_fit_a_phone` | pass, **markup only** (accepted by the reviewer; no browser check, see Rulings) |
+| S-237.3.5 | `test_S_237_3_5_two_messages_of_one_step_with_the_same_payload_get_a_publish_notice`, `test_S_237_3_5_a_payload_shared_by_two_messages_takes_the_first_exit_or_reply_when_only_the_second_is_wired` | pass |
+
+### Reviews
+
+- Spec review (skeptic-reviewer, spec-review mode): needs revision; items 1–3 fixed in the plan before "go".
+- T1 (adversarial): no blocker or major; 4 minors. Fixed in loop 1: the trailing-newline id (untrusted save path), the missing boundary and link-repeat tests, the notice wording. The fourth (a docblock that became true with T3) needed no change.
+- T2 (adversarial): 1 major (the tap half of S-237.3.5 untested), fixed in loop 1 and confirmed closed on re-check; minors to `TODO.md`.
+- T3 + T4a + T4b (standard): go, 4 minors, all to `TODO.md`.
+- One fix loop in all; no finding open at blocker or major.
 
 ## Rulings
 
-None yet.
+- Ruling: a postback's tap matches on payload only, first in port order, and an unwired first match goes to `reply` rather than to a later wired button with the same payload. Decision 4 matches by payload, and the Publish notice tells staff. Cost if wrong: two messages in one step sharing a payload send every tap to the first one's exit.
+- Ruling: the tap is read only from gateway chats (`payload.source === 'gateway'`). Botcake webhook params land in the same `payload`, and decision 8 says a Botcake customer can only type. Cost if wrong: none for customers; a Botcake setup sending `source=gateway` could forge a tap (trusted path, in `TODO.md`).
+- Ruling: the graph payload is compared after `trim` and a cut to 1000, the way the gateway stores the tap. Otherwise a trailing space typed by staff would send every tap to `reply`. Cost if wrong: two payloads differing only in outer spaces match the same tap.
+- Ruling: the server never makes ids; the editor does, on add and on load. An old or API-posted graph then cleans byte for byte the same (decision 7), and the ids the editor shows are the ones it saves. Cost if wrong: a graph posted without the editor has no button ports until it is opened and saved.
+- Ruling: web_url buttons keep an id (no port), so a Link → Postback switch brings the port and its wire back. Cost if wrong: none; a link's id is never a port.
+- Ruling: `TAP_ID` is `/^[a-z0-9]{6,16}$/D`. Without `/D`, PHP's `$` accepts a trailing newline that the JS twin refuses, and the editor would regenerate that id and get its own wire refused on every autosave. Cost if wrong: none.
+- Ruling: the same-payload notice says "with the same payload (…)", not "on different messages" as the plan wrote. Publish's existing same-message check (spec 229) compares raw payloads, so `OO` and `OO ` on one message reach the notice too. Cost if wrong: wording only.
+- Ruling: the existing S-229.7.2 test's assertion on the click handler changed from `say(t.title)` to `say(t.title, t.payload)`. It pinned the line this spec changes, and its behaviour (the click continues the flow) still holds.
+- Ruling: commit `a1226768` (T4a) carries the T4b page test, which only passes from `2514606d`. Every other commit is green on its own. Cost if wrong: a bisect landing exactly on `a1226768` sees one red test; `/ship` can tidy it.
+- Ruling: no browser check. Running the app locally needs the app's environment file and database, which this session may not touch, so S-237.3.4 is proved on the markup only (the reviewer accepted that). Cost if wrong: a long port title or many ports could still overflow at 390 px; the port label is `truncate` inside the 220 px card, and the canvas pans.
+- Ruling: the kit's `backend-developer` / `frontend-developer` agents are not installed in this session, so the main session built each task red first (as in spec 229), and `skeptic-reviewer` reviewed per tier: T1 and T2 adversarial, T3 + T4 standard (sonnet).
+- Conflict between CLAUDE.local.md and the spec: none.
 
 ## Story changes
 
-None yet.
+- Added (from the spec review, accepted by the reviewer): S-237.1.6, S-237.2.8, S-237.2.9, S-237.2.10, S-237.3.5. The reasons are in the Plan ("New cases from the spec review").
+- S-237.1.3: the editor half is "remove the first of three: the other two keep their ports", because the editor has no reorder control. Reordering is proved on the server with a reordered graph posted to the save API.
+- No other case was changed.
 
 ## Open questions
 
-None yet.
+None open. The reviewer answered the plan's questions: the five added cases accepted, "passes on today's code" recorded instead of a red run, S-237.3.4 on the markup.
 
 ## Proposed tasks
 
-None yet.
+1. **Strip `source` (and other system keys) from Botcake webhook params** in `BotcakeChatController`, so a Botcake param can never look like a gateway chat (`TODO.md`).
+2. **Show the button title instead of `tap_<id>` in the Test tab path** (`TODO.md`).
+3. **Make spec 229's same-message duplicate check compare trimmed payloads**, like the tap match does (`TODO.md`).
+4. **A browser check of the editor at 390 × 844 with 3+ button ports**, once a session can run the app.
