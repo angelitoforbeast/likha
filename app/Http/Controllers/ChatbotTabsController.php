@@ -220,6 +220,8 @@ class ChatbotTabsController extends Controller
         $run = new FlowRun($flow->id, $graph, $page, $pageId, $chatbotPage->botfields($page, $group), $fields, null,
             $message, 'Test Customer', now('Asia/Manila')->format('Y-m-d H:i'), true);
         $run->adGroup = $group; // ang AI ng napiling group din
+        // Ang click sa button ng Test: ang payload nito, gaya ng tap ng gateway (trim, hanggang 1000).
+        $run->tap = ($tap = $this->str($request, 'tap', 1000)) !== '' ? $tap : null;
         $engine->run($run, $this->testOutbox($request));
         TestHistory::record($fields, $message, $run);
 
