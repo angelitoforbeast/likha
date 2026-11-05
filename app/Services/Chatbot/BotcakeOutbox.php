@@ -163,6 +163,8 @@ class BotcakeOutbox implements Outbox
         ChatbotTags::storeRows($reply, $tags);
         // Ang #2022 ng page (PageRestriction). Ang "sent" ng gateway ay tinanggap pa lang, kaya ang send_status ang bibilang nito.
         if ($kind === 'send' && ($status === 'failed' || !in_array($via, Gateways::ALL, true))) app(PageRestriction::class)->note($pageId, $status, $error);
+        // Ang customer na hindi maabot (#551, #10 ng window): wala nang padalang hindi sagot hanggang sumulat siya (CustomerReach).
+        if ($kind === 'send' && $status === 'failed') CustomerReach::note($pageId, $psid, $error, $raw);
 
         return ['status' => $status, 'error' => $error];
     }

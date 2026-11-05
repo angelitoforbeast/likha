@@ -168,6 +168,9 @@ return [
     // lang: false = tumatakbo ang mga flow pero walang padala sa Botcake at walang sheet row (itinatala bilang skipped).
     'chatbot' => [
         'replies_enabled' => (bool) env('CHATBOT_REPLIES_ENABLED', true),
+        // Ang customer na sinabi ng Meta na hindi maabot (#551, #10 ng window): walang padalang hindi sagot hanggang sumulat
+        // siya (CustomerReach). false = walang bagong marka at walang laktaw, pang-rollback nang walang deploy.
+        'stop_unreachable' => (bool) env('CHATBOT_STOP_UNREACHABLE', true),
         // AI step: true = hindi naghihintay ang worker (chatbot:ai-pool ang nagpapadala at nagtutuloy); false = naghihintay
         // ang takbo sa sagot (ang dati), pang-rollback nang walang deploy.
         'ai_async' => (bool) env('CHATBOT_AI_ASYNC', true),

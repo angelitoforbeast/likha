@@ -90,13 +90,13 @@ class CustomerFields
 
     /**
      * "Clear all fields": lahat ng customer field at ang paghihintay (__wait); naiiwan ang __last_chat, ang __last_message_at, ang pause ng tao,
-     * at ang alaala ng AI (ang __ai_since: hindi bumabalik ang nakalimutan na).
+     * ang alaala ng AI (ang __ai_since: hindi bumabalik ang nakalimutan na) at ang marka ng hindi maabot (sinabi ng Meta, hindi ng flow).
      */
     public function clearAll(): void
     {
         foreach (array_keys($this->values) as $key) {
             // Ang ad group ng bawat sequence (AdGroups::SEQ_PIN) ay naiiwan din: hindi lumilipat ang sequence sa gitna.
-            if (!in_array($key, [self::LAST_CHAT, self::LAST_MESSAGE_AT, self::BOT_PAUSED, self::TEST_HISTORY, self::AI_SINCE], true)
+            if (!in_array($key, [self::LAST_CHAT, self::LAST_MESSAGE_AT, self::BOT_PAUSED, self::TEST_HISTORY, self::AI_SINCE, CustomerReach::KEY], true)
                 && !str_starts_with((string) $key, AdGroups::SEQ_PIN)) $this->clear((string) $key);
         }
     }
