@@ -189,7 +189,8 @@ class FlowGraph
         $str = fn ($v, int $max) => mb_substr(is_scalar($v) ? (string) $v : '', 0, $max);
         $step = 'Send message step ' . ($id !== '' ? $id . ' ' : '');
         $title = function ($v) use ($str, $step) {
-            $t = is_scalar($v) ? (string) $v : '';
+            // mb_scrub gaya ng mb_substr ng ibang field: ang sirang UTF-8 ay hindi makaka-json_encode ng draft.
+            $t = is_scalar($v) ? mb_scrub((string) $v, 'UTF-8') : '';
             if (mb_strlen($t) > self::MAX_TITLE) throw new InvalidArgumentException($step . 'has a button or quick reply title over ' . self::MAX_TITLE . ' characters.');
 
             return $t;
@@ -291,7 +292,10 @@ class FlowGraph
         foreach (array_values($items) as $k => $i) {
             $taps = array_merge((array) ($i['buttons'] ?? []), (array) ($i['quick_replies'] ?? []));
             if (!$taps) continue;
-            if (!empty($i['buttons']) && trim((string) ($i['value'] ?? '')) === '') return 'has buttons but no text.';
+            // Ang item na walang text (o link ng larawan) ay hindi ipinapadala, kaya hindi rin makikita ang mga tap nito.
+            if (($i['type'] ?? 'text') === 'image' ? !FlowEngine::isUrl(trim((string) ($i['value'] ?? ''))) && !str_contains((string) ($i['value'] ?? ''), '{{') : trim((string) ($i['value'] ?? '')) === '') {
+                return ($i['type'] ?? 'text') === 'image' ? 'has quick replies but no image link.' : 'has buttons or quick replies but no text.';
+            }
             if (!empty($i['quick_replies']) && $k !== $last) return 'has quick replies on a message that is not the last: Messenger shows quick replies only on the last message.';
             $titles = [];
             $payloads = [];

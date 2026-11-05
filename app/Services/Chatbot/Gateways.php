@@ -142,10 +142,6 @@ class Gateways
         return ucwords(str_replace(['_', '-'], ' ', $route));
     }
 
-    /**
-     * Ang address ng page (chatbot.gateway_app): ang key kapag naka-configure, kung hindi ay forbeast. Ang hindi kilalang
-     * key ay isang warning kada page at value kada araw.
-     */
     /** Tumatanggap ba ng button at quick reply ang address na ito (services.gateway.buttons)? Walang laman = wala. */
     public static function buttonsOn(?string $route): bool
     {
@@ -164,6 +160,10 @@ class Gateways
         return $gw === self::FORBEAST ? self::route($page) : $gw;
     }
 
+    /**
+     * Ang address ng page (chatbot.gateway_app): ang key kapag naka-configure, kung hindi ay forbeast. Ang hindi kilalang
+     * key ay isang warning kada page at value kada araw.
+     */
     public static function route(string $page): string
     {
         $key = trim((string) app(PageSettings::class)->get($page, ChatbotFields::PROVIDER, self::ROUTE_KEY));

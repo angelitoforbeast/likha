@@ -110,6 +110,18 @@ class ChatbotButtonsGraphTest extends ChatblastTestCase
         $this->assertSame(['type', 'value', 'buttons'], array_keys($items[0]));
     }
 
+    public function test_S_229_1_6_b_a_title_with_invalid_utf8_posted_as_a_form_is_saved_cleaned_and_the_draft_survives(): void
+    {
+        $flow = ChatbotFlow::create(['name' => 'Main', 'graph' => FlowGraph::blank()]);
+        $this->actingAs($this->me ??= $this->user());
+        $graph = $this->graph([['type' => 'text', 'value' => 'Hi', 'buttons' => [['title' => "Oo\xFF", 'type' => 'postback', 'payload' => "OK\xFE"]],
+            ]]);
+        $this->put("/chatbot/flows/{$flow->id}/graph", ['graph' => $graph, 'version' => ChatbotFlow::find($flow->id)->draft_version], ['Accept' => 'application/json'])->assertOk();
+
+        $b = ChatbotFlow::find($flow->id)->draft()['nodes'][1]['config']['items'][0]['buttons'][0];
+        $this->assertSame(['Oo?', 'OK?'], [$b['title'], $b['payload']]);
+    }
+
     public function test_S_229_1_7_filipino_and_emoji_titles_are_unchanged_after_save_and_reload(): void
     {
         $buttons = [$this->postback('Oo po 🙏'), $this->postback('Hindi, salamat'), $this->postback('Señor 👍🏽')];
@@ -247,6 +259,9 @@ class ChatbotButtonsGraphTest extends ChatblastTestCase
     public function test_S_229_6_2_buttons_with_empty_text_block_publish_naming_the_step(): void
     {
         $this->blocked([['type' => 'text', 'value' => '  ', 'buttons' => [['title' => 'Yes', 'type' => 'postback', 'payload' => 'YES']]]], 'no text');
+        // Ang walang laman ay hindi ipinapadala, kaya ang quick reply nito ay hindi rin makikita.
+        $this->blocked([['type' => 'text', 'value' => '', 'quick_replies' => [['title' => 'Yes', 'payload' => 'YES']]]], 'no text');
+        $this->blocked([['type' => 'image', 'value' => 'not a link', 'quick_replies' => [['title' => 'Yes', 'payload' => 'YES']]]], 'no image link');
     }
 
     public function test_S_229_6_3_a_postback_or_quick_reply_with_an_empty_payload_blocks_publish(): void
