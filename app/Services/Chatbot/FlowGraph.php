@@ -185,7 +185,7 @@ class FlowGraph
             'upload_macro' => array_combine(self::ENCODE_FIELDS, array_map(fn ($k) => $text($c[$k] ?? ''), self::ENCODE_FIELDS)) + [
                 'mode' => ($c['mode'] ?? '') === 'update' ? 'update' : 'insert',
                 'if_not_found' => ($c['if_not_found'] ?? '') === 'skip' ? 'skip' : 'insert',
-            ],
+            ] + (array_key_exists('ad_id', $c) ? ['ad_id' => $text($c['ad_id'])] : []), // walang key = {{ad_id}} (ang lumang step)
             // Encode order: si Astra kapag hindi PROCEED (naka-on kapag walang key). Walang hintay: ang "wait" ng lumang config ay hindi na itinatabi.
             'encode_macro' => [
                 'astra' => !array_key_exists('astra', $c) || !empty($c['astra']),

@@ -28,7 +28,7 @@ class ChatbotTags
     public const BACKFILL_HOURS = 48;
 
     /** Ang mga variable ng takbo (FlowRun::vars): hindi botfield, hindi customer field. */
-    private const RUN_VARS = ['last input', 'full name', 'first name', 'psid', 'page id', 'page name', 'current date', 'last interaction', 'replies via'];
+    private const RUN_VARS = ['last input', 'full name', 'first name', 'psid', 'page id', 'page name', 'current date', 'last interaction', 'replies via', 'ad id'];
 
     /** @var array<int, int> kada app instance (ang worker ay iisa; bawat test ay bago): 0 = handa, iba = kailan susuriin ulit */
     private static array $ready = [];

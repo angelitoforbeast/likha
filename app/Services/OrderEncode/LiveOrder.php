@@ -4,6 +4,7 @@ namespace App\Services\OrderEncode;
 
 use App\Models\MacroOutput;
 use App\Models\OrderEncode;
+use App\Services\BotcakeCustomerMatcher;
 use App\Services\OrderIdentity;
 use App\Services\OrderPhone;
 use Carbon\Carbon;
@@ -36,7 +37,9 @@ class LiveOrder
         if ($o->macro_output_id && ($made = MacroOutput::find($o->macro_output_id))) return $made;
 
         $v = $this->values($o);
-        $row = MacroOutput::create(array_filter($v, fn ($k) => $k[0] !== '_', ARRAY_FILTER_USE_KEY) + [
+        // Ang ad ng customer (ang {{ad_id}} ng takbo), gaya ng Upload to macro; walang ad = walang isinusulat.
+        $adId = $o->psid ? Upload::adId(app(BotcakeCustomerMatcher::class)->adOf((string) $v['_page'], (string) $o->psid, (string) ($o->input['page_id'] ?? ''))) : null;
+        $row = MacroOutput::create(array_filter($v, fn ($k) => $k[0] !== '_', ARRAY_FILTER_USE_KEY) + ($adId !== null ? ['botcake_ad_id' => $adId] : []) + [
             'TIMESTAMP' => $v['_timestamp'],
             'ts_date' => self::day($v['_timestamp']),
             'PAGE' => $v['_page'],
@@ -214,8 +217,9 @@ class LiveOrder
     /**
      * Upload to macro (Insert): ang hilaw na row ng order, walang encode. Ang FULL NAME ay ang FB name at ang PHONE NUMBER ay ang
      * phone ng flow (hal. ang sagot ng GPT; 9XXXXXXXXX kapag valid); walang STATUS at walang address hanggang sa Encode order.
+     * $adId: ang "Ad ID" ng step (Upload::adId), o null = walang ad id.
      */
-    public function insertRaw(OrderEncode $o, Input $in): MacroOutput
+    public function insertRaw(OrderEncode $o, Input $in, ?string $adId = null): MacroOutput
     {
         $timestamp = self::timestamp($in->get('date'));
         $shop = $in->get('shop');
@@ -233,7 +237,7 @@ class LiveOrder
             'extracted_details' => $in->get('cxd'), 'CXD' => $in->get('cxd'),
             'STATUS' => null,
             'botcake_psid' => $o->psid ? (string) $o->psid : null,
-        ]);
+        ] + ($adId !== null ? ['botcake_ad_id' => $adId] : []));
         $o->update(['macro_output_id' => $row->id]);
         $this->toForbeast($o, $row, ForbeastOrders::UPLOADED);
         DB::afterCommit(fn () => $this->afterImport($timestamp));

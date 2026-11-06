@@ -4,6 +4,7 @@ namespace App\Services\OrderEncode;
 
 use App\Models\MacroOutput;
 use App\Models\OrderEncode;
+use App\Services\BotcakeCustomerMatcher;
 use App\Services\Chatbot\FlowRun;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -17,6 +18,7 @@ use Illuminate\Support\Facades\DB;
 class Upload
 {
     public const SKIPPED = 'No open row of the customer: nothing uploaded';
+    public const AD_NOT_SAVED = 'Ad ID not saved: not an ad id (digits only, up to 64)';
 
     public function __construct(private LiveOrder $live, private Conversation $conversation)
     {
@@ -24,10 +26,11 @@ class Upload
 
     /**
      * @param array<int, string> $row ang mga cell A..I ng step
+     * @param ?string $adId ang ad id ng order (adId()), o null
      * @return array{result: string, row: ?int, note: string} result: inserted | updated | not_accepted | skipped | already
      * @throws \Illuminate\Contracts\Cache\LockTimeoutException kapag may ibang upload pa ng customer (Update)
      */
-    public function run(FlowRun $run, string $nodeId, array $row, string $mode, string $ifNotFound): array
+    public function run(FlowRun $run, string $nodeId, array $row, string $mode, string $ifNotFound, ?string $adId = null): array
     {
         if ($done = self::ofRun($run, $nodeId)) return ['result' => 'already', 'row' => (int) $done->macro_output_id, 'note' => 'Already uploaded in this run: row ' . $done->macro_output_id];
 
@@ -37,29 +40,39 @@ class Upload
             'input' => ['row' => array_values($row), 'node' => $nodeId, 'page_id' => $run->pageId, 'upload' => $mode],
         ]);
         $in = Input::fromRow($row);
-        if ($mode !== 'update') return $this->insert($o, $in);
+        if ($mode !== 'update') return $this->insert($o, $in, $adId);
 
         // Ang double tap ng Update: isa-isa kada customer (ang lock ng live na encode), kaya ang ikalawa ay nakikita ang row ng una.
-        return Cache::lock(Runner::customerKey($o), Runner::CUSTOMER_LOCK_SECONDS)->block((int) config('order_encode.upload_lock_wait', 5), function () use ($o, $in, $ifNotFound) {
+        return Cache::lock(Runner::customerKey($o), Runner::CUSTOMER_LOCK_SECONDS)->block((int) config('order_encode.upload_lock_wait', 5), function () use ($o, $in, $ifNotFound, $adId) {
             $found = $this->live->find($o, $in);
             if (isset($found['final'])) return $this->notAccepted($o, $found['final']);
-            if (!isset($found['open'])) return $ifNotFound === 'skip' ? ['result' => 'skipped', 'row' => null, 'note' => self::SKIPPED] : $this->insert($o, $in);
+            if (!isset($found['open'])) return $ifNotFound === 'skip' ? ['result' => 'skipped', 'row' => null, 'note' => self::SKIPPED] : $this->insert($o, $in, $adId);
 
             $id = (int) $found['open']->id;
 
-            return RowLock::hold($id, (int) config('order_encode.upload_row_lock_wait', 20), fn () => DB::transaction(function () use ($o, $in, $id) {
+            return RowLock::hold($id, (int) config('order_encode.upload_row_lock_wait', 20), fn () => DB::transaction(function () use ($o, $in, $id, $adId) {
                 $row = MacroOutput::find($id);
-                if (!$row || trim((string) $row->STATUS) !== '' || trim((string) $row->waybill) !== '') return $row ? $this->notAccepted($o, $row) : $this->insert($o, $in);
+                if (!$row || trim((string) $row->STATUS) !== '' || trim((string) $row->waybill) !== '') return $row ? $this->notAccepted($o, $row) : $this->insert($o, $in, $adId);
                 $o->macro_output_id = $id;
                 $o->input = array_merge((array) $o->input, ['linked' => true]);
                 $in = $this->save($o, $in);
                 if (!$this->live->appendRaw($row, $in)) return $this->notAccepted($o, $row);
+                // Ang ad id ay pinupunan lang kapag wala pa ang row nito (sinusuri sa mismong UPDATE); hindi kailanman pinapalitan.
+                if ($adId !== null) MacroOutput::whereKey($id)->whereRaw(BotcakeCustomerMatcher::EMPTY_AD)->update(['botcake_ad_id' => $adId]);
                 // Ang Update ay bagong version ng parehong order sa Forbeast (ang row ay may usapan na ng order na ito).
                 app(ForbeastOrders::class)->queue($o, $row, ForbeastOrders::UPLOADED);
 
                 return ['result' => 'updated', 'row' => $id, 'note' => 'Row ' . $id . ' updated with this order\'s messages'];
             }));
         });
+    }
+
+    /** Ang laman ng "Ad ID" ng step kapag ad id talaga (mga digit lang, 1 hanggang 64), o null (blangko o hindi ad id). */
+    public static function adId(string $value): ?string
+    {
+        $value = trim($value);
+
+        return preg_match('/^\d{1,64}$/', $value) ? $value : null;
     }
 
     /** Ang upload ng takbong ito (ng step na $nodeId, o ang huli ng takbo kapag null), o null. */
@@ -72,12 +85,12 @@ class Upload
             ->orderByDesc('id')->first();
     }
 
-    private function insert(OrderEncode $o, Input $in): array
+    private function insert(OrderEncode $o, Input $in, ?string $adId): array
     {
-        $made = DB::transaction(function () use ($o, $in) {
+        $made = DB::transaction(function () use ($o, $in, $adId) {
             $in = $this->save($o, $in);
 
-            return $this->live->insertRaw($o, $in);
+            return $this->live->insertRaw($o, $in, $adId);
         });
 
         return ['result' => 'inserted', 'row' => (int) $made->id, 'note' => 'Row ' . $made->id . ' inserted'];

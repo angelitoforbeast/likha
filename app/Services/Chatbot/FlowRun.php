@@ -4,6 +4,7 @@ namespace App\Services\Chatbot;
 
 use App\Models\BotcakeChat;
 use App\Models\ChatbotReply;
+use App\Services\BotcakeCustomerMatcher;
 use App\Services\OrderEncode\OrderVars;
 
 /**
@@ -40,6 +41,9 @@ class FlowRun
     /** Ang mga order_* variable (OrderVars), isang basa kada takbo; null = basahin ulit (pagkatapos ng Upload o Encode order). */
     public ?array $orderVars = null;
     private ?bool $usesOrder = null;
+    /** Ang ad_id ng customer (BotcakeCustomerMatcher::adOf), isang basa kada takbo; binabasa lang kapag binabanggit. */
+    private ?string $adId = null;
+    private ?bool $usesAd = null;
     /** Itinuloy pagkatapos ng padala (botcake:send-pool): ['node', 'status', 'error', 'messages'], ginagamit nang isang beses. */
     public ?array $sendResult = null;
     /** Huminto ang takbo para hintayin ang resulta ng padala sa Botcake. */
@@ -154,7 +158,8 @@ class FlowRun
             'last_input' => $this->input, 'full_name' => $this->fullName, 'first_name' => $first, 'psid' => $this->psid(),
             'page_id' => $this->pageId, 'page_name' => $this->pageName, 'current_date' => now('Asia/Manila')->toDateString(),
             'last_interaction' => $this->receivedAt, 'replies_via' => ChatbotProvider::repliesVia($this->pageName, $this->via()),
-        ] + ($this->usesOrderVars() ? ($this->orderVars ??= OrderVars::read($this->pageName, (string) $this->fields->psid)) : []);
+        ] + ($this->usesOrderVars() ? ($this->orderVars ??= OrderVars::read($this->pageName, (string) $this->fields->psid)) : [])
+            + ($this->usesAdId() ? ['ad_id' => $this->adId ??= app(BotcakeCustomerMatcher::class)->adOf($this->pageName, (string) $this->fields->psid, $this->pageId)] : []);
         $base = ChatbotVars::merge($this->botfields, $this->fields->fields(), $run);
         $bot = array_map(fn ($v) => ChatbotVars::interpolate((string) $v, $base), $this->botfields);
 
@@ -165,6 +170,16 @@ class FlowRun
     private function usesOrderVars(): bool
     {
         return $this->usesOrder ??= OrderVars::named((string) json_encode([$this->graph, $this->botfields], JSON_UNESCAPED_UNICODE));
+    }
+
+    /**
+     * Ang ad_id ay binabasa lang kapag binabanggit ng flow o ng botfields, o kapag may Upload to macro na walang "Ad ID" na
+     * key (ang lumang step: {{ad_id}} ang gamit).
+     */
+    private function usesAdId(): bool
+    {
+        return $this->usesAd ??= preg_match('/\bad[\s_]+id\b/i', (string) json_encode([$this->graph, $this->botfields], JSON_UNESCAPED_UNICODE)) === 1
+            || collect((array) ($this->graph['nodes'] ?? []))->contains(fn ($n) => ($n['type'] ?? '') === 'upload_macro' && !array_key_exists('ad_id', (array) ($n['config'] ?? [])));
     }
 
     public function text(string $template): string

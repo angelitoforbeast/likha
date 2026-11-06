@@ -121,31 +121,77 @@ class BotcakeCustomerMatcher
         // saka UPDATE ayon sa id, hanggang 1000 bawat isa: hindi nila-lock ng UPDATE ang lahat ng bagong order ng page.
         // Ang PSID ay hindi ginagalaw, at ang may ad id na ay hindi pinapalitan (sinusuri sa mismong UPDATE).
         if ($hasAdCol) {
-            // Ang row ng page: ayon sa page id, o ayon sa pangalan kapag wala pang page id ang row (gaya ng ofPage).
-            $onPage = $pageId === null ? "LOWER($trim(bp.page)) = ?" : "(bp.page_id = ? OR (bp.page_id IS NULL AND LOWER($trim(bp.page)) = ?))";
-            $pageArgs = $pageId === null ? [$key] : [$pageId, $key];
-            $adSql = "SELECT bp.ad_id FROM botcake_psids bp WHERE bp.source IN ('api', 'chat_verify') AND $onPage"
-                . " AND bp.psid = macro_output.botcake_psid AND bp.ad_id IS NOT NULL AND bp.ad_id <> ''";
-            $emptyAd = "(botcake_ad_id IS NULL OR botcake_ad_id = '')";
+            [$adSql, $pageArgs] = $this->adQuery($key, $pageId, 'macro_output.botcake_psid');
 
             MacroOutput::query()
                 ->whereRaw('LOWER(' . $trim . '(' . $this->col('PAGE') . ')) = ?', [$key])
                 ->where('ts_date', '>=', $since)
                 ->whereNotNull('botcake_psid')->where('botcake_psid', '<>', '')
-                ->whereRaw($emptyAd)
+                ->whereRaw(self::EMPTY_AD)
                 ->whereRaw("EXISTS ($adSql)", $pageArgs)
                 ->select('id')
-                ->chunkById(1000, function ($orders) use (&$out, $adSql, $emptyAd, $pageArgs) {
-                    $ids = $orders->pluck('id')->all();
-                    $out['ad_filled'] += DB::update(
-                        "UPDATE macro_output SET botcake_ad_id = ($adSql ORDER BY (bp.source = 'api') DESC, bp.id DESC LIMIT 1)"
-                        . ' WHERE id IN (' . implode(',', array_fill(0, count($ids), '?')) . ") AND $emptyAd AND EXISTS ($adSql)",
-                        array_merge($pageArgs, $ids, $pageArgs)
-                    );
+                ->chunkById(1000, function ($orders) use (&$out, $page, $pageId) {
+                    $out['ad_filled'] += $this->fillAds($page, $pageId, $orders->pluck('id')->all());
                 }, 'id');
         }
 
         return $out;
+    }
+
+    /** Ang order na wala pang ad id (ang may ad id na ay hindi kailanman pinapalitan). */
+    public const EMPTY_AD = "(botcake_ad_id IS NULL OR botcake_ad_id = '')";
+    /** Kapag higit sa isang row ang tugma: ang API ang nauuna, saka ang pinakabago. */
+    private const AD_PICK = " ORDER BY (bp.source = 'api') DESC, bp.id DESC LIMIT 1";
+
+    /**
+     * Ang ad_id ng customer: ang botcake_psids row ng parehong page at PSID, galing sa API o sa record ng chat (chat_verify,
+     * ang ad ng pinanggalingang chat), na may ad_id. Ang row ng page: ayon sa page id, o ayon sa pangalan kapag wala pang
+     * page id ang row (gaya ng ofPage). $psid ay SQL (hal. "macro_output.botcake_psid" o "?"); ang args ay ng page lang.
+     * @return array{0: string, 1: array<int, string>}
+     */
+    private function adQuery(string $key, ?string $pageId, string $psid): array
+    {
+        $trim = DB::getDriverName() === 'pgsql' ? 'BTRIM' : 'TRIM';
+        $onPage = $pageId === null ? "LOWER($trim(bp.page)) = ?" : "(bp.page_id = ? OR (bp.page_id IS NULL AND LOWER($trim(bp.page)) = ?))";
+
+        return ["SELECT bp.ad_id FROM botcake_psids bp WHERE bp.source IN ('api', 'chat_verify') AND $onPage"
+            . " AND bp.psid = $psid AND bp.ad_id IS NOT NULL AND bp.ad_id <> ''", $pageId === null ? [$key] : [$pageId, $key]];
+    }
+
+    /** Ang page id ng ad query: ang $pageId (hal. ng takbo ng flow), kung wala ang botcake.page_id ng page; null kapag walang column. */
+    public function adPageId(string $page, ?string $pageId = null): ?string
+    {
+        if (!BotcakePsid::hasPageId()) return null;
+        $pageId = trim((string) $pageId);
+
+        return $pageId !== '' ? $pageId : BotcakePsid::pageIdOf($page);
+    }
+
+    /** Ang ad ng customer ng page (ang pipiliin din ng fillAds), o '' kapag wala. */
+    public function adOf(string $page, string $psid, ?string $pageId = null): string
+    {
+        $psid = trim($psid);
+        if ($psid === '' || $psid === '0' || !Schema::hasTable('botcake_psids')) return '';
+        [$sql, $args] = $this->adQuery($this->settings->pageKey($page), $this->adPageId($page, $pageId), '?');
+
+        return (string) (DB::selectOne($sql . self::AD_PICK, array_merge($args, [$psid]))->ad_id ?? '');
+    }
+
+    /**
+     * Pinupunan ang botcake_ad_id ng mga order na $ids ng page na wala pang ad id (sinusuri sa mismong UPDATE), ayon sa
+     * adQuery. Plain SELECT muna ng mga id ang tumatawag (walang lock), hanggang 1000 bawat isa. $dryRun: bilang lang.
+     * @param array<int, int> $ids
+     * @return int ilan ang napunan (o mapupunan)
+     */
+    public function fillAds(string $page, ?string $pageId, array $ids, bool $dryRun = false): int
+    {
+        if (!$ids) return 0;
+        [$adSql, $pageArgs] = $this->adQuery($this->settings->pageKey($page), $pageId, 'macro_output.botcake_psid');
+        $where = ' WHERE id IN (' . implode(',', array_fill(0, count($ids), '?')) . ') AND ' . self::EMPTY_AD . " AND EXISTS ($adSql)";
+
+        if ($dryRun) return (int) DB::selectOne('SELECT COUNT(*) AS n FROM macro_output' . $where, array_merge($ids, $pageArgs))->n;
+
+        return DB::update("UPDATE macro_output SET botcake_ad_id = ($adSql" . self::AD_PICK . ')' . $where, array_merge($pageArgs, $ids, $pageArgs));
     }
 
     /**

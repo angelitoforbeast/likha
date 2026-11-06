@@ -4701,3 +4701,21 @@ Slice 238: 6 passed, 0 failed, 0 blocked, 0 skipped, 0 not run. Threat model: th
 | S-238.1.4 | edge | Given 4 of 8 sends restricted and page_min_sends 10, then the percent rule doesn't apply and the count decides: amber | `test_S_238_1_4_with_too_few_sends_the_percent_does_not_count_and_the_count_decides` | 2026-11-06 passed |
 | S-238.1.5 | edge | Given saved thresholds without page_blocked_pct, then the default 5% applies, the Health thresholds form shows its red input with 5, and saving 10 makes 6 of 100 amber | `test_S_238_1_5_saved_thresholds_without_the_new_key_take_the_default_and_the_form_shows_and_saves_it` | 2026-11-06 passed |
 | S-238.1.6 | edge | Given a red restricted page, when the red % is raised so it goes amber, then the banner shows it 🟠 and the urgent count stays 1, because orange counts as urgent today (today's rule kept) | `test_S_238_1_6_a_page_going_from_red_to_amber_turns_orange_and_orange_still_counts_as_urgent` | 2026-11-06 passed |
+
+## Slice 239 – Ad id on upload
+
+As the owner, I want the order to carry the ad that brought the customer (`botcake_ad_id`) the moment the flow uploads it, shown and editable in the "Upload to macro" step, so the per-ad reports and CPP are right today, not after the night's matcher.
+
+Threat model: the ad id comes from `botcake_psids` (saved from Botcake's API and the chat record) or from the step's "Ad ID" template, which a flow editor writes and may fill with customer text; only digits (1 to 64) are written, anything else is dropped and noted. The backfill command is run by the owner's deployer. Risk tier: medium. Test: `tests/Feature/OrderEncode/AdIdOnUploadTest.php`.
+
+### S-239.1 The ad id is written with the order (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-239.1.1 | happy | Given a `chat_verify` row of the same page and PSID carrying ad 1202…, when the customer passes Upload to macro (Insert), then the new row has that ad id. The same holds for the row made by the legacy Encode order step and the live Sheet step | `test_S_239_1_1_a_new_row_gets_the_ad_of_the_customers_chat_verify_row` | 2026-11-06 passed |
+| S-239.1.2 | negative | Given the ad row has the same page name but another PSID, or the same PSID on another page, then no ad id is written | `test_S_239_1_2_the_ad_of_another_psid_or_another_page_is_not_written` | 2026-11-06 passed |
+| S-239.1.3 | edge | Given the row has a page_id that differs from the run's page while the name matches, then it is not used; a row with no page_id and the same name is used (the matcher's page rule) | `test_S_239_1_3_a_row_of_another_page_id_is_not_used_and_a_row_without_page_id_matches_by_name` | 2026-11-06 passed |
+| S-239.1.4 | edge | Given an existing step with no "Ad ID" key, then the ad id is written; a step whose field is empty writes none; a field "{{ad_id}}x" or "abc" writes none and the event says "Ad ID not saved: not an ad id" | `test_S_239_1_4_the_ad_id_field_decides_what_is_written` | 2026-11-06 passed |
+| S-239.1.5 | edge | Given Update onto an open row that already has an ad id, then it is unchanged; onto one that has none, then it is filled | `test_S_239_1_5_update_fills_the_ad_id_only_when_the_open_row_has_none` | 2026-11-06 passed |
+| S-239.1.6 | happy | Given a Send message with {{ad_id}}, then it shows the ad id; a flow that never mentions it makes no `botcake_psids` query | `test_S_239_1_6_ad_id_interpolates_in_a_send_and_an_unmentioned_flow_reads_no_botcake_psids` | 2026-11-06 passed |
+| S-239.1.7 | happy | Given orders of a day with a PSID, when `orders:fill-ad-id --date=… --dry-run` runs, then nothing changes and it prints checked, filled, no ad found; without --dry-run it fills only the empty ones | `test_S_239_1_7_fill_ad_id_dry_run_changes_nothing_and_a_real_run_fills_only_empty_ones` | 2026-11-06 passed |
+| S-239.1.8 | edge | Given an uploaded ad id and a newer API row with another ad, when the nightly matcher runs, then the uploaded ad id stays | `test_S_239_1_8_the_nightly_matcher_keeps_the_uploaded_ad_id` | 2026-11-06 passed |

@@ -526,7 +526,7 @@
         set: {ops: [{op: 'set', field: '', value: '', separator: ', '}]}, ai: {model: 'gpt-4o-mini', system: '', user: OPEN + 'last_input' + CLOSE, history: 100, max_tokens: 250, save_to: '', send: false},
         clear_ai: {fields: []}, sheet: {sheet: '', tab: '', columns: []},
         encode_order: {date: '', page: '', name: '', phone: '', input: '', shop: '', extracted: '', price: '', also_sheet: false, sheet: '', tab: '', on_failure: 'sheet'},
-        upload_macro: {date: '', page: '', name: '', phone: '', input: '', shop: '', extracted: '', price: '', mode: 'insert', if_not_found: 'insert', counts_order: true},
+        upload_macro: {date: '', page: '', name: '', phone: '', input: '', shop: '', extracted: '', price: '', ad_id: OPEN + 'ad_id' + CLOSE, mode: 'insert', if_not_found: 'insert', counts_order: true},
         encode_macro: {astra: true}, sequence: {action: 'subscribe', sequence_id: 0}, end: {},
     };
     document.querySelectorAll('[data-add]').forEach(b => b.addEventListener('click', () => {
@@ -907,7 +907,10 @@
         body.append(label('Mode', bind(pickOne([['insert', 'Insert: always a new row'], ['update', 'Update: the open row of the customer (no status yet, last 24 hours)']], c.mode || 'insert'), v => { c.mode = v; drawNotFound(); })));
         body.append(notFound, el('p', {class: 'text-xs text-slate-500', text: 'Update adds the new messages of this order to the open row. A PROCEED or waybill row is never changed, and staff edits are kept.'}));
         drawNotFound();
-        body.append(el('div', {class: 'grid gap-2 sm:grid-cols-2'}, ENCODE_FIELDS.map(([k, t]) => label(t, bind(grow(input({tag: 'textarea', rows: 2, maxlength: 2000}, c[k])), v => c[k] = v)))));
+        // Ang lumang step na walang ad_id key ay ang ad_id variable ang gamit (FlowEngine); ang binura ay walang ad id.
+        const ad = label('Ad ID (I)', bind(grow(input({tag: 'textarea', rows: 2, maxlength: 2000}, 'ad_id' in c ? c.ad_id : OPEN + 'ad_id' + CLOSE)), v => c.ad_id = v));
+        body.append(el('div', {class: 'grid gap-2 sm:grid-cols-2'}, ENCODE_FIELDS.map(([k, t]) => label(t, bind(grow(input({tag: 'textarea', rows: 2, maxlength: 2000}, c[k])), v => c[k] = v))).concat([ad])));
+        body.append(el('p', {class: 'text-xs text-slate-500', text: 'Ad ID: the ad that brought the customer (' + OPEN + 'ad_id' + CLOSE + '). Saved only when it is digits; on Update only when the row has none. Leave it empty to save no ad id.'}));
     }
     // ---- Encode order: ine-queue ang encode ng order row sa background; ang resulta ay binabasa sa order_* variables ----
     function encodeMacroForm(c, body) {

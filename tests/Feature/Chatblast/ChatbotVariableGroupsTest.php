@@ -48,10 +48,11 @@ class ChatbotVariableGroupsTest extends ChatblastTestCase
 
     public function test_S_097_1_each_name_is_in_its_group(): void
     {
-        $this->assertSame(['last_input', 'full_name', 'first_name', 'psid', 'page_id', 'page_name', 'current_date', 'last_interaction', 'replies_via'], array_keys($this->groups['system']));
+        $this->assertSame(['last_input', 'full_name', 'first_name', 'psid', 'page_id', 'page_name', 'current_date', 'last_interaction', 'replies_via', 'ad_id'], array_keys($this->groups['system']));
         foreach (['PRICE', 'Prompt 1', 'Seq 1', 'Seq Img 20'] as $name) $this->assertArrayHasKey($name, $this->groups['botfield']);
         $this->assertSame(['REPLY ONE', 'GPT INPUT', 'PRICE', 'CXD', 'LAST INPUT'], array_keys($this->groups['customer']));
         $this->assertSame('Built in: the customer\'s name on Facebook', $this->groups['system']['full_name']['tip']);
+        $this->assertSame('Built in: Ad ID (the ad that brought the customer)', $this->groups['system']['ad_id']['tip']);
         $this->assertSame('Botfield: set per page on /chatbot/pages', $this->groups['botfield']['Prompt 1']['tip']);
     }
 

@@ -740,6 +740,10 @@ class FlowEngine
         $vars = $run->vars();
         $row = array_map(fn ($k) => ChatbotVars::sheetCell((string) ($c[$k] ?? ''), $vars), FlowGraph::ENCODE_FIELDS);
         $row[] = ''; // I = status
+        // Ang "Ad ID" ng step; ang lumang step na walang key ay {{ad_id}}, ang sadyang binura ay walang ad id.
+        $adText = trim(ChatbotVars::interpolate(array_key_exists('ad_id', $c) ? (string) $c['ad_id'] : '{{ad_id}}', $vars));
+        $adId = Upload::adId($adText);
+        $adNote = $adText !== '' && $adId === null ? ['ad_note' => Upload::AD_NOT_SAVED] : [];
         $mode = ($c['mode'] ?? '') === 'update' ? 'update' : 'insert';
         $id = $node['id'];
 
@@ -755,7 +759,7 @@ class FlowEngine
         }
         $run->runId ??= bin2hex(random_bytes(4));
         try {
-            $r = app(Upload::class)->run($run, $id, $row, $mode, ($c['if_not_found'] ?? '') === 'skip' ? 'skip' : 'insert');
+            $r = app(Upload::class)->run($run, $id, $row, $mode, ($c['if_not_found'] ?? '') === 'skip' ? 'skip' : 'insert', $adId);
         } catch (Throwable $e) {
             if (!$e instanceof LockTimeoutException) report($e);
             $note = $e instanceof LockTimeoutException ? 'The order was not saved: another upload or encode of this customer is still running' : 'The order could not be saved';
@@ -769,7 +773,7 @@ class FlowEngine
 
             return ['port' => 'next', 'note' => $r['note'], 'no_order' => true];
         }
-        $run->event('upload_macro', $id, ['result' => $r['result'], 'row' => (string) $r['row']] + ($r['result'] === 'not_accepted' ? ['error' => $r['note']] : []));
+        $run->event('upload_macro', $id, ['result' => $r['result'], 'row' => (string) $r['row']] + ($r['result'] === 'not_accepted' ? ['error' => $r['note']] : []) + $adNote);
 
         return ['port' => 'next', 'note' => $r['note']] + (in_array($r['result'], ['inserted', 'updated'], true) ? [] : ['no_order' => true]);
     }

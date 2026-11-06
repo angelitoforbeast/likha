@@ -29,7 +29,7 @@ use InvalidArgumentException;
 class ChatbotFlowController extends Controller
 {
     /** Ang mga variable ng takbo (para sa listahan sa mga form ng node). */
-    public const RUN_VARS = ['last_input', 'full_name', 'first_name', 'psid', 'page_id', 'page_name', 'current_date', 'last_interaction', 'replies_via'];
+    public const RUN_VARS = ['last_input', 'full_name', 'first_name', 'psid', 'page_id', 'page_name', 'current_date', 'last_interaction', 'replies_via', 'ad_id'];
 
     /** Ang tooltip ng bawat variable ng takbo ("Built in: …"). */
     private const RUN_VAR_INFO = [
@@ -37,6 +37,7 @@ class ChatbotFlowController extends Controller
         'psid' => 'the customer\'s ID on this page', 'page_id' => 'the Facebook ID of the page', 'page_name' => 'the name of the page',
         'current_date' => 'today\'s date in Manila (YYYY-MM-DD)', 'last_interaction' => 'when the customer\'s last chat came in',
         'replies_via' => 'which bot carries this chat: Botcake, Forbeast, or the page\'s gateway address (e.g. Incepxion)',
+        'ad_id' => 'Ad ID (the ad that brought the customer)',
     ];
 
     /** Ang mga order_* variable (OrderVars): ang huling order row ng customer sa page, binabasa tuwing kailangan. */
