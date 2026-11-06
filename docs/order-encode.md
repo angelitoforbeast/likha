@@ -196,6 +196,12 @@ of the old step.
 - The row: TIMESTAMP, ts_date, PAGE, fb_name, FULL NAME (the FB name), PHONE NUMBER (the flow's phone, 9XXXXXXXXX when valid), ITEM_NAME/COD from
   the shop details (else the price cell), shop details, all_user_input (this order's messages, the 136 conversation rule), extracted
   details/CXD and botcake_psid. STATUS and the address stay blank.
+- **Ad ID (I)** (`ad_id`, default `{{ad_id}}`; a step saved without the key behaves as `{{ad_id}}`) is written to botcake_ad_id when it is
+  digits only (1–64). Anything else writes none and the event says "Ad ID not saved: not an ad id"; an empty field writes none. Update
+  fills botcake_ad_id only when the row has none. `{{ad_id}}` is the customer's ad from botcake_psids (same page and PSID, source api or
+  chat_verify), the same query as the nightly matcher's ad fill; it is read only when a flow names it or has an old Upload step. The row
+  of the legacy Encode order step gets the same ad. `orders:fill-ad-id --date=YYYY-MM-DD [--page=] [--dry-run]` fills a day's orders
+  that have a PSID and no ad id (never replaces one) and prints checked, filled, no ad found.
 - **Insert** always makes a new row. R5 does not run here.
 - **Update** takes the customer's open row (PAGE + PSID, no STATUS, within 24 hours; the day from the order time, Manila) and appends this
   order's messages to its conversation. It changes only all_user_input, extracted_details and CXD, never a column with a person's log
