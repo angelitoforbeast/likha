@@ -145,6 +145,9 @@ class AdIdOnUploadTest extends UploadEncodeTestCase
             self::PAGE, self::PAGE_ID, [], $this->fields(), 13, 'hi', 'Ana Cruz', '2026-10-23 10:15');
         $plain->vars();
         $plain->text('Hi {{first_name}}');
+        // Ang Upload to macro na sadyang binura ang Ad ID (may key, walang banggit) ay hindi rin nagbabasa.
+        $cleared = new FlowRun(5, $this->uploadGraph(['ad_id' => '']), self::PAGE, self::PAGE_ID, [], $this->fields(), 13, 'hi', 'Ana Cruz', '2026-10-23 10:15');
+        $cleared->vars();
         $this->assertSame(0, $reads);
     }
 

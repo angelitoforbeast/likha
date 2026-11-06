@@ -178,7 +178,7 @@ class FlowRun
      */
     private function usesAdId(): bool
     {
-        return $this->usesAd ??= preg_match('/\bad[\s_]+id\b/i', (string) json_encode([$this->graph, $this->botfields], JSON_UNESCAPED_UNICODE)) === 1
+        return $this->usesAd ??= preg_match('/\{\{\s*ad[\s_]+id\s*\}\}/i',(string) json_encode([$this->graph, $this->botfields], JSON_UNESCAPED_UNICODE)) === 1
             || collect((array) ($this->graph['nodes'] ?? []))->contains(fn ($n) => ($n['type'] ?? '') === 'upload_macro' && !array_key_exists('ad_id', (array) ($n['config'] ?? [])));
     }
 
