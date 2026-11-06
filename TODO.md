@@ -1640,3 +1640,9 @@ Minor review findings, accepted (none is on a new untrusted path, and no page us
 - **Publish's same-message duplicate check (`tapProblem`, spec 229) compares raw payloads while the tap match trims**, so `OO` and `OO ` on one message pass Publish and get the "same payload" notice. Reason: spec 229's check; the notice now says "with the same payload" without claiming different messages, and the tap takes the first exit either way.
 
 - **A red % of 0 for `page_blocked_pct` makes every page with enough sends and any counted failure red, even with no restricted sends (`0 ≥ 0`).** Reason: the CEO sets it, on a trusted path, and it is the same `≥` rule as the other limits; if wanted later, treat 0 as "any restricted".
+
+## The order gets its ad id when the flow uploads it (spec 239), accepted review minors
+
+- **Upload Update fills `botcake_ad_id` with a guarded UPDATE, so the `$row` model then handed to `ForbeastOrders::queue` still holds the old empty value.** Reason: the Forbeast payload carries no ad id (no `ad_id` in `ForbeastOrders`), so nothing stale is sent.
+- **`orders:fill-ad-id` has no test for an invalid `--date`.** Reason: the deployer types the options (trusted), and the command refuses anything that isn't YYYY-MM-DD before any query.
+- **The old upload step with no `ad_id` key and no other mention is covered only through S-239.1.4** (it writes the ad, so the read happened). Reason: that is the behaviour that matters; a separate query-count test would prove the same line.
