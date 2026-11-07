@@ -20,7 +20,7 @@ class ChatAttachments
     public const IGNORE = 'ignore';
     public const REPLY = 'reply';
     public const MODES = [self::IGNORE, self::REPLY];
-    public const IGNORED = ['photo', 'audio', 'video', 'reel', 'file', 'fallback'];
+    public const IGNORED = ['photo', 'audio', 'video', 'reel', 'file', 'fallback', 'gif'];
 
     /**
      * Ang marka ng attachment: "[audio](https://…)" (Botcake, markdown link), "[audio] https://…", o "[Audio]" (Forbeast),
@@ -30,6 +30,12 @@ class ChatAttachments
     private const MARKER = '/^\[(audio|image|photo|video|file|fallback|reel|ig_reel|sticker|location|attachment|share|template)\](?:\((https?:\/\/[^\s)]+)\)|\s+(https?:\/\/\S+))?$/iu';
     /** Ang landas ng sticker sa Facebook CDN (ang Like at ang ibang sticker): hindi larawan ng customer. */
     private const STICKER_PATH = '/t39.1997-6/';
+    /**
+     * Ang GIF na pinili ng customer sa Messenger: dumarating mula sa Botcake bilang link lang, walang marka. Ang buong
+     * mensahe ay isang link sa cdn.fbsbx.com, may bahaging "t59.2708-21" sa landas, at .gif ang file. Ang ibang link
+     * (giphy, ibang site) ay tunay na share ng customer: text pa rin.
+     */
+    private const GIF = '#^https?://cdn\.fbsbx\.com/(?:[^\s/?\#]+/)*t59\.2708-21/(?:[^\s/?\#]+/)*[^\s/?\#]+\.gif(?:[?\#]\S*)?$#i';
 
     public static function ignoring(): bool
     {
@@ -49,6 +55,7 @@ class ChatAttachments
 
             return str_contains($url, self::STICKER_PATH) ? null : 'photo';
         }
+        if (self::gif($m) !== null) return 'gif';
         $a = self::fromMarker($m);
         if ($a === null) return null;
         $type = match ($a['type']) { 'image' => 'photo', 'ig_reel' => 'reel', default => $a['type'] };
@@ -68,6 +75,17 @@ class ChatAttachments
         $url = ($x[2] ?? '') !== '' ? $x[2] : (($x[3] ?? '') !== '' ? $x[3] : null);
 
         return ['type' => strtolower($x[1]) === 'photo' ? 'image' : strtolower($x[1]), 'url' => $url !== null ? mb_substr($url, 0, 2000) : null];
+    }
+
+    /**
+     * Ang uri at link ng GIF ng Messenger (ang anyo sa GIF sa itaas) para sa payload.attachment; null kapag hindi ganoon.
+     * @return array{type: string, url: string}|null
+     */
+    public static function gif(string $message): ?array
+    {
+        $m = trim($message);
+
+        return preg_match(self::GIF, $m) ? ['type' => 'gif', 'url' => mb_substr($m, 0, 2000)] : null;
     }
 
     /**

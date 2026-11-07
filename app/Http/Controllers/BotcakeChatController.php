@@ -159,7 +159,7 @@ class BotcakeChatController extends Controller
             $f['message'] = $clean['message'];
             if ($clean['image_url'] !== null) $payload['image_url'] = $clean['image_url'];
             // Ang uri at link ng attachment ("[audio](link)", "[audio] link" o ang larawan), para sa susunod na transcribe o paglalarawan.
-            $attachment = $clean['image_url'] !== null ? ['type' => 'image', 'url' => $clean['image_url']] : \App\Services\Chatbot\ChatAttachments::fromMarker($f['message']);
+            $attachment = $clean['image_url'] !== null ? ['type' => 'image', 'url' => $clean['image_url']] : (\App\Services\Chatbot\ChatAttachments::fromMarker($f['message']) ?? \App\Services\Chatbot\ChatAttachments::gif($f['message']));
             if ($attachment !== null) $payload['attachment'] = $attachment;
         }
 

@@ -4719,3 +4719,24 @@ Threat model: the ad id comes from `botcake_psids` (saved from Botcake's API and
 | S-239.1.6 | happy | Given a Send message with {{ad_id}}, then it shows the ad id; a flow that never mentions it makes no `botcake_psids` query | `test_S_239_1_6_ad_id_interpolates_in_a_send_and_an_unmentioned_flow_reads_no_botcake_psids` | 2026-11-06 passed |
 | S-239.1.7 | happy | Given orders of a day with a PSID, when `orders:fill-ad-id --date=… --dry-run` runs, then nothing changes and it prints checked, filled, no ad found; without --dry-run it fills only the empty ones | `test_S_239_1_7_fill_ad_id_dry_run_changes_nothing_and_a_real_run_fills_only_empty_ones` | 2026-11-06 passed |
 | S-239.1.8 | edge | Given an uploaded ad id and a newer API row with another ad, when the nightly matcher runs, then the uploaded ad id stays | `test_S_239_1_8_the_nightly_matcher_keeps_the_uploaded_ad_id` | 2026-11-06 passed |
+
+## Slice 241 – A Messenger GIF is an attachment
+
+As staff, I want a GIF the customer picks in Messenger to be handled like a photo, so the bot does not read the digits in its link as a phone number and move the flow on.
+
+Threat model: the chat text comes from the customer through Botcake (untrusted); only its classification changes (a bare `cdn.fbsbx.com` link in `t59.2708-21` ending in `.gif` is an attachment); it is stored and capped as today. Risk tier: low. Tests: `tests/Unit/ChatAttachmentsGifTest.php`, `tests/Feature/Chatblast/ChatbotAttachmentsTest.php`.
+
+### S-241.1 A Messenger GIF is ignored like a photo (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-241.1.1 | happy | Given `chatbot_attachments = ignore`, when Botcake pushes a bare `https://cdn.fbsbx.com/v/t59.2708-21/…_n.gif?…` link, then `type()` is `gif`, no flow run is dispatched, one `ignored` event `{attachment: gif}`, `_ignored = gif`, `payload.attachment = {type: gif, url: <link>}`, no reply | `test_S_149_28_an_attachment_only_message_is_ignored_logged_and_kept_for_later` (data set "messenger gif") | 2026-11-07 passed |
+| S-241.1.2 | negative | Given `reply`, when the same link arrives, then the flow runs once, no `ignored` event, the message is stored as today | `test_S_241_1_2_with_reply_the_gif_runs_the_flow_as_today` | 2026-11-07 passed |
+| S-241.1.3 | edge | The link with a query string, `.GIF`, `http://`, an upper-case host or spaces around is still `gif`; the stored link is capped at 2000 characters | `test_S_241_1_3_a_messenger_gif_link_is_a_gif_with_a_query_upper_case_or_http` | 2026-11-07 passed |
+
+### S-241.2 Other messages keep today's behaviour (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-241.2.1 | negative | A `.gif` on `media.giphy.com`, `example.com` or a look-alike host `cdn.fbsbx.com.example.com` is text and runs the flow | `test_S_241_2_other_links_text_and_existing_markers_keep_todays_type`, `test_S_241_2_text_and_other_links_still_run_the_flow_while_the_gif_does_not` | 2026-11-07 passed |
+| S-241.2.2 | negative | A `cdn.fbsbx.com` `.mp4`/`.png` in `t59.2708-21`, a `.gif` in `t59.3654-21` or `t59.2708-210`, or `.gif` only in the query is text | same two tests | 2026-11-07 passed |
+| S-241.2.3 | negative | The GIF link with words before or after (`ito po https://cdn.fbsbx.com/…gif`) is text and runs the flow | same two tests | 2026-11-07 passed |
+| S-241.2.4 | edge | `[Photo]` → photo, a sticker photo `/t39.1997-6/` → null, Like → null, `[audio](…)` → audio, `[photo] ito` → null: unchanged | `test_S_241_2_other_links_text_and_existing_markers_keep_todays_type` and the S-149.28/29 tests | 2026-11-07 passed |

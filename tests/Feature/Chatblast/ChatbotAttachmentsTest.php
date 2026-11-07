@@ -27,6 +27,7 @@ class ChatbotAttachmentsTest extends ChatblastTestCase
 {
     private const KEY_UNO = 'page-key-uno-test-a1s2d3f4g5h6j7k8l9';
     private const PSID = '6012345678901234';
+    private const GIF = 'https://cdn.fbsbx.com/v/t59.2708-21/111111111_2222222222222222_3333333333333333333_n.gif?_nc_cat=1&oh=00_abc&oe=12345678';
 
     protected function setUp(): void
     {
@@ -91,6 +92,8 @@ class ChatbotAttachmentsTest extends ChatblastTestCase
             'live Botcake reel' => ['[reel](https://www.facebook.com/x)', 'reel', 'https://www.facebook.com/x'],
             'live Botcake fallback' => ['[fallback](https://www.facebook.com/share/y)', 'fallback', 'https://www.facebook.com/share/y'],
             'live Botcake photo' => ['[Photo]', 'photo', null],
+            // Ang GIF ng Messenger: link lang, walang marka (ang tunay na anyo ng Botcake).
+            'messenger gif' => [self::GIF, 'gif', self::GIF],
         ];
     }
 
@@ -105,6 +108,28 @@ class ChatbotAttachmentsTest extends ChatblastTestCase
         // Ang uri ay gaya ng dating nito (ang larawan ay "image"), ang link ay buo.
         $this->assertSame([$type === 'photo' ? 'image' : $type, $url, $type], [$chat->payload['attachment']['type'] ?? null, $chat->payload['attachment']['url'] ?? null, $chat->payload['_ignored'] ?? null]);
         $this->assertSame(0, DB::table('chatbot_replies')->count());
+    }
+
+    public function test_S_241_1_2_with_reply_the_gif_runs_the_flow_as_today(): void
+    {
+        AppSetting::set(ChatAttachments::SETTING, ChatAttachments::REPLY);
+
+        $this->botcakePush(self::GIF)->assertOk();
+
+        $this->assertSame([1, []], [$this->ran(), $this->ignoredEvents()]);
+        $chat = BotcakeChat::sole();
+        $this->assertSame([self::GIF, null], [$chat->message, $chat->payload['_ignored'] ?? null], 'stored as today');
+    }
+
+    public function test_S_241_2_text_and_other_links_still_run_the_flow_while_the_gif_does_not(): void
+    {
+        $this->botcakePush(self::GIF)->assertOk();
+        $this->botcakePush('https://media.giphy.com/media/abc123/x.gif')->assertOk();
+        $this->botcakePush('https://cdn.fbsbx.com/v/t59.2708-21/1_n.mp4')->assertOk();
+        $this->botcakePush('ito po ' . self::GIF)->assertOk();
+        $this->botcakePush('09171234567')->assertOk();
+
+        $this->assertSame([4, ['gif']], [$this->ran(), $this->ignoredEvents()], 'only the bare messenger gif is ignored');
     }
 
     public function test_S_149_28_a_forbeast_audio_or_photo_is_ignored_and_its_link_kept(): void
