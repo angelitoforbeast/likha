@@ -120,6 +120,10 @@ abstract class MetaAdsTestCase extends OwnerPrivateTestCase
             $t->string('item_name')->nullable();
             $t->bigInteger('link_clicks')->nullable();
             $t->string('account_id')->nullable();
+            // Spec 244 (2026_11_20_100000_add_video_views_to_ads_manager_reports).
+            $t->unsignedInteger('video_plays_3s')->nullable();
+            $t->unsignedInteger('video_thruplays')->nullable();
+            $t->unsignedInteger('video_p50')->nullable();
             $t->timestamps();
             $t->unique(['day', 'ad_id']);
         });
