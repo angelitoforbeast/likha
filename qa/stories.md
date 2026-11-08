@@ -4804,3 +4804,29 @@ Threat model: the nav tables (written only by the CEO through nav settings) and 
 | S-243.4.3 | edge | Nothing readable (no /proc, no `sys_getloadavg`): every line says "Not available", the page renders; only the load missing: only that line says it, no cores | `test_S4_unreadable_stats_say_not_available_and_the_page_renders`, `test_S4_one_stat_missing_says_not_available_only_on_its_line` | 2026-11-08 passed |
 | S-243.4.4 | perf | One shared reader and cache: two views in 10 s read once, the cache entry is the monitor's `sysmon_server`, read again after 11 s; the CEO monitor's `getServerStats` returns the same numbers with the same keys | `test_S4_the_view_shares_the_ceo_monitors_10_second_cache`, `test_S4_the_ceo_monitor_reads_the_same_shared_code` | 2026-11-08 passed |
 | S-243.4.5 | negative | The database table list, file storage and processes are not on the Storage view; the OIC still gets 404 on `/system-monitor` | `test_S4_the_database_tables_and_processes_stay_on_the_ceo_monitor` | 2026-11-08 passed |
+
+## Slice 245 – The problems banner splits its list into Red, Orange and White tabs
+
+As anyone with the Chatbot menu, I want the expanded problems banner split by level in tabs, so the urgent lines are not buried among the orange and white ones.
+
+Threat model: the panel data (built by the server) is trusted; the only input is the tab choice, which only shows or hides lines already on the page. Risk tier: low. Tests: `tests/Feature/Chatblast/ProblemTabsTest.php` (faked `ProblemsPanel`); the existing banner tests (`ProblemsPanelTest`, `PageProblemsTest`, `SetupProblemsBannerTest`, `AiProblemsTest`, `QuietSetupTest`) still read the same list.
+
+### S-245.1 Tabs per level above the list (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-245.1.1 | happy | Red, orange and white lines on four pages: on `/chatbot/inbox` and `/chatblast/page-settings` a `role="tablist"` row "🔴 Red (2)", "🟠 Orange (2)", "⚪ White (2)", "All (6)" (lines, not pages), each `role="tab"` with `aria-controls="cb-problems-list"`; Red is selected; the row is hidden while the banner is collapsed | `test_S_245_1_the_tabs_count_lines_per_level_and_red_opens_first_on_both_screens` | 2026-11-08 passed |
+| S-245.1.2 | happy | Red tab: only red lines, under their pages in `panel()` order; a page without a red line is hidden. Orange and White by the same rule (the script's rule over the markup): only that level, pages in order, pages without it absent | `test_S_245_1_each_level_tab_shows_only_its_lines_grouped_by_page_in_order` | 2026-11-08 passed |
+| S-245.1.3 | happy | All tab: every page and line, as the list was before | `test_S_245_1_the_all_tab_is_todays_list` | 2026-11-08 passed |
+| S-245.1.4 | happy | Every link, Acknowledge and Done button (with `data-page`, `data-kind`, `data-level`), the "came back" mark, and the "Acknowledged and done" section with Undo are unchanged; the tabs filter only the page rows | `test_S_245_1_lines_keep_their_links_buttons_ack_marks_and_the_acknowledged_section_in_every_tab` | 2026-11-08 passed |
+| S-245.1.5 | edge | No red lines: Red (0) is disabled and Orange opens; only white lines: White opens, Red and Orange disabled; only acknowledged lines: All (0) opens and is not disabled | `test_S_245_1_a_tab_with_no_lines_is_disabled_and_the_first_level_with_lines_opens`, `test_S_245_edge_only_white_lines_open_the_white_tab`, `test_S_245_edge_only_acknowledged_lines_open_all_and_no_problems_means_no_banner` | 2026-11-08 passed |
+| S-245.1.6 | edge | No problems: no banner and no tab row | `test_S_245_edge_only_acknowledged_lines_open_all_and_no_problems_means_no_banner` | 2026-11-08 passed |
+
+### S-245.2 The collapsed line stays as it is (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-245.2.1 | happy | "⚠ N pages with problems (M urgent) ▾", the same button markup, red when urgent and slate when not | `test_S_245_2_the_collapsed_line_and_its_colours_stay_as_they_are` | 2026-11-08 passed |
+
+### S-245.3 The open tab is remembered (P2)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-245.3.1 | script hook | The tab picked is stored in `localStorage` `cb-problems-tab` and read back on the next view, both inside try/catch; a stored tab that is unknown or disabled now is skipped, so the server's default stays. No browser test in this repo: proven by the script hook, and tried once by hand in a browser on a rendered page (White picked, reload, White open) | `test_S_245_3_the_open_tab_is_remembered_in_local_storage_inside_try_catch` | 2026-11-08 passed |
