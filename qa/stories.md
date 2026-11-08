@@ -4740,3 +4740,28 @@ Threat model: the chat text comes from the customer through Botcake (untrusted);
 | S-241.2.2 | negative | A `cdn.fbsbx.com` `.mp4`/`.png` in `t59.2708-21`, a `.gif` in `t59.3654-21` or `t59.2708-210`, or `.gif` only in the query is text | same two tests | 2026-11-07 passed |
 | S-241.2.3 | negative | The GIF link with words before or after (`ito po https://cdn.fbsbx.com/…gif`) is text and runs the flow | same two tests | 2026-11-07 passed |
 | S-241.2.4 | edge | `[Photo]` → photo, a sticker photo `/t39.1997-6/` → null, Like → null, `[audio](…)` → audio, `[photo] ito` → null: unchanged | `test_S_241_2_other_links_text_and_existing_markers_keep_todays_type` and the S-149.28/29 tests | 2026-11-07 passed |
+
+## Slice 242 – Storage view for the marketing OIC and a storage banner at 80%
+
+As the CEO or the marketing OIC, I want to see the server storage and be warned on every Likha screen when the disk is filling up, so a full disk (as on 2026-11-08) is seen before it takes Likha down.
+
+Threat model: the server's own disk numbers and database answers are trusted; no request parameter is read. The view and the banner expose sizes only (fixed labels, no paths, no table contents). Risk tier: low-medium (the banner is on every `<x-layout>` page). Tests: `tests/Feature/SystemMonitor/StorageViewTest.php`, `tests/Feature/SystemMonitor/StorageBannerTest.php` (a fake `ServerStorage` bound in the container).
+
+### S-242.1 The marketing OIC sees a read-only Storage view (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-242.1.1 | happy | `Marketing - OIC` (also with extra spaces and other case) opens `/system-monitor/storage`: disk of `/` total, used, free GB and used %; database size; binary log size and file count | `test_S1_1_the_marketing_oic_sees_disk_database_and_binary_logs` | 2026-11-08 passed |
+| S-242.1.2 | happy | The CEO sees the Storage view and the System Monitor as today; the OIC gets 404 on `/system-monitor` and `/system-monitor/data` | `test_S1_2_the_ceo_sees_the_storage_view_and_the_system_monitor_as_today`, `test_S1_2_the_oic_gets_only_the_storage_view_not_the_rest_of_the_monitor` | 2026-11-08 passed |
+| S-242.1.3 | negative | `Marketing`, `Encoder - OIC`, `Marketing OIC` (no dash), no role: 404, nothing measured | `test_S1_3_other_roles_get_404` | 2026-11-08 passed |
+| S-242.1.4 | edge | `SHOW BINARY LOGS` refused: "Not available", page 200, nothing logged at warning or above; information_schema unreadable or the disk read failing: "Not available"; the rows of `SHOW BINARY LOGS` are summed whatever the column case | `test_S1_4_refused_binary_logs_say_not_available_and_the_page_renders`, `test_S1_4_the_real_class_returns_null_when_the_server_refuses_and_sums_the_rows_otherwise`, `test_S1_4_a_failed_disk_read_says_not_available` | 2026-11-08 passed |
+| S-242.1.5 | edge | Read-only: the view adds no form, button, input, select or textarea to the layout | `test_S1_5_the_view_is_read_only` | 2026-11-08 passed |
+
+### S-242.2 A storage banner on every Likha screen from 80% (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-242.2.1 | happy | 80% to under 90% used (80, 85, 89.9): amber "Server storage is at NN% (FF GB free)." with a link to the Storage view, for CEO and OIC | `test_S2_1_amber_banner_from_80_to_under_90_percent`, `test_S2_1_exactly_80_percent_is_amber_and_89_9_is_still_amber` | 2026-11-08 passed |
+| S-242.2.2 | happy | 90% or more: the same banner in red | `test_S2_2_red_banner_at_90_percent_or_more` | 2026-11-08 passed |
+| S-242.2.3 | negative | Other roles (`Marketing`, `Encoder`, none) never see it, and the disk is not read for them | `test_S2_3_other_roles_never_see_it` | 2026-11-08 passed |
+| S-242.2.4 | negative | Under 80% (79.9): nothing rendered | `test_S2_4_under_80_percent_nothing_is_rendered` | 2026-11-08 passed |
+| S-242.2.5 | edge | The disk read fails (null) or throws: no banner, the page renders; on a real request the banner sits above the page heading | `test_S2_5_a_failed_measurement_shows_no_banner_and_the_page_renders`, `test_S2_5_the_banner_is_on_a_real_page_request` | 2026-11-08 passed |
+| S-242.2.6 | perf | Cached 60 s (one disk read for three page views, a new read after 61 s); no information_schema or binary log query, no database or binary log call | `test_S2_6_the_check_is_cached_and_never_scans_or_queries_information_schema` | 2026-11-08 passed |

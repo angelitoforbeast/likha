@@ -36,12 +36,55 @@ No migration, no new table, no config or `.env` change.
 | S2.5 | edge | disk read fails (null) or throws: no banner, page renders |
 | S2.6 | perf | two renders call `disk()` once (60 s cache); `databaseBytes()` / `binaryLogs()` are never called and no query touches `information_schema` |
 
+**Followed as planned, with one addition.** The full run showed that the existing byte-for-byte pin of `/owner/column-settings/owner-private` (`SharedPagesBasePinTest`) failed for two reasons. First, the layout lines added two whitespace-only lines to every render, even with no banner. Second, the test machine's own disk is 90 % used, so the CEO render showed the real banner. Fixes: the banner block in the layout is written so that, with no banner, the output is byte for byte what it was (the comment is in PHP, the directives start at column 0); and `tests/TestCase.php` binds a `ServerStorage` whose `disk()` is null, so no test reads the machine's disk (the spec 242 tests bind their own fake over it). The pin hash was not changed.
+
 ## Done-when evidence
+
+All commands were run on this Windows machine with Herd's PHP 8.4.16 and PHPUnit 11.5.24. The database is the one `phpunit.xml` configures (SQLite `:memory:`, cache `array`). `vendor/` was installed with `composer install --no-scripts --ignore-platform-req=ext-pcntl --ignore-platform-req=ext-posix`, because Horizon needs pcntl, which Windows does not have.
+
+1. **Feature tests for every case of S1 and S2.** `php vendor\bin\phpunit tests/Feature/SystemMonitor`
+   - Before the code (tests first): `Tests: 26, Assertions: 45, Failures: 15`. They failed on the 404 of the missing route and the missing banner.
+   - After the code: `OK (26 tests, 91 assertions)`.
+   - Case table: `qa/stories.md` Slice 242 (S-242.1.1 to 1.5, S-242.2.1 to 2.6).
+2. **No new failures against `57aa21b8`.** Full suite `php vendor\bin\phpunit` (one run, no folder split needed, about 12 minutes).
+   - Baseline: the branch with only the two docs commits on top of `57aa21b8`, so the code was identical to `57aa21b8` and no extra worktree was needed. Result: `Tests: 4675, Assertions: 78091, Failures: 2, Skipped: 6` (11:47).
+   - After (code head `86dc001f`): `Tests: 4701, Assertions: 78182, Failures: 2, Skipped: 6` (12:00).
+   - The same 2 failures before and after, both unrelated to this spec: `Tests\Feature\ExampleTest::test_the_application_returns_a_successful_response` and `Tests\Feature\Item\ItemTableFitScriptTest::test_every_catalog_column_id_has_a_minimum_width_and_a_place_in_the_drop_order`.
+   - An intermediate run at `61db68f9` had 3 failures: the third was `SharedPagesBasePinTest`, fixed in `86dc001f` (see Plan).
+3. **`git diff 57aa21b8 -- database` is empty**: `git diff 57aa21b8 -- database | wc -l` gives `0`.
+4. **Branch.** `feat/242-storage-warning` from `57aa21b8`, pushed to `origin`; the head is below.
 
 ## Story changes
 
+No change to the spec's stories or to any Then. Added to `qa/stories.md` as Slice 242. Edge rows added inside existing cases:
+- S-242.1.3: `Marketing OIC` without the dash is not the OIC. Normalization is only trim, collapsed spaces and case, as in `checkCEO`.
+- S-242.1.4: an unreadable `information_schema` or a failed disk read also shows "Not available".
+- S-242.2.1: exactly 80 % is amber, and 89.9 % shows "89%" in amber. The percent is rounded down, so the number shown never reaches 90 before the colour turns red.
+- S-242.2.3: the disk is not even read for other roles.
+
+`storage/app` and `storage/logs` are left out of the Storage view (S1 allows this). The existing monitor does not measure `storage/app` as a whole, only two upload subfolders. It measures `storage/logs` only with a recursive directory walk of up to 50,000 files, which is not cheap.
+
 ## Files changed
+
+- `app/Services/ServerStorage.php` (new): the seam. `disk()` uses `disk_total_space` / `disk_free_space('/')`, or null. `databaseBytes()` is the System Monitor's `information_schema` SUM. `binaryLogs()` sums `SHOW BINARY LOGS` and counts the files. Both return null on any error, without logging.
+- `app/Services/StorageWarning.php` (new): `canSee()` (CEO or Marketing - OIC by the actual role) and `banner()` (cached 60 s, 80 % amber, 90 % red, never throws).
+- `app/Http/Controllers/SystemMonitorController.php`: new `storage()` action. `index()` and `data()` are unchanged and stay CEO-only.
+- `routes/web.php`: `GET /system-monitor/storage` (`system.monitor.storage`), in the same group as the monitor (`web`, `auth`, `allowed_ip`).
+- `resources/views/system_monitor/storage.blade.php` (new): read-only view rendered on the server (no JS, no buttons, no forms).
+- `resources/views/components/layout.blade.php`: the banner after the top nav. The heading keeps its `mt-16` only when there is no banner.
+- `tests/TestCase.php`: binds a `ServerStorage` with no disk reading for all tests.
+- `tests/Feature/SystemMonitor/StorageTestCase.php`, `FakeServerStorage.php`, `StorageViewTest.php`, `StorageBannerTest.php` (new).
+- `qa/stories.md`: Slice 242.
+- `docs/specs/242-storage-warning.md`, `docs/specs/242-storage-warning.result.md`.
 
 ## Head commit
 
+HEAD_PLACEHOLDER
+
 ## For the reviewer before release
+
+- **Where the banner renders.** In `resources/views/components/layout.blade.php`, right after the closing `</nav>` of the fixed top nav and before the page heading `<header>`. That is the `<x-layout>` component used by every Likha page except the Chatblast/Chatbot app shell (`layouts/chatblast`) and the TV screen (`layouts/chatbot-tv`), which do not get it. The banner has `mt-16` to clear the fixed nav. On pages that hide the heading (checklist, jnt_rts, prompt-generator, boardroom), those pages add their own `mt-16`, so there is an extra 4 rem gap under the banner while it shows. The layout is unchanged otherwise.
+- **How long the check takes.** Per page view, for CEO and OIC only: one cache read of `storage_warning_disk` from the configured cache store, plus a role check on the already loaded profile. Once per 60 s per cache store, the two disk functions run. Measured on this machine: 0.024 ms per `disk()` call (average of 1,000 calls; on Linux it is a `statvfs`). Other roles: no cache read and no disk read. No directory scan and no database query are run for the banner (test S-242.2.6).
+- **Binary logs.** "Not available" on the live server until the owner grants REPLICATION CLIENT to the app's database user (out of scope here). The query is `SHOW BINARY LOGS` and runs only when the Storage view is opened.
+- **Database size.** The Storage view runs the `information_schema` SUM on every open (not cached). Only two roles open it, and on demand.
+- Deploy is a code-only release: no migration, no config, no `.env`.
