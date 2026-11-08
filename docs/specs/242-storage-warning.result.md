@@ -51,6 +51,17 @@ All commands were run on this Windows machine with Herd's PHP 8.4.16 and PHPUnit
    - After (code head `86dc001f`): `Tests: 4701, Assertions: 78182, Failures: 2, Skipped: 6` (12:00).
    - The same 2 failures before and after, both unrelated to this spec: `Tests\Feature\ExampleTest::test_the_application_returns_a_successful_response` and `Tests\Feature\Item\ItemTableFitScriptTest::test_every_catalog_column_id_has_a_minimum_width_and_a_place_in_the_drop_order`.
    - An intermediate run at `61db68f9` had 3 failures: the third was `SharedPagesBasePinTest`, fixed in `86dc001f` (see Plan).
+   - **Send-back (banner on the Chatblast/Chatbot layout).** The full suite was not re-run, since no pin test covers this layout. Instead, the folders that render the Chatbot/Chatblast views and the spec's own folder were run before and after the layout change, each as `php vendor\bin\phpunit tests/Feature/<folder>`. All are green before and after, with no failures:
+
+     | Folder | Before | After |
+     |---|---|---|
+     | `tests/Feature/SystemMonitor` | OK, 26 tests, 91 assertions | OK, 26 tests, 91 assertions |
+     | `tests/Feature/Chatblast` | OK, 2088 tests, 56411 assertions, 2 skipped | OK, 2096 tests (the 8 new tests in `ChatblastStorageBannerTest`), 56439 assertions, 2 skipped |
+     | `tests/Feature/PageSettings` | OK, 149 tests, 1221 assertions | OK, 149 tests, 1221 assertions |
+     | `tests/Feature/Botcake` | OK, 129 tests, 492 assertions | OK, 129 tests, 492 assertions |
+     | `tests/Feature/OrderEncode` | OK, 526 tests, 1555 assertions | OK, 526 tests, 1555 assertions |
+
+     Tests first: before the layout change, `ChatblastStorageBannerTest` ran 8 tests with 3 failures. These were the cases where the banner should show. After the change: OK, 8 tests, 28 assertions.
 3. **`git diff 57aa21b8 -- database` is empty**: `git diff 57aa21b8 -- database | wc -l` gives `0`.
 4. **Branch.** `feat/242-storage-warning` from `57aa21b8`, pushed to `origin`; the head is below.
 
@@ -62,6 +73,8 @@ No change to the spec's stories or to any Then. Added to `qa/stories.md` as Slic
 - S-242.2.1: exactly 80 % is amber, and 89.9 % shows "89%" in amber. The percent is rounded down, so the number shown never reaches 90 before the colour turns red.
 - S-242.2.3: the disk is not even read for other roles.
 
+Send-back: no story changes. The added layout (Chatblast/Chatbot) is covered by a new case row S-242.2.7 under the existing S-242.2.
+
 `storage/app` and `storage/logs` are left out of the Storage view (S1 allows this). The existing monitor does not measure `storage/app` as a whole, only two upload subfolders. It measures `storage/logs` only with a recursive directory walk of up to 50,000 files, which is not cheap.
 
 ## Files changed
@@ -72,6 +85,8 @@ No change to the spec's stories or to any Then. Added to `qa/stories.md` as Slic
 - `routes/web.php`: `GET /system-monitor/storage` (`system.monitor.storage`), in the same group as the monitor (`web`, `auth`, `allowed_ip`).
 - `resources/views/system_monitor/storage.blade.php` (new): read-only view rendered on the server (no JS, no buttons, no forms).
 - `resources/views/components/layout.blade.php`: the banner after the top nav. The heading keeps its `mt-16` only when there is no banner.
+- `resources/views/layouts/chatblast.blade.php` (send-back): the same banner on the Chatblast/Chatbot screens, above the problems banner.
+- `tests/Feature/Chatblast/ChatblastStorageBannerTest.php` (new, send-back): the banner on `/chatblast` and `/chatbot/pages`.
 - `tests/TestCase.php`: binds a `ServerStorage` with no disk reading for all tests.
 - `tests/Feature/SystemMonitor/StorageTestCase.php`, `FakeServerStorage.php`, `StorageViewTest.php`, `StorageBannerTest.php` (new).
 - `qa/stories.md`: Slice 242.
@@ -79,11 +94,12 @@ No change to the spec's stories or to any Then. Added to `qa/stories.md` as Slic
 
 ## Head commit
 
-`75c5192a` holds the evidence; the code head is `86dc001f`. The branch tip after this line is the next docs commit.
+Code head `9e4d3584` (the send-back: banner on the Chatblast/Chatbot layout). The branch tip is the docs commit that records this result, right after it.
 
 ## For the reviewer before release
 
-- **Where the banner renders.** In `resources/views/components/layout.blade.php`, right after the closing `</nav>` of the fixed top nav and before the page heading `<header>`. That is the `<x-layout>` component used by every Likha page except the Chatblast/Chatbot app shell (`layouts/chatblast`) and the TV screen (`layouts/chatbot-tv`), which do not get it. The banner has `mt-16` to clear the fixed nav. On pages that hide the heading (checklist, jnt_rts, prompt-generator, boardroom), those pages add their own `mt-16`, so there is an extra 4 rem gap under the banner while it shows. The layout is unchanged otherwise.
+- **Where the banner renders.** In `resources/views/components/layout.blade.php`, right after the closing `</nav>` of the fixed top nav and before the page heading `<header>`. That is the `<x-layout>` component used by every Likha page except the Chatblast/Chatbot app shell and the TV screen. The banner has `mt-16` to clear the fixed nav. On pages that hide the heading (checklist, jnt_rts, prompt-generator, boardroom), those pages add their own `mt-16`, so there is an extra 4 rem gap under the banner while it shows. The layout is unchanged otherwise.
+- **Chatblast and Chatbot screens (added on send-back).** The banner is also in `resources/views/layouts/chatblast.blade.php`, right after the app bar's `</header>` and directly above the existing problems banner, before `<main>`. It uses the same `StorageWarning::banner`, the same roles and the same 60 s cache, and is styled like the problems banner (one line, full width). The TV screen (`layouts/chatbot-tv`, used by `/chatbot/live`) is left without it. Without a banner the Chatblast layout renders byte for byte as before. This was checked by rendering `/chatblast` and `/chatbot/pages` as `Marketing` with this layout and with the layout at `57aa21b8`: the two outputs are identical (233,243 bytes). No pin test covers this layout. This layout already uses the inline `@php(...)` form, and a block `@php … @endphp` added after it is swallowed by Blade (a parse error, found and fixed in the test run), so the banner line uses the inline form too.
 - **How long the check takes.** Per page view, for CEO and OIC only: one cache read of `storage_warning_disk` from the configured cache store, plus a role check on the already loaded profile. Once per 60 s per cache store, the two disk functions run. Measured on this machine: 0.024 ms per `disk()` call (average of 1,000 calls; on Linux it is a `statvfs`). Other roles: no cache read and no disk read. No directory scan and no database query are run for the banner (test S-242.2.6).
 - **Binary logs.** "Not available" on the live server until the owner grants REPLICATION CLIENT to the app's database user (out of scope here). The query is `SHOW BINARY LOGS` and runs only when the Storage view is opened.
 - **Database size.** The Storage view runs the `information_schema` SUM on every open (not cached). Only two roles open it, and on demand.
