@@ -15,11 +15,16 @@ class FakeServerStorage extends ServerStorage
 
     public ?array $binaryLogs = null;
 
+    /** Server stats (spec 243 S4); null reads as nothing readable, never the test machine's own numbers. */
+    public ?array $server = null;
+
     public int $diskCalls = 0;
 
     public int $databaseCalls = 0;
 
     public int $binaryLogCalls = 0;
+
+    public int $serverCalls = 0;
 
     public function disk(): ?array
     {
@@ -43,5 +48,12 @@ class FakeServerStorage extends ServerStorage
         $this->binaryLogCalls++;
 
         return $this->binaryLogs ?? parent::binaryLogs();
+    }
+
+    public function serverStats(): array
+    {
+        $this->serverCalls++;
+
+        return $this->server ?? self::emptyServerStats();
     }
 }
