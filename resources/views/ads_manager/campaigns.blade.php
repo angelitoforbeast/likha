@@ -469,6 +469,10 @@
             { id:'reach',          label:'Reach',            sort:'reach',          type:'integer',      align:'right', minw:90  },
             { id:'frequency',      label:'Freq',             sort:'frequency',      type:'number',       align:'right', minw:70  },
             { id:'link_clicks',       label:'Link clicks',         sort:'link_clicks',      type:'integer',      align:'right', minw:90  },
+            // Video views per ad (spec 244): only the ads level has them, so they show on the Ads tab only.
+            { id:'video_plays_3s',    label:'3s plays',            sort:null,               type:'integer',      align:'right', minw:90,  tab:'ads' },
+            { id:'video_thruplays',   label:'ThruPlays (15s)',     sort:null,               type:'integer',      align:'right', minw:110, tab:'ads' },
+            { id:'video_p50',         label:'50% views',           sort:null,               type:'integer',      align:'right', minw:90,  tab:'ads' },
             { id:'welcome_msg_rate',  label:'Welcome Msg Rate (%)',sort:'welcome_msg_rate', type:'percent',      align:'right', minw:130 },
             { id:'messages',       label:'Messages',         sort:null,             type:'integer',      align:'right', minw:90  },
             { id:'conversion_rate',   label:'Conv Rate (%)',       sort:'conversion_rate',  type:'percent',      align:'right', minw:110 },
@@ -491,7 +495,8 @@
           for (const c of defs) {
             if (!hidden.has(c.id) && !seen.has(c.id)) out.push(c);
           }
-          return out;
+          // A column with a `tab` exists on that tab only (the video views are per ad).
+          return out.filter(c => !(c.tab && c.tab !== this.tab));
         },
         // Header label override — "Name" col uses tab-aware label.
         colLabel(col){

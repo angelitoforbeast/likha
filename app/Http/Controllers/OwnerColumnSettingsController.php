@@ -147,6 +147,10 @@ class OwnerColumnSettingsController extends Controller
             ['id' => 'reach',          'label' => 'Reach'],
             ['id' => 'frequency',      'label' => 'Freq'],
             ['id' => 'link_clicks',       'label' => 'Link clicks'],
+            // Spec 244: per ad, so the Campaigns Manager shows them on its Ads tab only.
+            ['id' => 'video_plays_3s',    'label' => '3s plays (Ads tab)'],
+            ['id' => 'video_thruplays',   'label' => 'ThruPlays (15s) (Ads tab)'],
+            ['id' => 'video_p50',         'label' => '50% views (Ads tab)'],
             ['id' => 'welcome_msg_rate',  'label' => 'Welcome Msg Rate (%)'],
             ['id' => 'messages',       'label' => 'Messages'],
             ['id' => 'conversion_rate',   'label' => 'Conv Rate (%)'],
@@ -238,6 +242,12 @@ class OwnerColumnSettingsController extends Controller
     public const CEO_ONLY = ['claude_action', 'claude_reason', 'ceo_action', 'ceo_reason'];
 
     /**
+     * New columns that a saved order gets right after the catalog column before them (like CEO_ONLY), not at the end:
+     * the video views (spec 244) belong next to Link clicks.
+     */
+    private const PLACED_AFTER_PREVIOUS = ['video_plays_3s', 'video_thruplays', 'video_p50'];
+
+    /**
      * Default visibility per column when nothing has been saved yet.
      * Only the trimmed-down "Recommended" subset starts visible — the rest
      * default to hidden so the inline expand panel fits without horizontal
@@ -264,7 +274,7 @@ class OwnerColumnSettingsController extends Controller
             'first_started', 'days_running', 'latest_started',
             'spend', 'cpp', 'profit_pct', 'profit_pct_7d', 'profit_pct_3d', 'profit_pct_today', 'impressions',
             'frequency',
-            'link_clicks', 'welcome_msg_rate', 'messages', 'conversion_rate',
+            'link_clicks', 'video_plays_3s', 'video_thruplays', 'video_p50', 'welcome_msg_rate', 'messages', 'conversion_rate',
             'purchases',
             'ad_rdt',
         ],
@@ -939,7 +949,8 @@ class OwnerColumnSettingsController extends Controller
                 array_splice($valid, array_search($before[0], $valid, true), 0, [$id]);
                 continue;
             }
-            $pos = ($i > 0 && in_array($id, self::CEO_ONLY, true)) ? array_search($allowedIds[$i - 1], $valid, true) : false;
+            $pos = ($i > 0 && (in_array($id, self::CEO_ONLY, true) || in_array($id, self::PLACED_AFTER_PREVIOUS, true)))
+                ? array_search($allowedIds[$i - 1], $valid, true) : false;
             if ($pos === false) $valid[] = $id;
             else array_splice($valid, $pos + 1, 0, [$id]);
         }

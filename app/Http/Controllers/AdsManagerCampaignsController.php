@@ -1096,6 +1096,10 @@ class AdsManagerCampaignsController extends Controller
         $campaignIds    = $campaignIdsCsv ? array_values(array_filter(array_map('trim', explode(',', $campaignIdsCsv)))) : [];
         $adSetIds       = $adSetIdsCsv    ? array_values(array_filter(array_map('trim', explode(',', $adSetIdsCsv))))    : [];
 
+        // Video views per ad (spec 244), only on the ads level. Checked so the page keeps working in the window
+        // between a deploy and its migration.
+        $hasVideo = $level === 'ads' && Schema::hasColumn('ads_manager_reports', 'video_plays_3s');
+
         // Date expression (portable)
         $driver = DB::getDriverName(); // "pgsql" or "mysql"
         $dayExpr = $driver === 'pgsql'
@@ -1564,6 +1568,12 @@ class AdsManagerCampaignsController extends Controller
                     MAX(sd.running_at_start) AS running_at_start,
                     MAX(fs.latest_started) AS latest_started
                 ')
+                // No COALESCE: an ad without video (all null) stays null, not 0.
+                ->when($hasVideo, fn ($q) => $q->selectRaw('
+                    SUM(ads_manager_reports.video_plays_3s)  AS video_plays_3s,
+                    SUM(ads_manager_reports.video_thruplays) AS video_thruplays,
+                    SUM(ads_manager_reports.video_p50)       AS video_p50
+                '))
                 ->groupBy('ads_manager_reports.ad_id');
 
             if ($onlyWithSpend) $query->havingRaw('COALESCE(SUM(amount_spent_php),0) > 0');
@@ -1611,6 +1621,9 @@ class AdsManagerCampaignsController extends Controller
                     'reach'           => (int)   ($r->reach ?? 0),
                     'frequency'       => isset($r->frequency) ? (float) $r->frequency : null,
                     'link_clicks'      => $r->link_clicks !== null ? (int) $r->link_clicks : null,
+                    'video_plays_3s'   => isset($r->video_plays_3s)  ? (int) $r->video_plays_3s  : null,
+                    'video_thruplays'  => isset($r->video_thruplays) ? (int) $r->video_thruplays : null,
+                    'video_p50'        => isset($r->video_p50)       ? (int) $r->video_p50       : null,
                     'welcome_msg_rate' => isset($r->welcome_msg_rate) ? (float) $r->welcome_msg_rate : null,
                     'conversion_rate'  => isset($r->conversion_rate)  ? (float) $r->conversion_rate  : null,
                     // "Inside" — ads are leaf-level, no children to count.
@@ -1964,7 +1977,9 @@ class AdsManagerCampaignsController extends Controller
             COALESCE(SUM(reach),0) AS reach,
             COALESCE(SUM(results),0) AS results,
             COALESCE(SUM(link_clicks),0) AS link_clicks
-        ')->first();
+        ')->when($hasVideo, fn ($q) => $q->selectRaw('
+            SUM(video_plays_3s) AS video_plays_3s, SUM(video_thruplays) AS video_thruplays, SUM(video_p50) AS video_p50
+        '))->first();
 
         $totals = [
             'spend'       => (float) ($tot->spend ?? 0),
@@ -1981,6 +1996,9 @@ class AdsManagerCampaignsController extends Controller
             'welcome_msg_rate' => ($tot->link_clicks ?? 0) > 0 ? (float) (($tot->messages * 100.0) / $tot->link_clicks) : null,
             'conversion_rate'  => ($tot->messages ?? 0)    > 0 ? (float) (($tot->purchases * 100.0) / $tot->messages) : null,
         ];
+        if ($hasVideo) {
+            foreach (['video_plays_3s', 'video_thruplays', 'video_p50'] as $c) $totals[$c] = isset($tot->$c) ? (int) $tot->$c : null;
+        }
 
         // ── Stitch `has_ad_link` flag para sa /owner/private creative preview UI.
         // Frontend uses this para mag-display ng dimmed/light-blue name kapag
@@ -2108,7 +2126,7 @@ class AdsManagerCampaignsController extends Controller
                     ]);
                 }
             } else {
-                fputcsv($out, ['Ad (Headline)','Ad set','Campaign','Page','Active','First Launched','Days Running','Latest Start','Spend','CPM (1k)','Cost/Msg','Cost/Result','Cost/Purchase','Impr.','Link Clicks','Welcome Msg Rate (%)','Msgs','Conv Rate (%)','Purchases']);
+                fputcsv($out, ['Ad (Headline)','Ad set','Campaign','Page','Active','First Launched','Days Running','Latest Start','Spend','CPM (1k)','Cost/Msg','Cost/Result','Cost/Purchase','Impr.','Link Clicks','3s plays','ThruPlays (15s)','50% views','Welcome Msg Rate (%)','Msgs','Conv Rate (%)','Purchases']);
                 foreach ($rows as $r) {
                     fputcsv($out, [
                         ($r['headline'] ?? 'Ad '.$r['ad_id']), $r['ad_set_name'], $r['campaign_name'], $r['page_name'], $r['on'] ? '1':'0',
@@ -2116,7 +2134,9 @@ class AdsManagerCampaignsController extends Controller
                         ((!empty($r['running_at_start']) && !empty($r['first_started'])) ? '>= ' : '') . $daysAgo($r['first_started'] ?? null, !empty($r['on'])),
                         $r['latest_started'] ?? '',
                         $r['spend'], $r['cpm_1000'], $r['cpm_msg'], $r['cpr'], $r['cpp'],
-                        $r['impressions'], $intOrBlank($r['link_clicks'] ?? null), $rate($r['welcome_msg_rate'] ?? null),
+                        $r['impressions'], $intOrBlank($r['link_clicks'] ?? null),
+                        $intOrBlank($r['video_plays_3s'] ?? null), $intOrBlank($r['video_thruplays'] ?? null), $intOrBlank($r['video_p50'] ?? null),
+                        $rate($r['welcome_msg_rate'] ?? null),
                         $r['messages'], $rate($r['conversion_rate'] ?? null), $r['purchases']
                     ]);
                 }
