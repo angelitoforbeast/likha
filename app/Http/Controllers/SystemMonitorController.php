@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\ServerStorage;
+use App\Services\StorageWarning;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
@@ -34,6 +36,21 @@ class SystemMonitorController extends Controller
     {
         $this->checkCEO();
         return view('system_monitor.index');
+    }
+
+    /**
+     * Storage view (spec 242): the disk, the database and the binary logs only, read-only, for the CEO and the
+     * marketing OIC. The OIC watches storage; the rest of the monitor stays with the CEO.
+     */
+    public function storage(ServerStorage $storage)
+    {
+        if (!StorageWarning::canSee(Auth::user())) abort(404);
+
+        return view('system_monitor.storage', [
+            'disk'          => $storage->disk(),
+            'databaseBytes' => $storage->databaseBytes(),
+            'binaryLogs'    => $storage->binaryLogs(),
+        ]);
     }
 
     /**

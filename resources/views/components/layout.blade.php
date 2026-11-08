@@ -230,9 +230,21 @@
     </div>
   </nav>
 
+  {{-- Storage banner (spec 242): CEO and Marketing - OIC only, at 80 % used or more; null for everyone else and when
+       the disk cannot be read. Cached 60 s and fed by the disk functions only, so it never slows a page. It sits
+       under the fixed nav (mt-16), so the heading below drops its own mt-16 while it shows. --}}
+  @php $storageBanner = \App\Services\StorageWarning::banner(Auth::user()); @endphp
+  @if ($storageBanner)
+  <div data-storage-banner="{{ $storageBanner['tone'] }}" role="alert"
+       class="mt-16 border-b px-4 py-2 text-sm font-medium sm:px-6 lg:px-8 {{ $storageBanner['tone'] === 'red' ? 'border-red-300 bg-red-600 text-white' : 'border-amber-300 bg-amber-100 text-amber-900' }}">
+    {{ $storageBanner['text'] }}
+    <a href="{{ route('system.monitor.storage') }}" class="ml-2 underline">View storage</a>
+  </div>
+  @endif
+
   {{-- Page heading (hidden for checklist pages and full-viewport pages) --}}
   @unless(request()->is('checklist') || request()->is('checklist/*') || request()->is('jnt_rts') || request()->is('jnt_rts/*') || request()->is('prompt-generator') || request()->is('boardroom') || request()->is('boardroom/*'))
-  <header class="bg-white shadow-sm mt-16">
+  <header class="bg-white shadow-sm {{ $storageBanner ? '' : 'mt-16' }}">
     <div class="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
       <h1 class="text-3xl font-bold tracking-tight text-gray-900">
         {{ $heading ?? 'Dashboard' }}

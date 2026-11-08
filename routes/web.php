@@ -1238,6 +1238,8 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
     // /system-monitor — CEO-only system + DB + storage health dashboard
     Route::get   ('/system-monitor',         [SystemMonitorController::class, 'index']) ->name('system.monitor');
     Route::get   ('/system-monitor/data',    [SystemMonitorController::class, 'data'])  ->name('system.monitor.data');
+    // Storage only (disk, database, binary logs): CEO and Marketing - OIC (spec 242)
+    Route::get   ('/system-monitor/storage', [SystemMonitorController::class, 'storage'])->name('system.monitor.storage');
 
     // Consolidate/merge controls per-run (manual button + pause/resume/cancel)
     Route::post  ('/jnt_upload_v2/run/{runId}/start-merge',    [JntUploadV2Controller::class, 'startMerge'])         ->whereNumber('runId')->name('jnt.upload.v2.merge.start');
