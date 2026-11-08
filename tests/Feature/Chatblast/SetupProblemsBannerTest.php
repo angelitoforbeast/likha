@@ -41,11 +41,11 @@ class SetupProblemsBannerTest extends ChatblastTestCase
         app(PageSettings::class)->set($page, 'botcake', ChatblastSetupCheck::CHECK_KEY, json_encode($value), false, null, true);
     }
 
-    /** Ang banner ng mga problema (spec 184, pumalit sa banner na ito) bilang text, o null. */
+    /** Ang banner ng mga problema (spec 184, pumalit sa banner na ito) bilang text, o null; the spec 245 tab row is not part of the list text. */
     private function banner(string $html): ?string
     {
         return preg_match('#<div[^>]*data-alert="problems"[^>]*>(.*?)</ol>#s', $html, $m)
-            ? trim(preg_replace('/\s+/', ' ', strip_tags(preg_replace(['#<span aria-hidden="true">.*?</span>#', '#<span data-ack-(controls|back)[^>]*>.*?</span>#s'], '', $m[1])))) : null;
+            ? trim(preg_replace('/\s+/', ' ', strip_tags(preg_replace(['#<span aria-hidden="true">.*?</span>#', '#<span data-ack-(controls|back)[^>]*>.*?</span>#s', '#<div id="cb-problems-tabs"[^>]*>.*?</div>#s'], '', $m[1])))) : null;
     }
 
     public function test_S_171_4_a_page_with_an_x_shows_on_chatbot_and_chatblast_screens_with_the_reason_and_the_link(): void
