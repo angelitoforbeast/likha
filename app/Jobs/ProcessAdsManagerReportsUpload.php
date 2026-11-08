@@ -645,6 +645,11 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
                 $this->putIfExists($updateData, $r, 'impressions');
                 $this->putIfExists($updateData, $r, 'cost_per_result');
                 $this->putIfExists($updateData, $r, 'link_clicks');
+                // Video views (spec 244): only the Meta API sync sends them (the upload's header map has none). Null =
+                // no data, so the stored number stays. Not in MONOTONIC_FIELDS: a lower count does not refuse the row.
+                $this->putIfExists($updateData, $r, 'video_plays_3s');
+                $this->putIfExists($updateData, $r, 'video_thruplays');
+                $this->putIfExists($updateData, $r, 'video_p50');
                 $this->putIfExists($updateData, $r, 'ad_set_delivery');
                 $this->putIfExists($updateData, $r, 'messaging_conversations_started');
                 $this->putIfExists($updateData, $r, 'campaign_id');

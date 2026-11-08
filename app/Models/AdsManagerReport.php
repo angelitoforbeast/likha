@@ -45,6 +45,10 @@ class AdsManagerReport extends Model
 'quick_reply_2',
 'quick_reply_3',
 'item_name',
+        // Spec 244: filled by the Meta Ads sync; null = no data (image ad), never 0.
+        'video_plays_3s',
+        'video_thruplays',
+        'video_p50',
 
 
     ];

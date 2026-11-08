@@ -153,7 +153,9 @@ class AdsVideoViewsTableTest extends OwnerPrivateTestCase
         $html = $this->actingAs($this->user())->get('/ads_manager/campaigns')->assertOk()->getContent();
 
         $this->assertMatchesRegularExpression(
-            "/id:'link_clicks'.*\n.*id:'video_plays_3s',\s*label:'3s plays'.*tab:'ads'.*\n.*id:'video_thruplays',\s*label:'ThruPlays \\(15s\\)'.*tab:'ads'.*\n.*id:'video_p50',\s*label:'50% views'.*tab:'ads'/",
+            "/id:'link_clicks'[^\n]*\n(?:\s*\/\/[^\n]*\n)?\s*\{ id:'video_plays_3s',\s*label:'3s plays',[^\n]*tab:'ads' \},\n"
+                . "\s*\{ id:'video_thruplays',\s*label:'ThruPlays \(15s\)',[^\n]*tab:'ads' \},\n"
+                . "\s*\{ id:'video_p50',\s*label:'50% views',[^\n]*tab:'ads' \},\n\s*\{ id:'welcome_msg_rate'/",
             $html,
         );
         $this->assertStringContainsString("c.tab && c.tab !== this.tab", $html, 'the video columns show on the Ads tab only');

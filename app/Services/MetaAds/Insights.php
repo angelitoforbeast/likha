@@ -14,7 +14,19 @@ use Throwable;
 class Insights
 {
     public const FIELDS = 'account_id,ad_id,ad_name,adset_id,adset_name,campaign_id,campaign_name,reach,impressions,'
-        . 'inline_link_clicks,spend,actions,cost_per_action_type,results,cost_per_result,attribution_setting,date_start,date_stop';
+        . 'inline_link_clicks,spend,actions,cost_per_action_type,results,cost_per_result,attribution_setting,date_start,date_stop,'
+        . 'video_thruplay_watched_actions,video_p50_watched_actions';
+
+    /**
+     * Spec 244. Each video number is the `video_view` entry of a list of {action_type, value}:
+     * - 3-second plays: in `actions` (already requested), which is what Ads Manager calls "3-second video plays";
+     *   `video_play_actions` / the `video_play` action count plays that merely started, so they are not used.
+     * - ThruPlays: `video_thruplay_watched_actions` (15 seconds, or to the end of a shorter video). This is the
+     *   "15 seconds" number because it is the one Ads Manager shows; `video_15_sec_watched_actions` is still in Meta's
+     *   field list but is not requested, so the report has one 15-second number and it matches Ads Manager.
+     * - 50% watched: `video_p50_watched_actions`.
+     */
+    public const VIDEO_VIEW = 'video_view';
 
     public const AD_FIELDS = 'id,effective_status,'
         . 'adset{id,effective_status,daily_budget,lifetime_budget,start_time,end_time,optimization_goal},'
@@ -164,6 +176,9 @@ class Insights
             'reach'                           => self::int($r['reach'] ?? null),
             'impressions'                     => self::int($r['impressions'] ?? null),
             'link_clicks'                     => self::int($r['inline_link_clicks'] ?? null),
+            'video_plays_3s'                  => self::videoViews($r['actions'] ?? null),
+            'video_thruplays'                 => self::videoViews($r['video_thruplay_watched_actions'] ?? null),
+            'video_p50'                       => self::videoViews($r['video_p50_watched_actions'] ?? null),
             'messaging_conversations_started' => self::action($r['actions'] ?? [], [self::MESSAGING]),
             'purchases'                       => self::action($r['actions'] ?? [], self::PURCHASE_KEYS),
             'results'                         => $results,
@@ -256,6 +271,23 @@ class Insights
             foreach ($actions as $a) {
                 if (($a['action_type'] ?? null) === $k && is_numeric($a['value'] ?? null)) return (int) round((float) $a['value']);
             }
+        }
+
+        return null;
+    }
+
+    /**
+     * The `video_view` value of a Meta list, or null when there is none (an image ad) or the answer has an unknown
+     * shape: the answer is untrusted, and 0 would read as a video nobody watched.
+     */
+    private static function videoViews(mixed $list): ?int
+    {
+        if (!is_array($list) || !array_is_list($list)) return null;
+        foreach ($list as $a) {
+            if (!is_array($a) || ($a['action_type'] ?? null) !== self::VIDEO_VIEW) continue;
+            $v = $a['value'] ?? null;
+
+            return is_numeric($v) && (float) $v >= 0 ? (int) round((float) $v) : null;
         }
 
         return null;

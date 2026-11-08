@@ -7,7 +7,9 @@ use App\Models\UploadLog;
 use App\Models\User;
 use App\Services\MetaAds\Insights;
 use App\Services\MetaAds\Sync;
+use Illuminate\Http\Client\Factory as HttpFactory;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use PHPUnit\Framework\Attributes\DataProvider;
 
@@ -42,6 +44,9 @@ class MetaAdsVideoViewsTest extends MetaAdsTestCase
         Sync::setAccounts(['111']);
         $ana = User::where('email', 'ana@example.test')->first() ?? $this->user('Marketing', 'ana@example.test');
         $this->connect($ana, self::TOKEN_ANA, ['111']);
+        // A fresh fake per run: with stacked fakes the first one answers, and each run here has its own recorded answer.
+        Http::swap(new HttpFactory());
+        Http::preventStrayRequests();
         $this->fakeGraph(
             insights: ['111' => $insights],
             ads: ['111' => array_map(fn ($r) => self::adDetail($r['ad_id']), $insights)],
