@@ -64,7 +64,7 @@ New slice 245 in `qa/stories.md`: S-245.1 (6 cases), S-245.2 (1), S-245.3 (1), a
 
 ## Head commit
 
-HEAD_PLACEHOLDER
+`ae5c9ffc` (code and evidence; this line is added by the commit after it, "docs: head commit in the spec 245 result").
 
 ## For the reviewer before release
 
