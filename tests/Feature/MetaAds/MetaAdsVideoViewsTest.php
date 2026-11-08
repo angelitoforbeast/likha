@@ -160,25 +160,48 @@ class MetaAdsVideoViewsTest extends MetaAdsTestCase
         $this->assertSame(1, DB::table('ads_manager_reports')->where('ad_id', 'a1')->count());
     }
 
-    public function test_S3_an_uploaded_export_leaves_the_synced_video_numbers_as_they_are(): void
+    /** An Ads Manager export with one row for a1; since spec 246 the three video columns are required. */
+    private function uploadA1(array $video, string $spend = '100.50', string $impressions = '1600', string $clicks = '40'): UploadLog
     {
-        $this->sync([self::insight('111', 'a1', self::DAY, 10.00, self::video())]);
-
         Storage::fake('local');
         $path = 'uploads/ads_manager_reports/t.xlsx';
         Storage::disk('local')->makeDirectory('uploads/ads_manager_reports');
         $writer = new \OpenSpout\Writer\XLSX\Writer();
         $writer->openToFile(Storage::disk('local')->path($path));
         $writer->addRow(\OpenSpout\Common\Entity\Row::fromValues(['Day', 'Ad ID', 'Account ID', 'Campaign ID', 'Ad set ID', 'Page name', 'Campaign name',
-            'Ad set name', 'Amount spent (PHP)', 'Impressions', 'Results', 'Result type', 'Link clicks']));
-        $writer->addRow(\OpenSpout\Common\Entity\Row::fromValues([self::DAY, 'a1', '111', 'ca1', 'asa1', 'Page P1', 'Camp', 'Adset', '100.50', '1600', '12',
-            'Messaging conversations started', '40']));
+            'Ad set name', 'Amount spent (PHP)', 'Impressions', 'Results', 'Result type', 'Link clicks', '3-second video plays', 'ThruPlays', 'Video plays at 50%']));
+        $writer->addRow(\OpenSpout\Common\Entity\Row::fromValues(array_merge([self::DAY, 'a1', '111', 'ca1', 'asa1', 'Page P1', 'Camp', 'Adset', $spend, $impressions, '1',
+            'Messaging conversations started', $clicks], $video)));
         $writer->close();
         $log = UploadLog::create(['type' => 'ads_manager_reports', 'disk' => 'local', 'path' => $path, 'original_name' => 't.xlsx', 'status' => 'queued']);
         (new ProcessAdsManagerReportsUpload($path, null, $log->id))->handle();
 
-        $this->assertSame(['done', 0, 1], [$log->fresh()->status, (int) $log->fresh()->inserted, (int) $log->fresh()->updated]);
+        return $log->fresh();
+    }
+
+    public function test_S3_an_uploaded_export_with_blank_video_cells_leaves_the_synced_video_numbers_as_they_are(): void
+    {
+        $this->sync([self::insight('111', 'a1', self::DAY, 10.00, self::video())]);
+
+        $log = $this->uploadA1(['', '', '']);
+
+        $this->assertSame(['done', 0, 1], [$log->status, (int) $log->inserted, (int) $log->updated]);
         $this->assertSame([100.5, 40], [(float) DB::table('ads_manager_reports')->value('amount_spent_php'), (int) DB::table('ads_manager_reports')->value('link_clicks')]);
+        $this->assertSame(['video_plays_3s' => 4210, 'video_thruplays' => 1375, 'video_p50' => 980], $this->videoOf('a1'));
+    }
+
+    public function test_S_246_3_the_upload_and_the_sync_write_the_same_columns_and_neither_overwrites_a_number_with_null(): void
+    {
+        $this->assertSame('done', $this->uploadA1(['300', '120', '90'], '1.00', '10', '1')->status);
+        $this->assertSame(['video_plays_3s' => 300, 'video_thruplays' => 120, 'video_p50' => 90], $this->videoOf('a1'));
+
+        // A later sync of the same day and ad without video numbers updates the row and keeps the uploaded ones.
+        $this->assertSame('done', $this->sync([self::insight('111', 'a1', self::DAY, 50.00)])->status);
+        $this->assertSame(50.0, (float) DB::table('ads_manager_reports')->value('amount_spent_php'));
+        $this->assertSame(['video_plays_3s' => 300, 'video_thruplays' => 120, 'video_p50' => 90], $this->videoOf('a1'));
+
+        // And a sync with video numbers replaces them, as the upload would.
+        $this->sync([self::insight('111', 'a1', self::DAY, 60.00, self::video())]);
         $this->assertSame(['video_plays_3s' => 4210, 'video_thruplays' => 1375, 'video_p50' => 980], $this->videoOf('a1'));
     }
 }

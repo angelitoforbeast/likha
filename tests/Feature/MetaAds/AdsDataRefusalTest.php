@@ -33,9 +33,9 @@ class AdsDataRefusalTest extends MetaAdsTestCase
         $writer = new \OpenSpout\Writer\XLSX\Writer();
         $writer->openToFile(Storage::disk('local')->path($path));
         $writer->addRow(\OpenSpout\Common\Entity\Row::fromValues(['Day', 'Ad ID', 'Account ID', 'Campaign ID', 'Ad set ID', 'Page name', 'Campaign name',
-            'Ad set name', 'Amount spent (PHP)', 'Impressions', 'Reach', 'Results', 'Result type', 'Link clicks']));
+            'Ad set name', 'Amount spent (PHP)', 'Impressions', 'Reach', 'Results', 'Result type', 'Link clicks', '3-second video plays', 'ThruPlays', 'Video plays at 50%']));
         $writer->addRow(\OpenSpout\Common\Entity\Row::fromValues([self::DAY, 'a1', '111', 'c1', 'as1', 'Page P1', 'New camp', 'Adset', $spend,
-            $impressions, '900', '12', 'Messaging conversations started', $clicks]));
+            $impressions, '900', '12', 'Messaging conversations started', $clicks, '', '', '']));
         $writer->close();
         $log = UploadLog::create(['type' => 'ads_manager_reports', 'disk' => 'local', 'path' => $path, 'original_name' => 't.xlsx',
             'status' => 'queued', 'user_id' => $userId]);
