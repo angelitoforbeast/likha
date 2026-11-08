@@ -1,6 +1,90 @@
 # Spec 247 result: the Retrieve 2 page answers in seconds instead of timing out
 
-Status: done on branch `fix/247-retrieve2-speed` (from `eeb2e1f2`). Code head: `3c621ed6`. This result is committed on top of it.
+Status: done on branch `fix/247-retrieve2-speed` (from `eeb2e1f2`), with amendment 247-1 applied. Code head: `181896b2`. This result is committed on top of it. The original result follows the amendment section and still describes the `sp` set where the amendment does not override it.
+
+## Amendments applied
+
+### Amendment 247-1: a one-space IN probe replaces the "sp" set (2026-11-08)
+
+**Why.** The reviewer's read-only check on production found that the `sp` scan alone costs 8.3 s per request: `fb_name LIKE '% '` can only full-scan the index. The data also showed:
+- no `PAGE` has leading whitespace;
+- exactly 7 `fb_name` values have a leading space, each a single 0x20;
+- 52 `fb_name` values have trailing spaces only, which PAD SPACE already ignores.
+
+**What changed.**
+- `spacedOrderNames()` and the `sp` left join are removed.
+- `nameNotYetAnOrderSql()` now matches the name with `mo.fb_name IN (TRIM(pc.full_name), CONCAT(' ', TRIM(pc.full_name)))`. That is two lookups on `(PAGE, fb_name)`.
+- The bare `mo.PAGE = TRIM(...)` stays.
+- The sqlite-only `COLLATE NOCASE` stays. For the IN, it sits on the left operand (`mo.fb_name COLLATE NOCASE IN (...)`), because sqlite takes an IN list's collation from its left side. MySQL gets no extra text.
+
+**Accepted gap (reviewer's decision).** An order name with two or more leading spaces would no longer hide its conversation. There are 0 such rows today.
+
+The sections below that describe `sp` (plan step 4 and the "Why the results stay the same" case for spaced rows) are superseded by this amendment. For today's data, the IN probe matches what the old `LOWER(TRIM())` matched.
+
+**Tests (tests first, `b29c70ac`; with the old head only the shape test failed):**
+- New: `test_a_single_leading_space_on_the_order_name_hides_the_unpadded_conversation_name_on_its_page_only`. An order `' mia lopez'` hides `Mia Lopez` on Page Uno and not on Page Dos.
+- `test_an_order_whose_fb_name_has_a_leading_space_still_hides_its_conversation` still passes unchanged.
+- The query-shape test now asserts:
+  - the IN probe is present;
+  - the main statement has no `LIKE` at all and no `' %'`/`'% '` binding;
+  - there is no `group by LOWER(TRIM(PAGE)), LOWER(TRIM(fb_name))`.
+- Test changes:
+  - The "surrounding spaces" case uses `' Cara LIM  '` (one leading space) instead of two, per the accepted gap.
+  - Without `sp`, sqlite has nothing that ignores trailing spaces. This test file therefore registers a test-only `NOCASE` collation that behaves like `utf8mb4_unicode_ci`: case-insensitive, with trailing spaces ignored. It is registered the same way as the `CONVERT_TZ` stand-in. The controller is unchanged by this.
+- `tests/Feature/PancakePsid/`: OK, 34 tests, 165 assertions.
+
+**Full suite at `181896b2` (shim bootstrap):**
+
+| Tests | Passed | Failed | Skipped | Deprecations |
+|---|---|---|---|---|
+| 4805 | 4797 | 2 | 6 | 99 |
+
+The 2 failures are the same known ones as at base `eeb2e1f2` (4792 tests: 4784 passed, 2 failed, 6 skipped): `ExampleTest` and `ItemTableFitScriptTest`. There are no new failures.
+
+**Production check already done by the reviewer** with head `120b2578`, before the migration, Manila day 2026-11-07:
+- old 17 rows, new 17 rows, 0 differences;
+- the NOT EXISTS uses `macro_output_page_fb_name_idx`;
+- `pancake_page_id` is `utf8mb4_unicode_ci`.
+
+That check ran the `sp` version. The amended query has not been re-checked on production; see "Check before release".
+
+**New page SQL (MySQL grammar, `toSql()`, 2026-10-14 to 2026-10-20).** The export is the same without `limit 200 offset 0`.
+
+```sql
+select 
+            CONVERT_TZ(pc.created_at,'+00:00','+08:00') as date_created,
+            COALESCE(pi.pancake_page_name, pc.pancake_page_id) as page,
+            sm.shop_details as shop_details,
+            pc.full_name,
+            pc.psid as psid,
+            pc.customers_chat
+         from `pancake_conversations` as `pc` left join `pancake_id` as `pi` on `pi`.`pancake_page_id` = `pc`.`pancake_page_id` left join (select sc.ts_date, sc.page_key, MIN(sc.shop_details) as shop_details from (select 
+                ts_date,
+                LOWER(TRIM(`PAGE`)) as page_key,
+                TRIM(`SHOP DETAILS`) as shop_details,
+                COUNT(*) as cnt
+             from `macro_output` where `ts_date` is not null and TRIM(ts_date) <> '' and `ts_date` between ? and ? and `PAGE` is not null and TRIM(`PAGE`) <> '' and `SHOP DETAILS` is not null and TRIM(`SHOP DETAILS`) <> '' group by ts_date, LOWER(TRIM(`PAGE`)), TRIM(`SHOP DETAILS`)) as `sc` inner join (select ts_date, page_key, MAX(cnt) as max_cnt from (select 
+                ts_date,
+                LOWER(TRIM(`PAGE`)) as page_key,
+                TRIM(`SHOP DETAILS`) as shop_details,
+                COUNT(*) as cnt
+             from `macro_output` where `ts_date` is not null and TRIM(ts_date) <> '' and `ts_date` between ? and ? and `PAGE` is not null and TRIM(`PAGE`) <> '' and `SHOP DETAILS` is not null and TRIM(`SHOP DETAILS`) <> '' group by ts_date, LOWER(TRIM(`PAGE`)), TRIM(`SHOP DETAILS`)) as `scm` group by ts_date, page_key) as `mx` on `mx`.`ts_date` = `sc`.`ts_date` and `mx`.`page_key` = `sc`.`page_key` and `mx`.`max_cnt` = `sc`.`cnt` group by sc.ts_date, sc.page_key) as `sm` on `sm`.`ts_date` = DATE(CONVERT_TZ(pc.created_at,'+00:00','+08:00')) and `sm`.`page_key` = LOWER(TRIM(COALESCE(pi.pancake_page_name, pc.pancake_page_id))) where ((
+            (pc.psid IS NULL AND (NOT EXISTS (
+                SELECT 1 FROM macro_output mo
+                WHERE mo.`PAGE` = TRIM(COALESCE(pi.pancake_page_name, pc.pancake_page_id))
+                  AND mo.`fb_name` IN (TRIM(pc.full_name), CONCAT(' ', TRIM(pc.full_name)))
+                  AND TRIM(mo.`PAGE`) <> ''
+                  AND TRIM(mo.`fb_name`) <> ''
+            )))
+            OR (pc.psid IS NOT NULL AND NOT EXISTS (
+                SELECT 1 FROM macro_output mo
+                WHERE mo.botcake_psid = pc.psid
+                  AND (pi.pancake_page_name IS NULL OR LOWER(TRIM(mo.`PAGE`)) = LOWER(TRIM(pi.pancake_page_name)))
+            ))
+        )) and `pc`.`created_at` >= ? and `pc`.`created_at` < ? order by `pc`.`created_at` desc limit 200 offset 0
+```
+
+Bindings: `["2026-10-14","2026-10-20","2026-10-14","2026-10-20","2026-10-13 16:00:00","2026-10-20 16:00:00"]`
 
 ## Plan (as built)
 
@@ -109,7 +193,7 @@ select
 
 Bindings: `["2026-10-14","2026-10-20","2026-10-14","2026-10-20","2026-10-14","2026-10-20"]`
 
-### New
+### New (before amendment 247-1; the amended page SQL is in "Amendments applied")
 
 ```sql
 select 
@@ -153,9 +237,12 @@ Bindings: `[" %","% "," %","% ","2026-10-14","2026-10-20","2026-10-14","2026-10-
 
 ## Files changed
 
-- `app/Http/Controllers/PancakeRetrieve2Controller.php`: shared `range()` and `retrieveQuery()`, new `spacedOrderNames()` and `nameNotYetAnOrderSql()`, and `notYetAnOrder()` uses the new name rule (PSID branch unchanged).
+- `app/Http/Controllers/PancakeRetrieve2Controller.php`:
+  - shared `range()` and `retrieveQuery()`;
+  - new `nameNotYetAnOrderSql()` (the one-space IN probe since amendment 247-1);
+  - `notYetAnOrder()` uses the new name rule; its PSID branch is unchanged.
 - `database/migrations/2026_11_21_100000_add_created_at_index_to_pancake_conversations.php` (new)
-- `tests/Feature/PancakePsid/PancakeRetrieve2SpeedTest.php` (new, 12 tests)
+- `tests/Feature/PancakePsid/PancakeRetrieve2SpeedTest.php` (new, 13 tests)
 - `docs/specs/247-retrieve2-speed.md` (spec, unchanged copy) and this result
 
 ## Commits
@@ -163,20 +250,21 @@ Bindings: `[" %","% "," %","% ","2026-10-14","2026-10-20","2026-10-14","2026-10-
 - `2f0875ac` docs: spec 247 retrieve2 speed
 - `e5fa0655` test: retrieve2 keeps its rows while filtering created_at bare and probing macro_output by page and name (spec 247)
 - `7ed958bb` fix: retrieve2 filters created_at with UTC bounds and probes macro_output by bare page and name (spec 247)
-- `3c621ed6` fix: online index on pancake_conversations.created_at for retrieve2 (spec 247) (code head)
-- plus the commit of this result (branch head)
+- `3c621ed6` fix: online index on pancake_conversations.created_at for retrieve2 (spec 247)
+- `120b2578` docs: spec 247 result
+- `b29c70ac` test: retrieve2 probes a one-leading-space order name by index and scans macro_output by no pattern (spec 247, amendment 1)
+- `181896b2` fix: retrieve2 matches a one-leading-space order name with an index probe instead of scanning macro_output (spec 247, amendment 1) (code head)
+- plus the commit of this updated result (branch head)
 
 ## Check before release
 
-1. **EXPLAIN the new SQL on production (read-only)**, after the index exists, or with the index on a copy. Expected:
-   - `pc`: range on `pancake_conversations_created_at_idx`;
-   - the `mo` NOT EXISTS (`DEPENDENT SUBQUERY`): `ref` on `macro_output_page_fb_name_idx` using both key parts;
-   - `sp`: one materialized derived table read once, probably a full scan of the `(PAGE, fb_name)` covering index (about 947k entries) because `LIKE '% '` cannot seek. Time it alone:
-     `SELECT COUNT(*) FROM macro_output WHERE PAGE LIKE ' %' OR PAGE LIKE '% ' OR fb_name LIKE ' %' OR fb_name LIKE '% '`
-     It should be well under a second, and the count should be the known ~59. If it is the slow part, it can be narrowed later without changing results.
-   - `shopMode`: check that it is not the slow part. The spec left it as it was.
-2. **Compare old and new counts read-only** for the same range and filters. The old query may take minutes, so use a session-level timeout or a 1-day range. Wrap both in `SELECT COUNT(*) FROM (...) t`, with the bindings above.
-3. **Collation of `pancake_conversations.pancake_page_id`.** The bare probe compares `mo.PAGE` with `TRIM(COALESCE(pi.pancake_page_name, pc.pancake_page_id))`. The spec checked `pancake_page_name` and `full_name` (`utf8mb4_unicode_ci`), but not `pancake_page_id`. If it has another collation, MySQL may not use the index for that comparison. EXPLAIN shows it, and so does `SHOW FULL COLUMNS FROM pancake_conversations`.
-4. **Migration window.** The online index add on about 730k rows takes seconds to a minute. It needs a short metadata lock at its start and end, so run it when no long transaction holds `pancake_conversations`. `migrate` runs it as part of the usual deploy. If MySQL answers that `LOCK=NONE` is not supported, it changed nothing; report back rather than dropping the clause.
-5. **Time zone.** `created_at` is compared as stored, like the old `CONVERT_TZ(created_at,'+00:00','+08:00')`, which assumed the session shows UTC. Both read the same value, so nothing changes as long as the connection's session time zone stays as it is.
-6. Not run against MySQL locally (no credentials on this machine). The collation behaviour (case and trailing spaces in `=`) is covered in sqlite by `COLLATE NOCASE` plus the `sp` set. MySQL itself still needs the production read-only check in 2.
+1. **Re-run the read-only old/new comparison and EXPLAIN on the amended query.** The reviewer's check ran the `sp` version. Expected:
+   - same rows as old;
+   - the `mo` NOT EXISTS uses `ref`/`range` on `macro_output_page_fb_name_idx` with both key parts (two values from the IN);
+   - no full scan of `macro_output` anywhere except what `shopMode` does inside its `ts_date` range;
+   - `shopMode` is not the slow part.
+2. **Plan with the new index.** After the migration, `pc` should show a range on `pancake_conversations_created_at_idx`. The reviewer's run was before the migration.
+3. **Migration window.** The online index add on about 730k rows takes seconds to a minute. It needs a short metadata lock at its start and end, so run it when no long transaction holds `pancake_conversations`. If MySQL answers that `LOCK=NONE` is not supported, it changed nothing; report back rather than dropping the clause.
+4. **Time zone.** `created_at` is compared as stored, like the old `CONVERT_TZ(created_at,'+00:00','+08:00')`, which assumed the session shows UTC. Keep the connection's session time zone as it is.
+5. **Accepted gap.** A future order name with two or more leading spaces would not hide its conversation. There are 0 such rows today, and normalising names on insert is out of scope.
+6. Not run against MySQL locally (no credentials on this machine). In sqlite, the collation behaviour comes from the test-only `NOCASE` stand-in.
