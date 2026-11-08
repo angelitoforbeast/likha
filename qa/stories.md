@@ -4771,27 +4771,36 @@ Threat model: the server's own disk numbers and database answers are trusted; no
 
 As the CEO, I want to give the Storage view and its 80% banner to a role by checking the "Storage" link in `/owner/nav-settings`, like every other page, so who watches storage is not written in code.
 
-Threat model: the nav tables (written only by the CEO through nav settings) and the server's disk numbers are trusted; no request input is used. Risk tier: low. Tests: `tests/Feature/SystemMonitor/StorageNavAccessTest.php`, `tests/Feature/Chatblast/ChatblastStorageBannerTest.php`; the spec 242 tests seed the nav rows through the new migration (`StorageTestCase`).
+Threat model: the nav tables (written only by the CEO through nav settings) and the server's disk and server numbers are trusted; no request input is used. Risk tier: low. Tests: `tests/Feature/SystemMonitor/StorageNavAccessTest.php`, `tests/Feature/SystemMonitor/StorageServerStatsTest.php`, `tests/Feature/Chatblast/ChatblastStorageBannerTest.php`; the spec 242 tests seed the nav rows through the new migration (`StorageTestCase`).
 
 ### S-243.1 A "Storage" nav link like the others (P1)
 | Case | Type | Given / When / Then | Test | Last run |
 |------|------|---------------------|------|----------|
-| S-243.1.1 | happy | After the migration: one link `storage`, "Storage", `/system-monitor/storage`, `fa-solid fa-hard-drive`, active, sorted last; a visibility row for CEO, Marketing - OIC, Marketing, Data Encoder, Data Encoder - OIC, checked for CEO and Marketing - OIC only | `test_S1_the_migration_adds_the_storage_link_last_checked_for_ceo_and_oic_only` | |
-| S-243.1.2 | edge | Running `up()` again adds nothing; `down()` removes the link and its rows only, and is safe to run twice | `test_S1_the_migration_is_idempotent_and_down_removes_the_link` | |
-| S-243.1.3 | happy | `/owner/nav-settings` lists Storage with its URL, icon and a checkbox per role (CEO and OIC checked) | `test_S1_nav_settings_lists_storage_like_the_other_links` | |
-| S-243.1.4 | happy/negative | The menu shows Storage to a checked role (OIC, CEO, Marketing once checked), not to an unchecked one (Marketing, OIC once unchecked) | `test_S1_the_menu_shows_storage_to_a_checked_role_only` | |
+| S-243.1.1 | happy | After the migration: one link `storage`, "Storage", `/system-monitor/storage`, `fa-solid fa-hard-drive`, active, sorted last; a visibility row for CEO, Marketing - OIC, Marketing, Data Encoder, Data Encoder - OIC, checked for CEO and Marketing - OIC only | `test_S1_the_migration_adds_the_storage_link_last_checked_for_ceo_and_oic_only` | 2026-11-08 passed |
+| S-243.1.2 | edge | Running `up()` again adds nothing; `down()` removes the link and its rows only, and is safe to run twice | `test_S1_the_migration_is_idempotent_and_down_removes_the_link` | 2026-11-08 passed |
+| S-243.1.3 | happy | `/owner/nav-settings` lists Storage with its URL, icon and a checkbox per role (CEO and OIC checked) | `test_S1_nav_settings_lists_storage_like_the_other_links` | 2026-11-08 passed |
+| S-243.1.4 | happy/negative | The menu shows Storage to a checked role (OIC, CEO, Marketing once checked), not to an unchecked one (Marketing, OIC once unchecked) | `test_S1_the_menu_shows_storage_to_a_checked_role_only` | 2026-11-08 passed |
 
 ### S-243.2 The Storage view follows `NavAccess` (P1)
 | Case | Type | Given / When / Then | Test | Last run |
 |------|------|---------------------|------|----------|
-| S-243.2.1 | happy | A checked role opens the view (OIC; Data Encoder once checked); CEO always, even with the CEO row unchecked | `test_S2_a_checked_role_opens_the_view_and_the_ceo_always_does` | |
-| S-243.2.2 | negative | Unchecked roles (Marketing, Data Encoder, Data Encoder - OIC, a role not in nav settings, no role) get 404; an inactive link closes it for all but the CEO | `test_S2_an_unchecked_role_gets_404`, `test_S2_an_inactive_link_closes_the_view_for_everyone_but_the_ceo` | |
-| S-243.2.3 | edge | The CEO unchecks Marketing - OIC through `POST /owner/nav-settings`: the OIC gets 404 and no banner on the next view (no 60 s wait); checking Marketing gives Marketing the view and the banner; Reset drops the cached answers too | `test_S2_S3_unchecking_the_oic_in_nav_settings_closes_the_view_and_the_banner_at_once`, `test_S2_S3_checking_marketing_in_nav_settings_gives_marketing_the_view_and_the_banner`, `test_S2_S3_reset_in_nav_settings_also_drops_the_cached_answers` | |
+| S-243.2.1 | happy | A checked role opens the view (OIC; Data Encoder once checked); CEO always, even with the CEO row unchecked | `test_S2_a_checked_role_opens_the_view_and_the_ceo_always_does` | 2026-11-08 passed |
+| S-243.2.2 | negative | Unchecked roles (Marketing, Data Encoder, Data Encoder - OIC, a role not in nav settings, no role) get 404; an inactive link closes it for all but the CEO | `test_S2_an_unchecked_role_gets_404`, `test_S2_an_inactive_link_closes_the_view_for_everyone_but_the_ceo` | 2026-11-08 passed |
+| S-243.2.3 | edge | The CEO unchecks Marketing - OIC through `POST /owner/nav-settings`: the OIC gets 404 and no banner on the next view (no 60 s wait); checking Marketing gives Marketing the view and the banner; Reset drops the cached answers too | `test_S2_S3_unchecking_the_oic_in_nav_settings_closes_the_view_and_the_banner_at_once`, `test_S2_S3_checking_marketing_in_nav_settings_gives_marketing_the_view_and_the_banner`, `test_S2_S3_reset_in_nav_settings_also_drops_the_cached_answers` | 2026-11-08 passed |
 
 ### S-243.3 The banner shows to exactly those roles, without a query per page view (P1)
 | Case | Type | Given / When / Then | Test | Last run |
 |------|------|---------------------|------|----------|
-| S-243.3.1 | happy/negative | At 95 % the red banner shows to CEO, OIC and a checked Data Encoder - OIC, not to unchecked Marketing or Data Encoder, and each gets 200 or 404 on the view to match; the same on the Chatblast/Chatbot layout (Marketing checked sees it, OIC unchecked does not) | `test_S3_the_banner_shows_to_exactly_the_roles_that_may_open_the_view`, `test_243_S3_the_banner_follows_the_storage_link_in_nav_settings_on_chatblast_and_chatbot` | |
-| S-243.3.2 | perf | Under 80 % (or a failed disk read) `banner()` runs no query at all | `test_S3_under_80_percent_the_banner_runs_no_query_at_all` | |
-| S-243.3.3 | perf | At 85 % the first view per role asks nav settings once; the same role (any spacing) within 60 s asks nothing; a "no" is cached too; after 61 s it asks again | `test_S3_the_access_answer_is_cached_per_role_for_60_seconds` | |
-| S-243.3.4 | edge | Without the nav tables only the CEO sees the banner (as `NavAccess`) | `test_S3_without_the_nav_tables_only_the_ceo_sees_it` | |
+| S-243.3.1 | happy/negative | At 95 % the red banner shows to CEO, OIC and a checked Data Encoder - OIC, not to unchecked Marketing or Data Encoder, and each gets 200 or 404 on the view to match; the same on the Chatblast/Chatbot layout (Marketing checked sees it, OIC unchecked does not) | `test_S3_the_banner_shows_to_exactly_the_roles_that_may_open_the_view`, `test_243_S3_the_banner_follows_the_storage_link_in_nav_settings_on_chatblast_and_chatbot` | 2026-11-08 passed |
+| S-243.3.2 | perf | Under 80 % (or a failed disk read) `banner()` runs no query at all | `test_S3_under_80_percent_the_banner_runs_no_query_at_all` | 2026-11-08 passed |
+| S-243.3.3 | perf | At 85 % the first view per role asks nav settings once; the same role (any spacing) within 60 s asks nothing; a "no" is cached too; after 61 s it asks again | `test_S3_the_access_answer_is_cached_per_role_for_60_seconds` | 2026-11-08 passed |
+| S-243.3.4 | edge | Without the nav tables only the CEO sees the banner (as `NavAccess`) | `test_S3_without_the_nav_tables_only_the_ceo_sees_it` | 2026-11-08 passed |
+
+### S-243.4 The Storage view also shows the server stats (P1, amendment 243-1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-243.4.1 | happy | A checked role (OIC) sees "Server stats" after the disk: memory used / total MB with %, memory available (MB under 1 GB, else GB with 2 decimals, as on the monitor), swap used / total MB, CPU load 1 / 5 / 15 min with the cores, uptime (`3d 5h 7m`, `2h 15m`) | `test_S4_the_oic_sees_the_server_stats_on_the_storage_view`, `test_S4_memory_available_under_1_gb_is_shown_in_mb_and_short_uptimes_drop_the_days` | 2026-11-08 passed |
+| S-243.4.2 | negative | Same access as the rest of the view: unchecked `Marketing` gets 404 and nothing is read; once checked, sees the section | `test_S4_the_section_follows_the_storage_link_like_the_rest_of_the_view` | 2026-11-08 passed |
+| S-243.4.3 | edge | Nothing readable (no /proc, no `sys_getloadavg`): every line says "Not available", the page renders; only the load missing: only that line says it, no cores | `test_S4_unreadable_stats_say_not_available_and_the_page_renders`, `test_S4_one_stat_missing_says_not_available_only_on_its_line` | 2026-11-08 passed |
+| S-243.4.4 | perf | One shared reader and cache: two views in 10 s read once, the cache entry is the monitor's `sysmon_server`, read again after 11 s; the CEO monitor's `getServerStats` returns the same numbers with the same keys | `test_S4_the_view_shares_the_ceo_monitors_10_second_cache`, `test_S4_the_ceo_monitor_reads_the_same_shared_code` | 2026-11-08 passed |
+| S-243.4.5 | negative | The database table list, file storage and processes are not on the Storage view; the OIC still gets 404 on `/system-monitor` | `test_S4_the_database_tables_and_processes_stay_on_the_ceo_monitor` | 2026-11-08 passed |
