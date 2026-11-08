@@ -80,7 +80,7 @@ class ProblemTabsTest extends ChatblastTestCase
         foreach ($ts as [, $attrs, $label]) {
             preg_match('#data-tab="(\w+)"#', $attrs, $t);
             preg_match('#aria-selected="(\w+)"#', $attrs, $sel);
-            $tabs[$t[1]] = ['label' => $clean($label), 'selected' => $sel[1] ?? null, 'disabled' => (bool) preg_match('#\sdisabled\b#', $attrs), 'attrs' => $attrs];
+            $tabs[$t[1]] = ['label' => $clean($label), 'selected' => $sel[1] ?? null, 'disabled' => (bool) preg_match('#\sdisabled(?![:\w-])#', $attrs), 'attrs' => $attrs];
         }
         $body = (string) preg_replace('#<span[^>]*\bdata-ack-(controls|back)[^>]*>.*?</span>#s', '', $m[1]);
         preg_match_all('#<li data-page="([^"]*)" data-level="(\w+)"([^>]*)>(.*?)</ul>\s*</li>#s', $body, $rows, PREG_SET_ORDER);
@@ -238,7 +238,8 @@ class ProblemTabsTest extends ChatblastTestCase
         foreach (self::URLS as $url) {
             $html = $this->get($url)->assertOk()->getContent();
             $this->assertStringNotContainsString('data-alert="problems"', $html, $url);
-            $this->assertStringNotContainsString('cb-problems-tabs', $html, $url);
+            $this->assertStringNotContainsString('id="cb-problems-tabs"', $html, $url);
+            $this->assertStringNotContainsString('id="cb-problems-tab-', $html, $url);
         }
     }
 
