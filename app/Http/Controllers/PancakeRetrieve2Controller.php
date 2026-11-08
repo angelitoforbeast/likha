@@ -118,13 +118,14 @@ class PancakeRetrieve2Controller extends Controller
      */
     private function retrieveQuery(string $dateFrom, string $dateTo, string $pageContains, string $nameContains)
     {
-        // created_at is stored in UTC. Comparing the bare column with UTC bounds lets MySQL range-scan its index;
-        // DATE(CONVERT_TZ(created_at)) made it read every conversation. Manila has no DST, so the bounds are exact.
-        $fromUtc = Carbon::parse($dateFrom, self::TZ)->startOfDay()->utc()->format('Y-m-d H:i:s');
-        $toUtc   = Carbon::parse($dateTo, self::TZ)->addDay()->startOfDay()->utc()->format('Y-m-d H:i:s');
+        // created_at is stored as Manila wall-clock time (the upload job writes now() in Asia/Manila and the MySQL
+        // session is UTC, so the TIMESTAMP comes back unchanged). The Manila dates are therefore the bounds as they
+        // are, with no conversion; comparing the bare column keeps the created_at index in use (spec 247, spec 248).
+        $fromBound = Carbon::parse($dateFrom, self::TZ)->startOfDay()->format('Y-m-d H:i:s');
+        $toBound   = Carbon::parse($dateTo, self::TZ)->addDay()->startOfDay()->format('Y-m-d H:i:s');
 
-        $convDateExpr     = "DATE(CONVERT_TZ(pc.created_at,'+00:00','+08:00'))";
-        $convDateTimeExpr = "CONVERT_TZ(pc.created_at,'+00:00','+08:00')";
+        $convDateExpr     = "DATE(pc.created_at)";
+        $convDateTimeExpr = "pc.created_at";
 
         // Page name expression used for display + matching
         $pageNameExpr = "COALESCE(pi.pancake_page_name, pc.pancake_page_id)";
@@ -174,8 +175,8 @@ class PancakeRetrieve2Controller extends Controller
                      ->on('sm.page_key', '=', DB::raw($pageKeyExpr));
             })
             ->where(fn ($w) => $this->notYetAnOrder($w))
-            ->where('pc.created_at', '>=', $fromUtc)
-            ->where('pc.created_at', '<', $toUtc);
+            ->where('pc.created_at', '>=', $fromBound)
+            ->where('pc.created_at', '<', $toBound);
 
         if ($pageContains !== '') {
             $q->whereRaw("LOWER($pageNameExpr) LIKE ?", ['%' . mb_strtolower($pageContains) . '%']);
