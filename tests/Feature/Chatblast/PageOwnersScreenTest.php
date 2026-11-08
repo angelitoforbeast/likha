@@ -207,7 +207,7 @@ class PageOwnersScreenTest extends ChatblastTestCase
         $this->actingAs($this->user());
         $html = $this->get('/chatbot/owners')->assertOk()->getContent();
 
-        $this->assertMatchesRegularExpression('#data-page="1001"((?!data-page=)[\s\S])*Follow-ups paused for transfer \#41 since Oct 27, 2026 9:00 AM#', $html);
+        $this->assertMatchesRegularExpression('#data-page="1001"(?:(?!data-page=)[\s\S])*?Follow-ups paused for transfer \#41 since Oct 27, 2026 9:00 AM#', $html);
         $this->assertSame(1, substr_count($html, 'Follow-ups paused'), 'only the held page');
     }
 
@@ -331,7 +331,7 @@ class PageOwnersScreenTest extends ChatblastTestCase
         $this->forbeast([self::API . '/pages' => Http::response(['site' => 'likha', 'pages' => [['meta_page_id' => '1001', 'name' => 'Page Uno', 'owner' => 'likha', 'pending' => []]]])]);
         $this->actingAs($this->user('Marketing', 'mkt@example.test'));
 
-        $this->assertMatchesRegularExpression('#data-group="available"((?!data-group=)[\s\S])*No pages to claim right now#', $this->get('/chatbot/owners')->assertOk()->getContent());
+        $this->assertMatchesRegularExpression('#data-group="available"(?:(?!data-group=)[\s\S])*?No pages to claim right now#', $this->get('/chatbot/owners')->assertOk()->getContent());
     }
 
     public function test_S_170_6_the_confirm_form_has_a_hidden_username_then_the_password_then_the_phrase(): void
@@ -383,7 +383,7 @@ class PageOwnersScreenTest extends ChatblastTestCase
         $this->post('/chatbot/owners/take', self::CLAIM)->assertSessionHas('owners_status');
         $html = $this->get('/chatbot/owners')->assertOk()->getContent();
 
-        $this->assertMatchesRegularExpression('#data-group="site"((?!data-group=)[\s\S])*data-page="3003"#', $html);
+        $this->assertMatchesRegularExpression('#data-group="site"(?:(?!data-group=)[\s\S])*?data-page="3003"#', $html);
         $this->assertMatchesRegularExpression('#data-claimed[^>]*>\s*Claimed — the bot is Off until you set it up and turn it on#', $this->card($html, '3003'));
         $this->assertStringNotContainsString('data-claiming', $html);
         $this->assertStringNotContainsString('data-owners-refresh', $html, 'nothing in progress: no refresh');
