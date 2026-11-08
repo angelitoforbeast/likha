@@ -161,7 +161,7 @@ class MetaAdsVideoViewsTest extends MetaAdsTestCase
     }
 
     /** An Ads Manager export with one row for a1; since spec 246 the three video columns are required. */
-    private function uploadA1(array $video, string $spend = '100.50', string $impressions = '1600', string $clicks = '40'): UploadLog
+    private function uploadA1(array $video, string $spend = '100.50', string $impressions = '1600', string $clicks = '40', string $results = '12'): UploadLog
     {
         Storage::fake('local');
         $path = 'uploads/ads_manager_reports/t.xlsx';
@@ -170,7 +170,7 @@ class MetaAdsVideoViewsTest extends MetaAdsTestCase
         $writer->openToFile(Storage::disk('local')->path($path));
         $writer->addRow(\OpenSpout\Common\Entity\Row::fromValues(['Day', 'Ad ID', 'Account ID', 'Campaign ID', 'Ad set ID', 'Page name', 'Campaign name',
             'Ad set name', 'Amount spent (PHP)', 'Impressions', 'Results', 'Result type', 'Link clicks', '3-second video plays', 'ThruPlays', 'Video plays at 50%']));
-        $writer->addRow(\OpenSpout\Common\Entity\Row::fromValues(array_merge([self::DAY, 'a1', '111', 'ca1', 'asa1', 'Page P1', 'Camp', 'Adset', $spend, $impressions, '1',
+        $writer->addRow(\OpenSpout\Common\Entity\Row::fromValues(array_merge([self::DAY, 'a1', '111', 'ca1', 'asa1', 'Page P1', 'Camp', 'Adset', $spend, $impressions, $results,
             'Messaging conversations started', $clicks], $video)));
         $writer->close();
         $log = UploadLog::create(['type' => 'ads_manager_reports', 'disk' => 'local', 'path' => $path, 'original_name' => 't.xlsx', 'status' => 'queued']);
@@ -192,7 +192,7 @@ class MetaAdsVideoViewsTest extends MetaAdsTestCase
 
     public function test_S_246_3_the_upload_and_the_sync_write_the_same_columns_and_neither_overwrites_a_number_with_null(): void
     {
-        $this->assertSame('done', $this->uploadA1(['300', '120', '90'], '1.00', '10', '1')->status);
+        $this->assertSame('done', $this->uploadA1(['300', '120', '90'], '1.00', '10', '1', '1')->status);
         $this->assertSame(['video_plays_3s' => 300, 'video_thruplays' => 120, 'video_p50' => 90], $this->videoOf('a1'));
 
         // A later sync of the same day and ad without video numbers updates the row and keeps the uploaded ones.
