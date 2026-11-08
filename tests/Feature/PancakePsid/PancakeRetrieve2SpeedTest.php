@@ -199,7 +199,11 @@ class PancakeRetrieve2SpeedTest extends PancakePsidTestCase
         // The name rule probes macro_output on the bare (PAGE, fb_name) columns instead of grouping the whole table.
         $this->assertMatchesRegularExpression('/mo\.`PAGE` = TRIM\(/', $sql);
         $this->assertMatchesRegularExpression('/mo\.`fb_name` = TRIM\(pc\.full_name\)/', $sql);
-        $this->assertStringNotContainsString('group by LOWER(TRIM(`PAGE`)), LOWER(TRIM(`fb_name`))', $sql);
+        // Only the few order names that start or end with a space are still grouped, never all of macro_output.
+        $this->assertStringNotContainsString("\"fb_name\" is not null and TRIM(`fb_name`) <> '' group by LOWER(TRIM(`PAGE`)), LOWER(TRIM(`fb_name`))", $sql);
+        $this->assertStringContainsString('"fb_name" like ? or "fb_name" like ?', $sql);
+        $this->assertContains(' %', $bindings);
+        $this->assertContains('% ', $bindings);
     }
 
     public function test_the_migration_adds_the_created_at_index_once_and_down_removes_it(): void

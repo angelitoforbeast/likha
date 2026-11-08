@@ -9,67 +9,120 @@ use Carbon\Carbon;
 
 class PancakeRetrieve2Controller extends Controller
 {
+    private const TZ = 'Asia/Manila';
+
     public function index(Request $request)
     {
-        // -----------------------------
-        // ✅ Timezone / presets
-        // -----------------------------
-        $tz = 'Asia/Manila';
+        [$preset, $dateFrom, $dateTo] = $this->range($request);
 
+        $pageContains = trim((string) $request->get('page_contains', ''));
+        $nameContains = trim((string) $request->get('name_contains', ''));
+
+        $rows = $this->retrieveQuery($dateFrom, $dateTo, $pageContains, $nameContains)
+            ->paginate(200)
+            ->withQueryString();
+
+        $rows->getCollection()->transform(function ($r) {
+            $r->phone_number = $this->extractPhoneNumber((string) ($r->customers_chat ?? ''));
+            return $r;
+        });
+
+        return view('pancake.retrieve2', [
+            'rows'          => $rows,
+            'preset'        => $preset,
+            'date_from'     => $dateFrom,
+            'date_to'       => $dateTo,
+            'page_contains' => $pageContains,
+            'name_contains' => $nameContains,
+            'tz'            => self::TZ,
+        ]);
+    }
+
+    /**
+     * ✅ Export ALL rows (no pagination) for current filters/date range.
+     * Returns JSON rows.
+     */
+    public function export(Request $request)
+    {
+        [, $dateFrom, $dateTo] = $this->range($request);
+
+        $pageContains = trim((string) $request->get('page_contains', ''));
+        $nameContains = trim((string) $request->get('name_contains', ''));
+
+        $all = $this->retrieveQuery($dateFrom, $dateTo, $pageContains, $nameContains)->get();
+
+        $rows = $all->map(function ($r) {
+            return [
+                'date_created'   => (string) ($r->date_created ?? ''),
+                'page'           => (string) ($r->page ?? ''),
+                'full_name'      => (string) ($r->full_name ?? ''),
+                'psid'           => $r->psid !== null ? (string) $r->psid : null,
+                'phone_number'   => (string) ($this->extractPhoneNumber((string) ($r->customers_chat ?? '')) ?? ''),
+                'shop_details'   => (string) ($r->shop_details ?? ''),
+                'customers_chat' => (string) ($r->customers_chat ?? ''),
+            ];
+        });
+
+        return response()->json([
+            'date_from' => $dateFrom,
+            'date_to'   => $dateTo,
+            'count'     => $rows->count(),
+            'rows'      => $rows,
+        ]);
+    }
+
+    /**
+     * Manila date range from the request: explicit dates win, else the preset, else yesterday.
+     *
+     * @return array{0: string, 1: string, 2: string} [preset, date_from, date_to]
+     */
+    private function range(Request $request): array
+    {
         // Support legacy preset=month
         $preset = (string) $request->get('preset', '');
         if ($preset === 'month') {
             $preset = 'this_month';
         }
 
-        $now = Carbon::now($tz);
-
         $dateFrom = $request->get('date_from');
         $dateTo   = $request->get('date_to');
 
-        if (!$dateFrom || !$dateTo) {
-            // Default = yesterday
-            $y = $now->copy()->subDay()->toDateString();
-            $dateFrom = $y;
-            $dateTo   = $y;
-
-            if ($preset === 'today') {
-                $t = $now->toDateString();
-                $dateFrom = $t;
-                $dateTo   = $t;
-
-            } elseif ($preset === 'yesterday') {
-                // already set
-
-            } elseif ($preset === 'last7') {
-                $dateFrom = $now->copy()->subDays(6)->toDateString();
-                $dateTo   = $now->toDateString();
-
-            } elseif ($preset === 'this_month') {
-                // ✅ Month up to yesterday
-                $dateFrom = $now->copy()->startOfMonth()->toDateString();
-
-                $yesterday = $now->copy()->subDay();
-                if ($yesterday->lt($now->copy()->startOfMonth())) {
-                    $dateTo = $now->copy()->startOfMonth()->toDateString();
-                } else {
-                    $dateTo = $yesterday->toDateString();
-                }
-            }
-        } else {
-            $dateFrom = Carbon::parse($dateFrom, $tz)->toDateString();
-            $dateTo   = Carbon::parse($dateTo, $tz)->toDateString();
+        if ($dateFrom && $dateTo) {
+            return [$preset, Carbon::parse($dateFrom, self::TZ)->toDateString(), Carbon::parse($dateTo, self::TZ)->toDateString()];
         }
 
-        // -----------------------------
-        // ✅ Optional text filters
-        // -----------------------------
-        $pageContains = trim((string) $request->get('page_contains', ''));
-        $nameContains = trim((string) $request->get('name_contains', ''));
+        $now = Carbon::now(self::TZ);
 
-        // -----------------------------
-        // ✅ Manila day derived from pc.created_at (stored UTC)
-        // -----------------------------
+        // Default = yesterday
+        $dateFrom = $dateTo = $now->copy()->subDay()->toDateString();
+
+        if ($preset === 'today') {
+            $dateFrom = $dateTo = $now->toDateString();
+        } elseif ($preset === 'last7') {
+            $dateFrom = $now->copy()->subDays(6)->toDateString();
+            $dateTo   = $now->toDateString();
+        } elseif ($preset === 'this_month') {
+            // ✅ Month up to yesterday
+            $dateFrom  = $now->copy()->startOfMonth()->toDateString();
+            $yesterday = $now->copy()->subDay();
+            $dateTo = $yesterday->lt($now->copy()->startOfMonth())
+                ? $now->copy()->startOfMonth()->toDateString()
+                : $yesterday->toDateString();
+        }
+
+        return [$preset, $dateFrom, $dateTo];
+    }
+
+    /**
+     * The one query behind the page and the export: conversations in the Manila date range that are not an order yet.
+     */
+    private function retrieveQuery(string $dateFrom, string $dateTo, string $pageContains, string $nameContains)
+    {
+        // created_at is stored in UTC. Comparing the bare column with UTC bounds lets MySQL range-scan its index;
+        // DATE(CONVERT_TZ(created_at)) made it read every conversation. Manila has no DST, so the bounds are exact.
+        $fromUtc = Carbon::parse($dateFrom, self::TZ)->startOfDay()->utc()->format('Y-m-d H:i:s');
+        $toUtc   = Carbon::parse($dateTo, self::TZ)->addDay()->startOfDay()->utc()->format('Y-m-d H:i:s');
+
         $convDateExpr     = "DATE(CONVERT_TZ(pc.created_at,'+00:00','+08:00'))";
         $convDateTimeExpr = "CONVERT_TZ(pc.created_at,'+00:00','+08:00')";
 
@@ -77,17 +130,6 @@ class PancakeRetrieve2Controller extends Controller
         $pageNameExpr = "COALESCE(pi.pancake_page_name, pc.pancake_page_id)";
         $pageKeyExpr  = "LOWER(TRIM($pageNameExpr))";
         $nameKeyExpr  = "LOWER(TRIM(pc.full_name))";
-
-        // -----------------------------
-        // ✅ Existing (PAGE + fb_name) combos in macro_output (global)
-        // -----------------------------
-        $macroPairs = DB::table('macro_output')
-            ->selectRaw("LOWER(TRIM(`PAGE`)) as page_key, LOWER(TRIM(`fb_name`)) as name_key")
-            ->whereNotNull('PAGE')
-            ->whereRaw("TRIM(`PAGE`) <> ''")
-            ->whereNotNull('fb_name')
-            ->whereRaw("TRIM(`fb_name`) <> ''")
-            ->groupByRaw("LOWER(TRIM(`PAGE`)), LOWER(TRIM(`fb_name`))");
 
         // -----------------------------
         // ✅ Mode SHOP DETAILS per ts_date + page_key, within selected date range
@@ -128,17 +170,17 @@ class PancakeRetrieve2Controller extends Controller
         // -----------------------------
         $q = DB::table('pancake_conversations as pc')
             ->leftJoin('pancake_id as pi', 'pi.pancake_page_id', '=', 'pc.pancake_page_id')
-            ->leftJoinSub($macroPairs, 'mp', function ($join) use ($pageKeyExpr, $nameKeyExpr) {
-                $join->on('mp.page_key', '=', DB::raw($pageKeyExpr))
-                     ->on('mp.name_key', '=', DB::raw($nameKeyExpr));
+            ->leftJoinSub($this->spacedOrderNames(), 'sp', function ($join) use ($pageKeyExpr, $nameKeyExpr) {
+                $join->on('sp.page_key', '=', DB::raw($pageKeyExpr))
+                     ->on('sp.name_key', '=', DB::raw($nameKeyExpr));
             })
             ->leftJoinSub($shopMode, 'sm', function ($join) use ($convDateExpr, $pageKeyExpr) {
                 $join->on('sm.ts_date', '=', DB::raw($convDateExpr))
                      ->on('sm.page_key', '=', DB::raw($pageKeyExpr));
             })
             ->where(fn ($w) => $this->notYetAnOrder($w))
-            ->whereRaw("$convDateExpr >= ?", [$dateFrom])
-            ->whereRaw("$convDateExpr <= ?", [$dateTo]);
+            ->where('pc.created_at', '>=', $fromUtc)
+            ->where('pc.created_at', '<', $toUtc);
 
         if ($pageContains !== '') {
             $q->whereRaw("LOWER($pageNameExpr) LIKE ?", ['%' . mb_strtolower($pageContains) . '%']);
@@ -157,166 +199,43 @@ class PancakeRetrieve2Controller extends Controller
             pc.customers_chat
         ");
 
-        $rows = $q->orderBy('pc.created_at', 'desc')
-                  ->paginate(200)
-                  ->withQueryString();
-
-        $rows->getCollection()->transform(function ($r) {
-            $r->phone_number = $this->extractPhoneNumber((string) ($r->customers_chat ?? ''));
-            return $r;
-        });
-
-        return view('pancake.retrieve2', [
-            'rows'          => $rows,
-            'preset'        => $preset,
-            'date_from'     => $dateFrom,
-            'date_to'       => $dateTo,
-            'page_contains' => $pageContains,
-            'name_contains' => $nameContains,
-            'tz'            => $tz,
-        ]);
+        return $q->orderBy('pc.created_at', 'desc');
     }
 
     /**
-     * ✅ Export ALL rows (no pagination) for current filters/date range.
-     * Returns JSON rows.
+     * The few macro_output rows whose PAGE or fb_name starts or ends with a space, keyed as before by
+     * LOWER(TRIM()). The bare (PAGE, fb_name) probe in nameNotYetAnOrderSql() cannot match a leading space,
+     * so these are matched here instead: one read of macro_output per request without grouping the whole
+     * table, and no new column on it.
      */
-    public function export(Request $request)
+    private function spacedOrderNames()
     {
-        $tz = 'Asia/Manila';
-
-        $preset = (string) $request->get('preset', '');
-        if ($preset === 'month') $preset = 'this_month';
-
-        $now = Carbon::now($tz);
-
-        $dateFrom = $request->get('date_from');
-        $dateTo   = $request->get('date_to');
-
-        if (!$dateFrom || !$dateTo) {
-            $y = $now->copy()->subDay()->toDateString();
-            $dateFrom = $y;
-            $dateTo   = $y;
-
-            if ($preset === 'today') {
-                $t = $now->toDateString();
-                $dateFrom = $t;
-                $dateTo   = $t;
-            } elseif ($preset === 'last7') {
-                $dateFrom = $now->copy()->subDays(6)->toDateString();
-                $dateTo   = $now->toDateString();
-            } elseif ($preset === 'this_month') {
-                $dateFrom = $now->copy()->startOfMonth()->toDateString();
-                $yesterday = $now->copy()->subDay();
-                $dateTo = $yesterday->lt($now->copy()->startOfMonth())
-                    ? $now->copy()->startOfMonth()->toDateString()
-                    : $yesterday->toDateString();
-            }
-        } else {
-            $dateFrom = Carbon::parse($dateFrom, $tz)->toDateString();
-            $dateTo   = Carbon::parse($dateTo, $tz)->toDateString();
-        }
-
-        $pageContains = trim((string) $request->get('page_contains', ''));
-        $nameContains = trim((string) $request->get('name_contains', ''));
-
-        $convDateExpr     = "DATE(CONVERT_TZ(pc.created_at,'+00:00','+08:00'))";
-        $convDateTimeExpr = "CONVERT_TZ(pc.created_at,'+00:00','+08:00')";
-
-        $pageNameExpr = "COALESCE(pi.pancake_page_name, pc.pancake_page_id)";
-        $pageKeyExpr  = "LOWER(TRIM($pageNameExpr))";
-        $nameKeyExpr  = "LOWER(TRIM(pc.full_name))";
-
-        $macroPairs = DB::table('macro_output')
+        return DB::table('macro_output')
             ->selectRaw("LOWER(TRIM(`PAGE`)) as page_key, LOWER(TRIM(`fb_name`)) as name_key")
-            ->whereNotNull('PAGE')
+            ->where(fn ($w) => $w->where('PAGE', 'like', ' %')->orWhere('PAGE', 'like', '% ')
+                ->orWhere('fb_name', 'like', ' %')->orWhere('fb_name', 'like', '% '))
             ->whereRaw("TRIM(`PAGE`) <> ''")
-            ->whereNotNull('fb_name')
             ->whereRaw("TRIM(`fb_name`) <> ''")
             ->groupByRaw("LOWER(TRIM(`PAGE`)), LOWER(TRIM(`fb_name`))");
+    }
 
-        $shopCounts = DB::table('macro_output')
-            ->selectRaw("
-                ts_date,
-                LOWER(TRIM(`PAGE`)) as page_key,
-                TRIM(`SHOP DETAILS`) as shop_details,
-                COUNT(*) as cnt
-            ")
-            ->whereNotNull('ts_date')
-            ->whereRaw("TRIM(ts_date) <> ''")
-            ->whereBetween('ts_date', [$dateFrom, $dateTo])
-            ->whereNotNull('PAGE')
-            ->whereRaw("TRIM(`PAGE`) <> ''")
-            ->whereNotNull(DB::raw("`SHOP DETAILS`"))
-            ->whereRaw("TRIM(`SHOP DETAILS`) <> ''")
-            ->groupByRaw("ts_date, LOWER(TRIM(`PAGE`)), TRIM(`SHOP DETAILS`)");
+    /**
+     * No order has this conversation's page and name. The bare columns keep the (PAGE, fb_name) index usable:
+     * MySQL's utf8mb4_unicode_ci already ignores letter case and trailing spaces in "=", so only the
+     * conversation side is trimmed. Order names with a leading space come from spacedOrderNames() ("sp").
+     * sqlite (the tests) compares binary, so it gets NOCASE there.
+     */
+    private function nameNotYetAnOrderSql(): string
+    {
+        $ci = DB::getDriverName() === 'sqlite' ? ' COLLATE NOCASE' : '';
 
-        $shopMax = DB::query()
-            ->fromSub($shopCounts, 'scm')
-            ->selectRaw("ts_date, page_key, MAX(cnt) as max_cnt")
-            ->groupByRaw("ts_date, page_key");
-
-        $shopMode = DB::query()
-            ->fromSub($shopCounts, 'sc')
-            ->joinSub($shopMax, 'mx', function ($join) {
-                $join->on('mx.ts_date', '=', 'sc.ts_date')
-                    ->on('mx.page_key', '=', 'sc.page_key')
-                    ->on('mx.max_cnt', '=', 'sc.cnt');
-            })
-            ->selectRaw("sc.ts_date, sc.page_key, MIN(sc.shop_details) as shop_details")
-            ->groupByRaw("sc.ts_date, sc.page_key");
-
-        $q = DB::table('pancake_conversations as pc')
-            ->leftJoin('pancake_id as pi', 'pi.pancake_page_id', '=', 'pc.pancake_page_id')
-            ->leftJoinSub($macroPairs, 'mp', function ($join) use ($pageKeyExpr, $nameKeyExpr) {
-                $join->on('mp.page_key', '=', DB::raw($pageKeyExpr))
-                     ->on('mp.name_key', '=', DB::raw($nameKeyExpr));
-            })
-            ->leftJoinSub($shopMode, 'sm', function ($join) use ($convDateExpr, $pageKeyExpr) {
-                $join->on('sm.ts_date', '=', DB::raw($convDateExpr))
-                     ->on('sm.page_key', '=', DB::raw($pageKeyExpr));
-            })
-            ->where(fn ($w) => $this->notYetAnOrder($w))
-            ->whereRaw("$convDateExpr >= ?", [$dateFrom])
-            ->whereRaw("$convDateExpr <= ?", [$dateTo]);
-
-        if ($pageContains !== '') {
-            $q->whereRaw("LOWER($pageNameExpr) LIKE ?", ['%' . mb_strtolower($pageContains) . '%']);
-        }
-
-        if ($nameContains !== '') {
-            $q->whereRaw("LOWER(pc.full_name) LIKE ?", ['%' . mb_strtolower($nameContains) . '%']);
-        }
-
-        $q->selectRaw("
-            $convDateTimeExpr as date_created,
-            $pageNameExpr as page,
-            sm.shop_details as shop_details,
-            pc.full_name,
-            {$this->psidSelect()},
-            pc.customers_chat
-        ");
-
-        $all = $q->orderBy('pc.created_at', 'desc')->get();
-
-        $rows = $all->map(function ($r) {
-            return [
-                'date_created'   => (string) ($r->date_created ?? ''),
-                'page'           => (string) ($r->page ?? ''),
-                'full_name'      => (string) ($r->full_name ?? ''),
-                'psid'           => $r->psid !== null ? (string) $r->psid : null,
-                'phone_number'   => (string) ($this->extractPhoneNumber((string) ($r->customers_chat ?? '')) ?? ''),
-                'shop_details'   => (string) ($r->shop_details ?? ''),
-                'customers_chat' => (string) ($r->customers_chat ?? ''),
-            ];
-        });
-
-        return response()->json([
-            'date_from' => $dateFrom,
-            'date_to'   => $dateTo,
-            'count'     => $rows->count(),
-            'rows'      => $rows,
-        ]);
+        return "(sp.name_key IS NULL AND NOT EXISTS (
+                SELECT 1 FROM macro_output mo
+                WHERE mo.`PAGE` = TRIM(COALESCE(pi.pancake_page_name, pc.pancake_page_id))$ci
+                  AND mo.`fb_name` = TRIM(pc.full_name)$ci
+                  AND TRIM(mo.`PAGE`) <> ''
+                  AND TRIM(mo.`fb_name`) <> ''
+            ))";
     }
 
     /** May PSID ba ang conversations at macro_output? Kung wala pa (hindi pa na-migrate), pangalan lang ang rule gaya ng dati. */
@@ -338,12 +257,12 @@ class PancakeRetrieve2Controller extends Controller
     private function notYetAnOrder($w): void
     {
         if (!$this->psidRuleAvailable()) {
-            $w->whereNull('mp.name_key');
+            $w->whereRaw($this->nameNotYetAnOrderSql());
             return;
         }
 
         $w->whereRaw("(
-            (pc.psid IS NULL AND mp.name_key IS NULL)
+            (pc.psid IS NULL AND {$this->nameNotYetAnOrderSql()})
             OR (pc.psid IS NOT NULL AND NOT EXISTS (
                 SELECT 1 FROM macro_output mo
                 WHERE mo.botcake_psid = pc.psid
