@@ -129,7 +129,6 @@ class PancakeRetrieve2Controller extends Controller
         // Page name expression used for display + matching
         $pageNameExpr = "COALESCE(pi.pancake_page_name, pc.pancake_page_id)";
         $pageKeyExpr  = "LOWER(TRIM($pageNameExpr))";
-        $nameKeyExpr  = "LOWER(TRIM(pc.full_name))";
 
         // -----------------------------
         // ✅ Mode SHOP DETAILS per ts_date + page_key, within selected date range
@@ -170,10 +169,6 @@ class PancakeRetrieve2Controller extends Controller
         // -----------------------------
         $q = DB::table('pancake_conversations as pc')
             ->leftJoin('pancake_id as pi', 'pi.pancake_page_id', '=', 'pc.pancake_page_id')
-            ->leftJoinSub($this->spacedOrderNames(), 'sp', function ($join) use ($pageKeyExpr, $nameKeyExpr) {
-                $join->on('sp.page_key', '=', DB::raw($pageKeyExpr))
-                     ->on('sp.name_key', '=', DB::raw($nameKeyExpr));
-            })
             ->leftJoinSub($shopMode, 'sm', function ($join) use ($convDateExpr, $pageKeyExpr) {
                 $join->on('sm.ts_date', '=', DB::raw($convDateExpr))
                      ->on('sm.page_key', '=', DB::raw($pageKeyExpr));
@@ -203,36 +198,21 @@ class PancakeRetrieve2Controller extends Controller
     }
 
     /**
-     * The few macro_output rows whose PAGE or fb_name starts or ends with a space, keyed as before by
-     * LOWER(TRIM()). The bare (PAGE, fb_name) probe in nameNotYetAnOrderSql() cannot match a leading space,
-     * so these are matched here instead: one read of macro_output per request without grouping the whole
-     * table, and no new column on it.
-     */
-    private function spacedOrderNames()
-    {
-        return DB::table('macro_output')
-            ->selectRaw("LOWER(TRIM(`PAGE`)) as page_key, LOWER(TRIM(`fb_name`)) as name_key")
-            ->where(fn ($w) => $w->where('PAGE', 'like', ' %')->orWhere('PAGE', 'like', '% ')
-                ->orWhere('fb_name', 'like', ' %')->orWhere('fb_name', 'like', '% '))
-            ->whereRaw("TRIM(`PAGE`) <> ''")
-            ->whereRaw("TRIM(`fb_name`) <> ''")
-            ->groupByRaw("LOWER(TRIM(`PAGE`)), LOWER(TRIM(`fb_name`))");
-    }
-
-    /**
      * No order has this conversation's page and name. The bare columns keep the (PAGE, fb_name) index usable:
      * MySQL's utf8mb4_unicode_ci already ignores letter case and trailing spaces in "=", so only the
-     * conversation side is trimmed. Order names with a leading space come from spacedOrderNames() ("sp").
-     * sqlite (the tests) compares binary, so it gets NOCASE there.
+     * conversation side is trimmed. The old LOWER(TRIM()) also matched order names with leading spaces; on
+     * production those are a single space, so the name is probed as given and with one space in front, which
+     * is two index lookups instead of a scan. A name with two or more leading spaces is not matched (none exist).
+     * sqlite (the tests) compares binary, so it gets NOCASE there; in an IN list sqlite takes it from the left.
      */
     private function nameNotYetAnOrderSql(): string
     {
         $ci = DB::getDriverName() === 'sqlite' ? ' COLLATE NOCASE' : '';
 
-        return "(sp.name_key IS NULL AND NOT EXISTS (
+        return "(NOT EXISTS (
                 SELECT 1 FROM macro_output mo
                 WHERE mo.`PAGE` = TRIM(COALESCE(pi.pancake_page_name, pc.pancake_page_id))$ci
-                  AND mo.`fb_name` = TRIM(pc.full_name)$ci
+                  AND mo.`fb_name`$ci IN (TRIM(pc.full_name), CONCAT(' ', TRIM(pc.full_name)))
                   AND TRIM(mo.`PAGE`) <> ''
                   AND TRIM(mo.`fb_name`) <> ''
             ))";
