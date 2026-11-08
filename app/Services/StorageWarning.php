@@ -2,14 +2,16 @@
 
 namespace App\Services;
 
+use App\Http\Controllers\NavSettingsController;
 use App\Models\User;
+use App\Support\NavAccess;
 use Illuminate\Support\Facades\Cache;
 
 /**
  * Who may see the server storage, and the banner on every `<x-layout>` page when the disk of `/` is 80 % used or more.
  *
- * The disk filled up once and took Likha down for hours without anyone seeing it coming; the banner makes the
- * CEO and the marketing OIC see it in time.
+ * The disk filled up once and took Likha down for hours without anyone seeing it coming; the banner makes the people
+ * who watch storage see it in time. Who they are is the "Storage" link in /owner/nav-settings, like every other page.
  */
 class StorageWarning
 {
@@ -17,36 +19,40 @@ class StorageWarning
 
     public const RED_PERCENT = 90;
 
+    /** The Storage link's route_url in nav settings. */
+    public const URL = '/system-monitor/storage';
+
     /** Long enough that a page view almost never touches the disk functions, short enough to follow a cleanup. */
     private const CACHE_SECONDS = 60;
 
     private const CACHE_KEY = 'storage_warning_disk';
 
-    /** CEO or Marketing - OIC by the actual role (not the CEO's "view as"), normalized like checkCEO. */
+    private const ACCESS_CACHE_KEY = 'storage_warning_access:';
+
+    /** The Storage link is checked for this user's actual role (not the CEO's "view as"); CEO always. */
     public static function canSee(?User $user): bool
     {
-        $raw  = $user?->employeeProfile?->role ?? '';
-        $norm = preg_replace('/\s+/u', ' ', trim((string) $raw));
-
-        return preg_match('/^(ceo|marketing - oic)$/iu', $norm) === 1;
+        return NavAccess::allows(self::role($user), self::URL);
     }
 
     /**
-     * The banner for this user, or null: other roles, under 80 %, or the disk could not be read. It is on every
-     * page, so it never throws and only the cached disk numbers feed it (no directory scan, no database query).
+     * The banner for this user, or null: under 80 %, the disk could not be read, or the role may not open the Storage
+     * view. It is on every page, so it never throws, the disk is checked first (no query at all while under 80 %), and
+     * both the disk numbers and the role's access answer come from a 60 s cache.
      *
      * @return array{percent:int, free_gb:string, tone:string, text:string}|null
      */
     public static function banner(?User $user): ?array
     {
         try {
-            if (!self::canSee($user)) {
-                return null;
-            }
-
             // A failed read is cached as false, so a broken mount is not retried on every page view.
             $disk = Cache::remember(self::CACHE_KEY, self::CACHE_SECONDS, fn () => app(ServerStorage::class)->disk() ?? false);
             if (!is_array($disk) || $disk['percent'] < self::AMBER_PERCENT) {
+                return null;
+            }
+
+            $role = self::role($user);
+            if (!Cache::remember(self::ACCESS_CACHE_KEY . md5($role), self::CACHE_SECONDS, fn () => NavAccess::allows($role, self::URL))) {
                 return null;
             }
 
@@ -63,5 +69,22 @@ class StorageWarning
         } catch (\Throwable $e) {
             return null;
         }
+    }
+
+    /**
+     * Drop the cached access answers, so a change saved in nav settings shows on the next page view rather than up to
+     * 60 s later. Only the nav settings roles can have a checked row, so only their answers can change.
+     */
+    public static function forgetAccess(): void
+    {
+        foreach (NavSettingsController::ROLES as $role) {
+            Cache::forget(self::ACCESS_CACHE_KEY . md5($role));
+        }
+    }
+
+    /** The actual role, with spaces normalized as NavAccess does, so one cache entry serves every spelling of it. */
+    private static function role(?User $user): string
+    {
+        return (string) preg_replace('/\s+/u', ' ', trim((string) ($user?->employeeProfile?->role ?? '')));
     }
 }

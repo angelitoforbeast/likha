@@ -256,7 +256,8 @@ class StorageNavAccessTest extends StorageTestCase
         $marketing = $this->user('Marketing')->load('employeeProfile');
         $queries = [];
         DB::listen(function ($q) use (&$queries) { $queries[] = $q->sql; });
-        $navQueries = fn () => count(array_filter($queries, fn ($sql) => str_contains($sql, 'nav_link')));
+        // By reference: an arrow function would copy $queries when it is made.
+        $navQueries = function () use (&$queries) { return count(array_filter($queries, fn ($sql) => str_contains($sql, 'nav_link'))); };
 
         $this->assertNotNull(StorageWarning::banner($oic));
         $first = $navQueries();

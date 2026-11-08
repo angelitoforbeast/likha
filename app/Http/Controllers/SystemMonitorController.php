@@ -39,8 +39,8 @@ class SystemMonitorController extends Controller
     }
 
     /**
-     * Storage view (spec 242): the disk, the database and the binary logs only, read-only, for the CEO and the
-     * marketing OIC. The OIC watches storage; the rest of the monitor stays with the CEO.
+     * Storage view (spec 242): the disk, the database and the binary logs only, read-only, for the roles checked for
+     * the "Storage" link in /owner/nav-settings (spec 243) and the CEO. The rest of the monitor stays with the CEO.
      */
     public function storage(ServerStorage $storage)
     {

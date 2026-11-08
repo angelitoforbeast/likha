@@ -99,7 +99,8 @@
     </div>
 </header>
 
-{{-- Storage banner (spec 242), the same as on the main Likha layout: CEO and Marketing - OIC at 80 % used or more,
+{{-- Storage banner (spec 242), the same as on the main Likha layout: the roles checked for the Storage link in nav
+     settings (spec 243) and the CEO, at 80 % used or more,
      cached 60 s, above the problems banner. Inline @php (this layout already uses the inline form, which a block
      form here would swallow), at column 0 right after the comment, so that without a banner the page is byte for
      byte what it was before. --}}@php($cbStorageBanner = \App\Services\StorageWarning::banner(Auth::user()))

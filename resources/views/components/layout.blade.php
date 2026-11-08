@@ -231,7 +231,8 @@
   </nav>
 
 @php
-  // Storage banner (spec 242): CEO and Marketing - OIC only, at 80 % used or more; null for everyone else and when
+  // Storage banner (spec 242): the roles checked for the Storage link in nav settings (spec 243) and the CEO, at 80 %
+  // used or more; null for everyone else and when
   // the disk cannot be read. Cached 60 s and fed by the disk functions only, so it never slows a page. It sits under
   // the fixed nav (mt-16), so the heading below drops its own mt-16 while it shows. These lines start at column 0 and
   // the comment lives in PHP so that, without a banner, the page is byte for byte what it was before.

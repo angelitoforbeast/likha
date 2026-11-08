@@ -106,6 +106,8 @@ class NavSettingsController extends Controller
                     ->update(['sort_order' => (int) $order, 'updated_at' => $now]);
             }
         });
+        // The storage banner caches each role's access for 60 s; a saved checkbox should count from the next page view.
+        \App\Services\StorageWarning::forgetAccess();
 
         return redirect()
             ->route('owner.nav-settings')
@@ -225,6 +227,7 @@ class NavSettingsController extends Controller
                 $sort++;
             }
         });
+        \App\Services\StorageWarning::forgetAccess(); // as in save()
 
         return redirect()
             ->route('owner.nav-settings')
