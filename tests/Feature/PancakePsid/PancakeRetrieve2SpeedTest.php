@@ -28,6 +28,11 @@ class PancakeRetrieve2SpeedTest extends PancakePsidTestCase
         DB::connection()->getPdo()->sqliteCreateFunction('CONVERT_TZ', function ($d, $from = null, $to = null) {
             return $d === null ? null : gmdate('Y-m-d H:i:s', strtotime($d . ' UTC') + 8 * 3600);
         }, 3);
+        // The controller adds NOCASE on sqlite only. Production compares with utf8mb4_unicode_ci, which ignores
+        // letter case and trailing spaces (PAD SPACE) in "="; this stand-in gives NOCASE the same two rules.
+        DB::connection()->getPdo()->sqliteCreateCollation('NOCASE', fn ($a, $b) => strcmp(
+            mb_strtolower(rtrim((string) $a, ' ')), mb_strtolower(rtrim((string) $b, ' '))
+        ));
     }
 
     protected function migrationPaths(): array
@@ -88,7 +93,8 @@ class PancakeRetrieve2SpeedTest extends PancakePsidTestCase
         $this->chat('5001', 'Lia Nobody');
         $this->order(['fb_name' => 'ana cruz']);
         $this->order(['fb_name' => 'BEN REYES  ']);
-        $this->order(['PAGE' => 'page uno', 'fb_name' => '  Cara LIM  ']);
+        // One leading space at most: production has no order name with more (amendment 247-1, accepted gap).
+        $this->order(['PAGE' => 'page uno', 'fb_name' => ' Cara LIM  ']);
 
         $this->assertSame(['Lia Nobody'], $this->listed());
     }
@@ -100,6 +106,17 @@ class PancakeRetrieve2SpeedTest extends PancakePsidTestCase
         $this->order(['fb_name' => ' Dan Space']);
 
         $this->assertSame(['Lia Nobody'], $this->listed());
+    }
+
+    public function test_a_single_leading_space_on_the_order_name_hides_the_unpadded_conversation_name_on_its_page_only(): void
+    {
+        $this->chat('5001', 'Mia Lopez');
+        $this->chat('5002', 'Mia Lopez');
+        $this->order(['fb_name' => ' mia lopez']);
+
+        $export = $this->actingAs($this->me())->getJson('/pancake/retrieve2/export?' . http_build_query(self::DAY))->assertOk();
+        $this->assertSame(['Page Dos'], collect($export->json('rows'))->pluck('page')->all());
+        $this->assertSame(['Mia Lopez'], $this->listed());
     }
 
     public function test_a_page_name_that_differs_only_in_letter_case_or_trailing_spaces_still_matches(): void
@@ -198,12 +215,13 @@ class PancakeRetrieve2SpeedTest extends PancakePsidTestCase
         $this->assertStringNotContainsString("DATE(CONVERT_TZ(pc.created_at,'+00:00','+08:00')) <= ?", $sql);
         // The name rule probes macro_output on the bare (PAGE, fb_name) columns instead of grouping the whole table.
         $this->assertMatchesRegularExpression('/mo\.`PAGE` = TRIM\(/', $sql);
-        $this->assertMatchesRegularExpression('/mo\.`fb_name` = TRIM\(pc\.full_name\)/', $sql);
-        // Only the few order names that start or end with a space are still grouped, never all of macro_output.
-        $this->assertStringNotContainsString("\"fb_name\" is not null and TRIM(`fb_name`) <> '' group by LOWER(TRIM(`PAGE`)), LOWER(TRIM(`fb_name`))", $sql);
-        $this->assertStringContainsString('"fb_name" like ? or "fb_name" like ?', $sql);
-        $this->assertContains(' %', $bindings);
-        $this->assertContains('% ', $bindings);
+        // The name is probed as given and with one leading space, both index lookups (amendment 247-1).
+        $this->assertMatchesRegularExpression("/mo\\.`fb_name`( COLLATE NOCASE)? IN \\(TRIM\\(pc\\.full_name\\), CONCAT\\(' ', TRIM\\(pc\\.full_name\\)\\)\\)/", $sql);
+        // No scan of macro_output by pattern and no grouping of it for the name rule remain.
+        $this->assertDoesNotMatchRegularExpression('/\blike\b/i', $sql);
+        $this->assertNotContains(' %', $bindings);
+        $this->assertNotContains('% ', $bindings);
+        $this->assertStringNotContainsString('group by LOWER(TRIM(`PAGE`)), LOWER(TRIM(`fb_name`))', $sql);
     }
 
     public function test_the_migration_adds_the_created_at_index_once_and_down_removes_it(): void
