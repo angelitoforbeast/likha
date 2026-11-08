@@ -15,7 +15,7 @@ class StorageViewTest extends StorageTestCase
     {
         return [
             'exact'               => ['Marketing - OIC'],
-            'spaces and case'     => ['  marketing   -  OIC '],
+            'extra spaces'        => ['  Marketing   -  OIC '],
         ];
     }
 

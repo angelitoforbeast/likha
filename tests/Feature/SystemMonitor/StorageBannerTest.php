@@ -20,7 +20,7 @@ class StorageBannerTest extends StorageTestCase
         return [
             'ceo'        => ['CEO'],
             'oic'        => ['Marketing - OIC'],
-            'oic spaced' => [' marketing  - oic'],
+            'oic spaced' => [' Marketing  - OIC'],
         ];
     }
 
@@ -82,7 +82,8 @@ class StorageBannerTest extends StorageTestCase
 
         $this->assertStringNotContainsString('data-storage-banner', $html);
         $this->assertStringNotContainsString('Server storage is at', $html);
-        $this->assertSame(0, $this->storage->diskCalls, 'the disk is not even read for them');
+        // Since spec 243 the cached disk is read first (so no access query runs under 80 %), then the nav settings say no.
+        $this->assertSame(1, $this->storage->diskCalls);
     }
 
     public function test_S2_4_under_80_percent_nothing_is_rendered(): void

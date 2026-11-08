@@ -33,6 +33,8 @@ class ChatblastStorageBannerTest extends ChatblastTestCase
         $this->storage = new FakeServerStorage();
         $this->app->instance(ServerStorage::class, $this->storage);
         $this->navLink('/chatblast', ['Marketing - OIC', 'Marketing']);
+        // Spec 243: the banner follows the Storage link in nav settings, which starts checked for CEO and OIC only.
+        Artisan::call('migrate', ['--path' => 'database/migrations/2026_11_19_100000_add_storage_nav_link.php', '--force' => true]);
     }
 
     private function navLink(string $url, array $roles): void
@@ -94,6 +96,21 @@ class ChatblastStorageBannerTest extends ChatblastTestCase
 
         $this->assertStringNotContainsString('data-storage-banner', $html);
         $this->assertStringNotContainsString('Server storage is at', $html);
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('pages')]
+    public function test_243_S3_the_banner_follows_the_storage_link_in_nav_settings_on_chatblast_and_chatbot(string $url): void
+    {
+        $this->diskAt(85);
+        $storageId = DB::table('nav_links')->where('key', 'storage')->value('id');
+        DB::table('nav_link_role_visibility')->where('nav_link_id', $storageId)->where('role', 'Marketing')->update(['is_visible' => true]);
+        DB::table('nav_link_role_visibility')->where('nav_link_id', $storageId)->where('role', 'Marketing - OIC')->update(['is_visible' => false]);
+
+        $html = $this->actingAs($this->user('Marketing', 'mkt@example.test'))->get($url)->assertOk()->getContent();
+        $this->assertStringContainsString('data-storage-banner="amber"', $html);
+
+        $html = $this->actingAs($this->user('Marketing - OIC', 'oic@example.test'))->get($url)->assertOk()->getContent();
+        $this->assertStringNotContainsString('data-storage-banner', $html);
     }
 
     #[\PHPUnit\Framework\Attributes\DataProvider('pages')]
