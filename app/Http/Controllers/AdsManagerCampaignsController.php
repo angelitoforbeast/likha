@@ -1574,11 +1574,13 @@ class AdsManagerCampaignsController extends Controller
                     SUM(ads_manager_reports.video_thruplays) AS video_thruplays,
                     SUM(ads_manager_reports.video_p50)       AS video_p50
                 '))
+                ->when($hasVideo, fn ($q) => $q->selectRaw(self::videoRatesSql()))
                 ->groupBy('ads_manager_reports.ad_id');
 
             if ($onlyWithSpend) $query->havingRaw('COALESCE(SUM(amount_spent_php),0) > 0');
 
             $sortable = ['spend','messages','purchases','cpp','cpm_msg','cpm_1000','cpr','impressions','reach','frequency','link_clicks','welcome_msg_rate','conversion_rate','headline','item_name','first_started','latest_started'];
+            if ($hasVideo) $sortable = array_merge($sortable, self::VIDEO_RATES);
 
             if ($sortBy === 'default') {
                 $rows = $query->orderByDesc('is_on')
@@ -1591,7 +1593,7 @@ class AdsManagerCampaignsController extends Controller
                 $rows = $query->orderBy($sortBy, $sortDir)->limit($limit)->get();
             }
 
-            $rows = $rows->map(function ($r) {
+            $rows = $rows->map(function ($r) use ($hasVideo) {
                 return [
                     'level'           => 'ad',
                     'campaign_id'     => $r->campaign_id,
@@ -1628,7 +1630,7 @@ class AdsManagerCampaignsController extends Controller
                     'conversion_rate'  => isset($r->conversion_rate)  ? (float) $r->conversion_rate  : null,
                     // "Inside" — ads are leaf-level, no children to count.
                     'active_subcount'  => null,
-                ];
+                ] + ($hasVideo ? self::videoRates($r) : []);
             });
         }
 
@@ -1979,7 +1981,7 @@ class AdsManagerCampaignsController extends Controller
             COALESCE(SUM(link_clicks),0) AS link_clicks
         ')->when($hasVideo, fn ($q) => $q->selectRaw('
             SUM(video_plays_3s) AS video_plays_3s, SUM(video_thruplays) AS video_thruplays, SUM(video_p50) AS video_p50
-        '))->first();
+        ')->selectRaw(self::videoRatesSql()))->first();
 
         $totals = [
             'spend'       => (float) ($tot->spend ?? 0),
@@ -1998,6 +2000,7 @@ class AdsManagerCampaignsController extends Controller
         ];
         if ($hasVideo) {
             foreach (['video_plays_3s', 'video_thruplays', 'video_p50'] as $c) $totals[$c] = isset($tot->$c) ? (int) $tot->$c : null;
+            $totals += self::videoRates($tot);
         }
 
         // ── Stitch `has_ad_link` flag para sa /owner/private creative preview UI.
@@ -2126,7 +2129,7 @@ class AdsManagerCampaignsController extends Controller
                     ]);
                 }
             } else {
-                fputcsv($out, ['Ad (Headline)','Ad set','Campaign','Page','Active','First Launched','Days Running','Latest Start','Spend','CPM (1k)','Cost/Msg','Cost/Result','Cost/Purchase','Impr.','Link Clicks','3s plays','ThruPlays (15s)','50% views','Welcome Msg Rate (%)','Msgs','Conv Rate (%)','Purchases']);
+                fputcsv($out, ['Ad (Headline)','Ad set','Campaign','Page','Active','First Launched','Days Running','Latest Start','Spend','CPM (1k)','Cost/Msg','Cost/Result','Cost/Purchase','Impr.','Link Clicks','3s plays','ThruPlays (15s)','50% views','Hook Rate (%)','Hold Rate (%)','Hold Rate 50% (%)','Welcome Msg Rate (%)','Msgs','Conv Rate (%)','Purchases']);
                 foreach ($rows as $r) {
                     fputcsv($out, [
                         ($r['headline'] ?? 'Ad '.$r['ad_id']), $r['ad_set_name'], $r['campaign_name'], $r['page_name'], $r['on'] ? '1':'0',
@@ -2136,6 +2139,7 @@ class AdsManagerCampaignsController extends Controller
                         $r['spend'], $r['cpm_1000'], $r['cpm_msg'], $r['cpr'], $r['cpp'],
                         $r['impressions'], $intOrBlank($r['link_clicks'] ?? null),
                         $intOrBlank($r['video_plays_3s'] ?? null), $intOrBlank($r['video_thruplays'] ?? null), $intOrBlank($r['video_p50'] ?? null),
+                        $rate($r['hook_rate'] ?? null), $rate($r['hold_rate'] ?? null), $rate($r['hold_rate_50'] ?? null),
                         $rate($r['welcome_msg_rate'] ?? null),
                         $r['messages'], $rate($r['conversion_rate'] ?? null), $r['purchases']
                     ]);
@@ -2143,5 +2147,36 @@ class AdsManagerCampaignsController extends Controller
             }
             fclose($out);
         }, 200, $headers);
+    }
+
+    /** Spec 246: the three video rates of the ads level, in percent. */
+    private const VIDEO_RATES = ['hook_rate', 'hold_rate', 'hold_rate_50'];
+
+    /**
+     * Hook Rate = 3-second plays ÷ impressions, Hold Rate = ThruPlays ÷ 3-second plays, Hold Rate 50% = 50% views ÷
+     * 3-second plays, all from summed numbers (an average of per-ad rates would weigh a small ad like a big one).
+     * Each divisor is summed only over the rows that carry the numerator: days stored before the video sync have null
+     * video numbers (no backfill), and counting their impressions would make every rate that spans them look low.
+     * A divisor of 0 or a null numerator gives NULL, shown as "—".
+     */
+    private static function videoRatesSql(): string
+    {
+        $t = 'ads_manager_reports.';
+        $rate = fn (string $num, string $den, string $as) => "CASE WHEN SUM(CASE WHEN {$t}{$num} IS NOT NULL THEN {$t}{$den} END) > 0"
+            . " THEN (SUM({$t}{$num}) * 100.0) / SUM(CASE WHEN {$t}{$num} IS NOT NULL THEN {$t}{$den} END) END AS {$as}";
+
+        return implode(', ', [
+            $rate('video_plays_3s', 'impressions', 'hook_rate'),
+            $rate('video_thruplays', 'video_plays_3s', 'hold_rate'),
+            $rate('video_p50', 'video_plays_3s', 'hold_rate_50'),
+        ]);
+    }
+
+    /** The rates of one aggregated row (an ad or the totals) as floats, null when there is none. */
+    private static function videoRates(object $r): array
+    {
+        $out = [];
+        foreach (self::VIDEO_RATES as $id) $out[$id] = isset($r->$id) ? (float) $r->$id : null;
+        return $out;
     }
 }

@@ -13,22 +13,30 @@ use Illuminate\Support\Facades\Storage;
  */
 class AdsReportPageVideoColumnsTest extends MetaAdsTestCase
 {
-    private const BASE = 'Day,Ad ID,Account ID,Campaign ID,Ad set ID,Page name,Campaign name,Ad set name,Amount spent (PHP),Impressions,Results,Result type,Link clicks';
-    private const ROW  = '2026-10-20,a1,111,c1,as1,Page P1,Camp,Adset,100.50,1500,12,Messaging conversations started,33';
+    private const BASE = ['Day', 'Ad ID', 'Account ID', 'Campaign ID', 'Ad set ID', 'Page name', 'Campaign name', 'Ad set name',
+        'Amount spent (PHP)', 'Impressions', 'Results', 'Result type', 'Link clicks'];
+    private const ROW  = ['2026-10-20', 'a1', '111', 'c1', 'as1', 'Page P1', 'Camp', 'Adset', '100.50', '1500', '12', 'Messaging conversations started', '33'];
 
-    private function uploadThroughThePage(string $csv): \Illuminate\Testing\TestResponse
+    /** An Ads Manager export (XLSX, as Ads Manager exports it) posted through the page's upload form. */
+    private function uploadThroughThePage(array $headers, array $row): \Illuminate\Testing\TestResponse
     {
-        Storage::fake(config('filesystems.default'));
+        $disk = Storage::fake(config('filesystems.default'));
+        $disk->makeDirectory('in');
+        $writer = new \OpenSpout\Writer\XLSX\Writer();
+        $writer->openToFile($disk->path('in/report.xlsx'));
+        $writer->addRow(\OpenSpout\Common\Entity\Row::fromValues($headers));
+        $writer->addRow(\OpenSpout\Common\Entity\Row::fromValues($row));
+        $writer->close();
         $this->actingAs($this->user('Marketing', 'uploader@example.test'));
 
         return $this->followingRedirects()
-            ->post('/ads_manager/report', ['files' => [UploadedFile::fake()->createWithContent('report.csv', $csv)]])
+            ->post('/ads_manager/report', ['files' => [new UploadedFile($disk->path('in/report.xlsx'), 'report.xlsx', null, null, true)]])
             ->assertOk();
     }
 
     public function test_S_246_3_5_the_page_upload_without_the_video_columns_is_refused_and_the_uploader_sees_which_are_missing(): void
     {
-        $html = $this->uploadThroughThePage(self::BASE . "\n" . self::ROW . "\n")->getContent();
+        $html = $this->uploadThroughThePage(self::BASE, self::ROW)->getContent();
 
         $message = 'Missing required column(s): 3-second video plays, ThruPlays, Video plays at 50%';
         $this->assertStringContainsString(e($message), $html);
@@ -39,7 +47,7 @@ class AdsReportPageVideoColumnsTest extends MetaAdsTestCase
 
     public function test_S_246_3_5_the_page_upload_with_the_video_columns_fills_them(): void
     {
-        $this->uploadThroughThePage(self::BASE . ",3-second video plays,ThruPlays,Video plays at 50%\n" . self::ROW . ",\"4,210\",1375,980\n");
+        $this->uploadThroughThePage(array_merge(self::BASE, ['3-second video plays', 'ThruPlays', 'Video plays at 50%']), array_merge(self::ROW, ['4,210', '1375', 980]));
 
         $this->assertSame('done', $this->getJson('/ads_manager/report/status')->json('logs.0.status'));
         $row = DB::table('ads_manager_reports')->where('ad_id', 'a1')->first();

@@ -473,6 +473,10 @@
             { id:'video_plays_3s',    label:'3s plays',            sort:null,               type:'integer',      align:'right', minw:90,  tab:'ads' },
             { id:'video_thruplays',   label:'ThruPlays (15s)',     sort:null,               type:'integer',      align:'right', minw:110, tab:'ads' },
             { id:'video_p50',         label:'50% views',           sort:null,               type:'integer',      align:'right', minw:90,  tab:'ads' },
+            // Spec 246: rates of the video views per ad (from summed numbers, server-side sort), Ads tab only.
+            { id:'hook_rate',         label:'Hook Rate',           sort:'hook_rate',        type:'percent',      align:'right', minw:90,  tab:'ads' },
+            { id:'hold_rate',         label:'Hold Rate',           sort:'hold_rate',        type:'percent',      align:'right', minw:90,  tab:'ads' },
+            { id:'hold_rate_50',      label:'Hold Rate 50%',       sort:'hold_rate_50',     type:'percent',      align:'right', minw:110, tab:'ads' },
             { id:'welcome_msg_rate',  label:'Welcome Msg Rate (%)',sort:'welcome_msg_rate', type:'percent',      align:'right', minw:130 },
             { id:'messages',       label:'Messages',         sort:null,             type:'integer',      align:'right', minw:90  },
             { id:'conversion_rate',   label:'Conv Rate (%)',       sort:'conversion_rate',  type:'percent',      align:'right', minw:110 },

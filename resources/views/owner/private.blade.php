@@ -3390,6 +3390,10 @@
           { id:'reach',          label:'Reach',            sort:'reach',          type:'integer',      align:'right', minw:90  },
           { id:'frequency',      label:'Freq',             sort:'frequency',      type:'number',       align:'right', minw:70  },
           { id:'link_clicks',       label:'Link clicks',         sort:'link_clicks',      type:'integer',      align:'right', minw:90  },
+          // Spec 246: rates of the video views, on the ads rows only (see visibleCampaignsCols).
+          { id:'hook_rate',         label:'Hook Rate',           sort:'hook_rate',        type:'percent',      align:'right', minw:90,  tab:'ads' },
+          { id:'hold_rate',         label:'Hold Rate',           sort:'hold_rate',        type:'percent',      align:'right', minw:90,  tab:'ads' },
+          { id:'hold_rate_50',      label:'Hold Rate 50%',       sort:'hold_rate_50',     type:'percent',      align:'right', minw:110, tab:'ads' },
           { id:'welcome_msg_rate',  label:'Welcome Msg Rate (%)',sort:'welcome_msg_rate', type:'percent',      align:'right', minw:130 },
           { id:'messages',       label:'Messages',         sort:null,             type:'integer',      align:'right', minw:90  },
           { id:'conversion_rate',   label:'Conv Rate (%)',       sort:'conversion_rate',  type:'percent',      align:'right', minw:110 },
@@ -3403,7 +3407,8 @@
           { id:'ad_rts_pct',     label:'RTS%',             sort:null,             type:'percent',      align:'right', minw:70  },
         ];
       },
-      visibleCampaignsCols(){
+      // `level` is passed by the ads table only: a column with a `tab` (the video rates) exists on that level only.
+      visibleCampaignsCols(level){
         const defs = this.defaultCampaignsCols();
         const defMap = Object.fromEntries(defs.map(c => [c.id, c]));
         const cfg = window.__CAMPAIGNS_COLS__ || {};
@@ -3414,7 +3419,7 @@
           if (defMap[id] && !hidden.has(id) && !seen.has(id)) { out.push(defMap[id]); seen.add(id); }
         }
         for (const c of defs) { if (!hidden.has(c.id) && !seen.has(c.id)) out.push(c); }
-        return out;
+        return out.filter(c => !(c.tab && c.tab !== level));
       },
       // Header label per col, with name col tab-aware.
       campLabel(col, level){

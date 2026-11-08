@@ -151,6 +151,10 @@ class OwnerColumnSettingsController extends Controller
             ['id' => 'video_plays_3s',    'label' => '3s plays (Ads tab)'],
             ['id' => 'video_thruplays',   'label' => 'ThruPlays (15s) (Ads tab)'],
             ['id' => 'video_p50',         'label' => '50% views (Ads tab)'],
+            // Spec 246: computed from the video views per ad, so also on the Ads tab only.
+            ['id' => 'hook_rate',         'label' => 'Hook Rate (Ads tab)'],
+            ['id' => 'hold_rate',         'label' => 'Hold Rate (Ads tab)'],
+            ['id' => 'hold_rate_50',      'label' => 'Hold Rate 50% (Ads tab)'],
             ['id' => 'welcome_msg_rate',  'label' => 'Welcome Msg Rate (%)'],
             ['id' => 'messages',       'label' => 'Messages'],
             ['id' => 'conversion_rate',   'label' => 'Conv Rate (%)'],
@@ -243,9 +247,9 @@ class OwnerColumnSettingsController extends Controller
 
     /**
      * New columns that a saved order gets right after the catalog column before them (like CEO_ONLY), not at the end:
-     * the video views (spec 244) belong next to Link clicks.
+     * the video views (spec 244) belong next to Link clicks, and their rates (spec 246) next to the video views.
      */
-    private const PLACED_AFTER_PREVIOUS = ['video_plays_3s', 'video_thruplays', 'video_p50'];
+    private const PLACED_AFTER_PREVIOUS = ['video_plays_3s', 'video_thruplays', 'video_p50', 'hook_rate', 'hold_rate', 'hold_rate_50'];
 
     /**
      * Default visibility per column when nothing has been saved yet.
@@ -274,7 +278,7 @@ class OwnerColumnSettingsController extends Controller
             'first_started', 'days_running', 'latest_started',
             'spend', 'cpp', 'profit_pct', 'profit_pct_7d', 'profit_pct_3d', 'profit_pct_today', 'impressions',
             'frequency',
-            'link_clicks', 'video_plays_3s', 'video_thruplays', 'video_p50', 'welcome_msg_rate', 'messages', 'conversion_rate',
+            'link_clicks', 'video_plays_3s', 'video_thruplays', 'video_p50', 'hook_rate', 'hold_rate', 'hold_rate_50', 'welcome_msg_rate', 'messages', 'conversion_rate',
             'purchases',
             'ad_rdt',
         ],

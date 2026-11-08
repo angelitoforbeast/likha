@@ -128,7 +128,8 @@ class AdsVideoViewsTableTest extends OwnerPrivateTestCase
         $lines  = array_map('str_getcsv', preg_split('/\r?\n/', trim(ltrim($res->streamedContent(), "\xEF\xBB\xBF"))));
         $header = $lines[0];
         $at     = array_search('Link Clicks', $header, true);
-        $this->assertSame(['Link Clicks', '3s plays', 'ThruPlays (15s)', '50% views', 'Welcome Msg Rate (%)'], array_slice($header, $at, 5));
+        // Spec 246 put its three rates right after "50% views".
+        $this->assertSame(['Link Clicks', '3s plays', 'ThruPlays (15s)', '50% views', 'Hook Rate (%)'], array_slice($header, $at, 5));
         $byAd = [];
         foreach (array_slice($lines, 1) as $l) $byAd[$l[0]] = array_slice($l, $at, 4);
         $this->assertSame(['40', '150', '50', '35'], $byAd['Ad a1']);
@@ -155,7 +156,8 @@ class AdsVideoViewsTableTest extends OwnerPrivateTestCase
         $this->assertMatchesRegularExpression(
             "/id:'link_clicks'[^\n]*\n(?:\s*\/\/[^\n]*\n)?\s*\{ id:'video_plays_3s',\s*label:'3s plays',[^\n]*tab:'ads' \},\n"
                 . "\s*\{ id:'video_thruplays',\s*label:'ThruPlays \(15s\)',[^\n]*tab:'ads' \},\n"
-                . "\s*\{ id:'video_p50',\s*label:'50% views',[^\n]*tab:'ads' \},\n\s*\{ id:'welcome_msg_rate'/",
+                // Spec 246's three rates follow the video columns.
+                . "\s*\{ id:'video_p50',\s*label:'50% views',[^\n]*tab:'ads' \},\n(?:\s*\/\/[^\n]*\n)?\s*\{ id:'hook_rate'/",
             $html,
         );
         $this->assertStringContainsString("c.tab && c.tab !== this.tab", $html, 'the video columns show on the Ads tab only');

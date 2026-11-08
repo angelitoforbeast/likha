@@ -19,6 +19,8 @@ class AdsHookHoldRatesTest extends OwnerPrivateTestCase
     private const RATES = ['hook_rate', 'hold_rate', 'hold_rate_50'];
     private const QUERY = ['level' => 'ads', 'start_date' => '2026-10-01', 'end_date' => '2026-10-10', 'page_name' => 'Page Uno'];
 
+    private ?\App\Models\User $ceo = null;
+
     protected function migrationPaths(): array
     {
         return array_merge(parent::migrationPaths(), ['database/migrations/2026_05_22_140000_create_ad_catalog_table.php']);
@@ -97,7 +99,9 @@ class AdsHookHoldRatesTest extends OwnerPrivateTestCase
 
     private function data(array $extra = []): \Illuminate\Testing\TestResponse
     {
-        return $this->actingAs($this->user())->getJson('/ads_manager/campaigns/data?' . http_build_query(self::QUERY + $extra))->assertOk();
+        $this->ceo ??= $this->user();
+
+        return $this->actingAs($this->ceo)->getJson('/ads_manager/campaigns/data?' . http_build_query(array_merge(self::QUERY, $extra)))->assertOk();
     }
 
     private function rates(array $row): array

@@ -395,8 +395,19 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
             'Results'              => ['results'],
             'Result Type'          => ['result type'],
             'Link Clicks'          => ['link clicks'],
-        ];
+        ] + array_combine(array_keys(self::VIDEO_HEADERS), array_column(self::VIDEO_HEADERS, 'accepts'));
     }
+
+    /**
+     * The three video numbers (spec 246), required so every upload carries what the Meta sync stores. Keyed by the name
+     * Ads Manager's export uses (shown in the missing-column message); `accepts` lists the normalized headers read, the
+     * current name first, then the older Ads Manager names that older saved report layouts still export.
+     */
+    private const VIDEO_HEADERS = [
+        '3-second video plays' => ['column' => 'video_plays_3s',  'accepts' => ['3-second video plays', '3-second video views']],
+        'ThruPlays'            => ['column' => 'video_thruplays', 'accepts' => ['thruplays', 'thruplay']],
+        'Video plays at 50%'   => ['column' => 'video_p50',       'accepts' => ['video plays at 50%', 'video watches at 50%']],
+    ];
 
     /**
      * Returns user-facing labels of required headers absent from the file.
@@ -444,6 +455,15 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
             if (array_key_exists($intCol, $row)) $row[$intCol] = $this->toInt($row[$intCol]);
         }
 
+        // Video counts: one column can come under several header names, so the first one present is read (a plain
+        // header map would let an absent alias overwrite it with null).
+        foreach (self::VIDEO_HEADERS as $video) {
+            $row[$video['column']] = null;
+            foreach ($video['accepts'] as $header) {
+                if (isset($headerIndex[$header])) { $row[$video['column']] = $this->toCount($getByHeader($header)); break; }
+            }
+        }
+
         // decimals
         foreach (['amount_spent_php','cost_per_result','ad_set_budget'] as $decCol) {
             if (array_key_exists($decCol, $row)) $row[$decCol] = $this->toDecimal($row[$decCol]);
@@ -478,6 +498,18 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
         $v = preg_replace('/[^\d\-]/', '', (string)$v);
         if ($v === '' || $v === '-') return null;
         return (int) $v;
+    }
+
+    /**
+     * A view count from an uploaded cell, or null. The file is untrusted: thousands separators are allowed, anything
+     * else that is not a non-negative number ("—", text, a negative) is null so it never replaces a stored count.
+     */
+    private function toCount($v): ?int
+    {
+        if ($v === null) return null;
+        $s = str_replace([',', ' '], '', trim((string) $v));
+        if (!is_numeric($s) || (float) $s < 0) return null;
+        return (int) round((float) $s);
     }
 
     private function toDecimal($v): ?float
@@ -645,8 +677,8 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
                 $this->putIfExists($updateData, $r, 'impressions');
                 $this->putIfExists($updateData, $r, 'cost_per_result');
                 $this->putIfExists($updateData, $r, 'link_clicks');
-                // Video views (spec 244): only the Meta API sync sends them (the upload's header map has none). Null =
-                // no data, so the stored number stays. Not in MONOTONIC_FIELDS: a lower count does not refuse the row.
+                // Video views (spec 244, and from the upload since spec 246). Null = no data, so the stored number stays.
+                // Not in MONOTONIC_FIELDS: a lower count does not refuse the row.
                 $this->putIfExists($updateData, $r, 'video_plays_3s');
                 $this->putIfExists($updateData, $r, 'video_thruplays');
                 $this->putIfExists($updateData, $r, 'video_p50');
