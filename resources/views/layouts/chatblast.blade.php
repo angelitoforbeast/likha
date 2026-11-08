@@ -99,6 +99,17 @@
     </div>
 </header>
 
+{{-- Storage banner (spec 242), the same as on the main Likha layout: CEO and Marketing - OIC at 80 % used or more,
+     cached 60 s, above the problems banner. Inline @php (this layout already uses the inline form, which a block
+     form here would swallow), at column 0 right after the comment, so that without a banner the page is byte for
+     byte what it was before. --}}@php($cbStorageBanner = \App\Services\StorageWarning::banner(Auth::user()))
+@if($cbStorageBanner)
+    <div data-storage-banner="{{ $cbStorageBanner['tone'] }}" role="alert"
+         class="shrink-0 border-b px-4 py-1.5 text-sm font-semibold sm:px-6 {{ $cbStorageBanner['tone'] === 'red' ? 'border-red-300 bg-red-600 text-white' : 'border-amber-300 bg-amber-100 text-amber-900' }}">
+        {{ $cbStorageBanner['text'] }}
+        <a href="{{ route('system.monitor.storage') }}" class="ml-2 underline">View storage</a>
+    </div>
+@endif
 @if($cbProblems)
     {{-- Isang linya muna; ang pag-click ay nagbubukas ng listahan dito rin (walang lipat ng page). --}}
     <div class="shrink-0 border-b {{ $cbProblems['urgent'] ? 'border-red-300 bg-red-600 text-white' : 'border-slate-300 bg-slate-100 text-slate-800' }} text-sm" role="alert" data-alert="problems">
