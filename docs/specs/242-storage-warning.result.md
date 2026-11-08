@@ -79,7 +79,7 @@ No change to the spec's stories or to any Then. Added to `qa/stories.md` as Slic
 
 ## Head commit
 
-HEAD_PLACEHOLDER
+`75c5192a` holds the evidence; the code head is `86dc001f`. The branch tip after this line is the next docs commit.
 
 ## For the reviewer before release
 
