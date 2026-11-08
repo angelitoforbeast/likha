@@ -24,7 +24,8 @@ class PancakeRetrieve2SpeedTest extends PancakePsidTestCase
         parent::setUp();
         $this->mapPage('Page Uno', '5001');
         $this->mapPage('Page Dos', '5002');
-        // sqlite has no CONVERT_TZ: this stand-in really shifts UTC to Manila, so the day boundary is tested.
+        // sqlite has no CONVERT_TZ: this stand-in really shifts by 8 hours, so any conversion left in the query shows
+        // up as a wrong day or time (spec 248: created_at is stored as Manila wall-clock time and is read as is).
         DB::connection()->getPdo()->sqliteCreateFunction('CONVERT_TZ', function ($d, $from = null, $to = null) {
             return $d === null ? null : gmdate('Y-m-d H:i:s', strtotime($d . ' UTC') + 8 * 3600);
         }, 3);
@@ -52,13 +53,29 @@ class PancakeRetrieve2SpeedTest extends PancakePsidTestCase
         return MacroOutput::create($extra + ['PAGE' => 'Page Uno', 'ts_date' => '2026-10-20']);
     }
 
-    /** created_at is UTC, as in production. 02:00 UTC = 10:00 Manila on the same day. */
-    private function chat(string $pageId, string $name, ?string $psid = null, string $createdAtUtc = '2026-10-20 02:00:00'): void
+    /** created_at is Manila wall-clock time, as in production (spec 248). */
+    private function chat(string $pageId, string $name, ?string $psid = null, string $createdAt = '2026-10-20 10:00:00'): void
     {
         DB::table('pancake_conversations')->insert([
             'pancake_page_id' => $pageId, 'full_name' => $name, 'psid' => $psid,
-            'customers_chat' => 'chat 09171234567', 'created_at' => $createdAtUtc, 'updated_at' => $createdAtUtc,
+            'customers_chat' => 'chat 09171234567', 'created_at' => $createdAt, 'updated_at' => $createdAt,
         ]);
+    }
+
+    /** The page's rows, by name. */
+    private function pageRows(array $query = self::DAY): array
+    {
+        $page = $this->actingAs($this->me())->get('/pancake/retrieve2?' . http_build_query($query))->assertOk();
+
+        return $page->viewData('rows')->getCollection()->keyBy('full_name')->all();
+    }
+
+    /** The export's rows, by name. */
+    private function exportRows(array $query = self::DAY): array
+    {
+        $export = $this->actingAs($this->me())->getJson('/pancake/retrieve2/export?' . http_build_query($query))->assertOk();
+
+        return collect($export->json('rows'))->keyBy('full_name')->all();
     }
 
     /** Names listed by the export and by the page for the same filters; both must agree. */
@@ -151,16 +168,47 @@ class PancakeRetrieve2SpeedTest extends PancakePsidTestCase
         $this->assertSame([''], $this->listed());
     }
 
-    public function test_the_manila_day_boundary_decides_the_range_from_the_utc_created_at(): void
+    public function test_the_manila_day_boundary_decides_the_range_from_the_stored_created_at(): void
     {
-        $this->chat('5001', 'Before Start', null, '2026-10-19 15:59:59'); // 23:59:59 Manila on the 19th
-        $this->chat('5001', 'At Start', null, '2026-10-19 16:00:00');     // 00:00 Manila on the 20th
-        $this->chat('5001', 'Last Minute', null, '2026-10-20 15:59:00');  // 23:59 Manila on the 20th
-        $this->chat('5001', 'Next Day', null, '2026-10-20 16:00:00');     // 00:00 Manila on the 21st
+        // Spec 248: created_at is Manila wall-clock time, so the day is the stored date with no shift.
+        $this->chat('5001', 'Before Start', null, '2026-10-19 23:59:59');
+        $this->chat('5001', 'At Start', null, '2026-10-20 00:00:00');
+        $this->chat('5001', 'Late Afternoon', null, '2026-10-20 17:00:00'); // the UTC reading put it on the 21st
+        $this->chat('5001', 'Last Second', null, '2026-10-20 23:59:59');
+        $this->chat('5001', 'Next Day', null, '2026-10-21 00:00:00');
 
-        $this->assertSame(['At Start', 'Last Minute'], $this->listed());
-        $this->assertSame(['At Start', 'Last Minute', 'Next Day'],
+        $this->assertSame(['At Start', 'Last Second', 'Late Afternoon'], $this->listed());
+        $this->assertSame(['At Start', 'Last Second', 'Late Afternoon', 'Next Day'],
             $this->listed(['date_from' => '2026-10-20', 'date_to' => '2026-10-21']));
+        $this->assertSame(['Next Day'], $this->listed(['date_from' => '2026-10-21', 'date_to' => '2026-10-21']));
+    }
+
+    public function test_date_created_shows_the_stored_created_at_on_the_page_and_in_the_export(): void
+    {
+        $this->chat('5001', 'Morning', null, '2026-10-20 08:15:00');
+        $this->chat('5001', 'Evening', null, '2026-10-20 17:00:00');
+
+        $export = $this->exportRows();
+        $this->assertSame('2026-10-20 08:15:00', $export['Morning']['date_created'] ?? null);
+        $this->assertSame('2026-10-20 17:00:00', $export['Evening']['date_created'] ?? null);
+
+        $page = $this->pageRows();
+        $this->assertSame('2026-10-20 08:15:00', isset($page['Morning']) ? (string) $page['Morning']->date_created : null);
+        $this->assertSame('2026-10-20 17:00:00', isset($page['Evening']) ? (string) $page['Evening']->date_created : null);
+    }
+
+    public function test_the_shop_details_come_from_orders_of_the_stored_created_at_date(): void
+    {
+        // After 16:00 the UTC reading moved the conversation to the next day and took that day's shop details.
+        $this->chat('5001', 'Late Chat', null, '2026-10-20 17:00:00');
+        $this->order(['fb_name' => 'Other One', 'SHOP DETAILS' => 'Shop Today', 'ts_date' => '2026-10-20']);
+        $this->order(['fb_name' => 'Other Two', 'SHOP DETAILS' => 'Shop Tomorrow', 'ts_date' => '2026-10-21']);
+
+        foreach ([self::DAY, ['date_from' => '2026-10-20', 'date_to' => '2026-10-21']] as $range) {
+            $this->assertSame('Shop Today', $this->exportRows($range)['Late Chat']['shop_details'] ?? null);
+            $page = $this->pageRows($range);
+            $this->assertSame('Shop Today', isset($page['Late Chat']) ? $page['Late Chat']->shop_details : null);
+        }
     }
 
     public function test_the_psid_rule_still_decides_for_a_conversation_with_a_psid(): void
@@ -206,13 +254,15 @@ class PancakeRetrieve2SpeedTest extends PancakePsidTestCase
         $bindings = collect(DB::getQueryLog())->first(fn ($q) => str_contains($q['query'], 'from "pancake_conversations"'))['bindings'];
         DB::disableQueryLog();
 
-        // The range is compared on the bare column, with UTC bounds worked out from the Manila dates.
+        // The range is compared on the bare column, with the Manila dates as bounds and no conversion (spec 248).
         $this->assertStringContainsString('"pc"."created_at" >= ?', $sql);
         $this->assertStringContainsString('"pc"."created_at" < ?', $sql);
-        $this->assertContains('2026-10-19 16:00:00', $bindings);
-        $this->assertContains('2026-10-20 16:00:00', $bindings);
-        $this->assertStringNotContainsString("DATE(CONVERT_TZ(pc.created_at,'+00:00','+08:00')) >= ?", $sql);
-        $this->assertStringNotContainsString("DATE(CONVERT_TZ(pc.created_at,'+00:00','+08:00')) <= ?", $sql);
+        $this->assertContains('2026-10-20 00:00:00', $bindings);
+        $this->assertContains('2026-10-21 00:00:00', $bindings);
+        $this->assertNotContains('2026-10-19 16:00:00', $bindings);
+        $this->assertNotContains('2026-10-20 16:00:00', $bindings);
+        $this->assertStringNotContainsString('CONVERT_TZ', $sql);
+        $this->assertStringContainsString('DATE(pc.created_at)', $sql);
         // The name rule probes macro_output on the bare (PAGE, fb_name) columns instead of grouping the whole table.
         $this->assertMatchesRegularExpression('/mo\.`PAGE` = TRIM\(/', $sql);
         // The name is probed as given and with one leading space, both index lookups (amendment 247-1).
