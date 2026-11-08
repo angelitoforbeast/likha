@@ -4804,3 +4804,29 @@ Threat model: the nav tables (written only by the CEO through nav settings) and 
 | S-243.4.3 | edge | Nothing readable (no /proc, no `sys_getloadavg`): every line says "Not available", the page renders; only the load missing: only that line says it, no cores | `test_S4_unreadable_stats_say_not_available_and_the_page_renders`, `test_S4_one_stat_missing_says_not_available_only_on_its_line` | 2026-11-08 passed |
 | S-243.4.4 | perf | One shared reader and cache: two views in 10 s read once, the cache entry is the monitor's `sysmon_server`, read again after 11 s; the CEO monitor's `getServerStats` returns the same numbers with the same keys | `test_S4_the_view_shares_the_ceo_monitors_10_second_cache`, `test_S4_the_ceo_monitor_reads_the_same_shared_code` | 2026-11-08 passed |
 | S-243.4.5 | negative | The database table list, file storage and processes are not on the Storage view; the OIC still gets 404 on `/system-monitor` | `test_S4_the_database_tables_and_processes_stay_on_the_ceo_monitor` | 2026-11-08 passed |
+
+## Slice 244 – The Meta Ads sync brings in video views
+
+As the owner, I want 3-second plays, ThruPlays (15 seconds or to the end) and 50% views per ad next to reach, impressions and link clicks, so I can see which video ads hold attention without opening Ads Manager.
+
+Threat model: Meta's Insights answers are untrusted (each video number must be a list of `{action_type, value}` with a numeric, non-negative `video_view` value, otherwise it is null); the database is trusted; no user input is read. Risk tier: medium (a migration on the large `ads_manager_reports`; a wrong mapping would write wrong numbers into every synced row). Tests: `tests/Feature/MetaAds/MetaAdsVideoViewsTest.php` (recorded made-up answers through the fake Graph), `tests/Feature/MetaAds/AdsVideoViewsTableTest.php` (the migration, `/ads_manager/campaigns` and its data, CSV and column settings).
+
+### S-244.1 The sync stores the three numbers per ad and day (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-244.1.1 | happy | The insights request asks for `actions`, `video_thruplay_watched_actions` and `video_p50_watched_actions` (not `video_15_sec_watched_actions`); a video ad's answer stores `video_plays_3s` (the `video_view` action), `video_thruplays` and `video_p50` (their `video_view` entries) | `test_S1_1_the_sync_asks_for_the_video_fields_and_stores_3s_plays_thruplays_and_50_percent` | |
+| S-244.1.2 | edge | An image ad (no video fields), only `video_play`, a string, an object, a negative, empty or non-numeric value, a list without `video_view`: the column is null, never 0; a real 0 stays 0; each column reads only its own field; the rest of the row is as before | `test_S1_2_an_image_ad_stores_null_not_zero_and_the_rest_of_the_row_as_before`, `test_S1_2_missing_or_unknown_shapes_give_null_never_zero` | |
+| S-244.1.3 | edge | The same recorded answer with and without the video fields maps every other column to exactly the same values (spend, reach, impressions, link clicks, messages, purchases, results, cost per result, result type, …) | `test_S1_3_every_other_column_keeps_its_value_for_the_same_recorded_answer` | |
+| S-244.1.4 | happy | The update path: a stored row (same day + ad) gets the three numbers; a later answer without them keeps them; a later higher ThruPlay count replaces it; still one row | `test_S1_4_the_update_path_fills_the_columns_and_a_later_answer_without_them_keeps_them` | |
+| S-244.1.5 | edge | The migration adds the three unsigned nullable integer columns without a default and without `after()` (MySQL 8 INSTANT add, no table rebuild); running it again changes nothing; `down()` drops them and is safe twice | `test_S1_5_the_migration_adds_three_nullable_columns_without_a_default_and_down_removes_them` | |
+
+### S-244.2 The numbers in the per-ad table (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-244.2.1 | happy | `/ads_manager/campaigns/data?level=ads` returns the sums per ad (null for an image ad) and in the totals; the ads CSV has "3s plays", "ThruPlays (15s)", "50% views" right after "Link Clicks", blank for null; before the migration has run the ads level and its CSV still load | `test_S2_1_the_ads_level_returns_the_three_sums_per_ad_null_for_an_image_ad_and_in_the_totals`, `test_S2_1_the_ads_csv_has_the_three_columns_right_after_link_clicks_and_blank_for_null`, `test_S2_1_before_the_migration_runs_the_ads_level_still_loads` | |
+| S-244.2.2 | happy | The Campaigns Manager (`/ads_manager/campaigns`) lists the three columns after Link clicks on the Ads tab only ("—" when null, like link clicks); the column settings catalog has them after Link clicks, the CEO sees them by default, and an older saved order gets them right after Link clicks | `test_S2_2_the_campaigns_manager_has_the_three_columns_after_link_clicks_on_the_ads_tab`, `test_S2_2_column_settings_list_them_after_link_clicks_and_an_older_saved_order_gets_them_there` | |
+
+### S-244.3 Compare and the upload are unchanged (P2)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-244.3.1 | negative | The upload's header map has no video columns, so it is not changed: an uploaded export for the same day + ad updates its own columns and leaves the synced video numbers as they are. `Compare` compares the same five numbers as before | `test_S3_an_uploaded_export_leaves_the_synced_video_numbers_as_they_are`, existing `MetaAdsCompareTest` | |
