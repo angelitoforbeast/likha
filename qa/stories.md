@@ -4829,4 +4829,32 @@ Threat model: Meta's Insights answers are untrusted (each video number must be a
 ### S-244.3 Compare and the upload are unchanged (P2)
 | Case | Type | Given / When / Then | Test | Last run |
 |------|------|---------------------|------|----------|
-| S-244.3.1 | negative | The upload's header map has no video columns, so it is not changed: an uploaded export for the same day + ad updates its own columns and leaves the synced video numbers as they are. `Compare` compares the same five numbers as before | `test_S3_an_uploaded_export_leaves_the_synced_video_numbers_as_they_are`, existing `MetaAdsCompareTest` | |
+| S-244.3.1 | negative | An uploaded export for the same day + ad updates its own columns and leaves the synced video numbers as they are (since spec 246 the upload carries the three video columns; blank cells keep the stored numbers, see S-246.3). `Compare` compares the same five numbers as before | `test_S3_an_uploaded_export_with_blank_video_cells_leaves_the_synced_video_numbers_as_they_are`, existing `MetaAdsCompareTest` | |
+
+## Slice 246 – Hook Rate, Hold Rate and Hold Rate 50% per ad; the upload requires the video columns
+
+As the owner, I want Hook Rate (3-second plays ÷ impressions), Hold Rate (ThruPlays ÷ 3-second plays) and Hold Rate 50% (50% views ÷ 3-second plays) on the ads rows, and every Ads Manager upload to carry the three video numbers, so I can compare video ads at a glance whichever way the data came in.
+
+Threat model: uploaded files are untrusted (a video cell is a non-negative count or null; a missing column refuses the whole file before any row is written); the database and the stored Meta API data are trusted. Risk tier: medium (a wrong required-column check blocks every upload). Tests: `tests/Feature/MetaAds/AdsHookHoldRatesTest.php` (data, totals, sort, CSV, both catalogs, column settings), `tests/Feature/MetaAds/AdsUploadVideoColumnsTest.php` (the upload), `tests/Feature/MetaAds/MetaAdsVideoViewsTest.php` (upload and sync together).
+
+### S-246.1 The three rates per ad and in the totals (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-246.1.1 | happy | `/ads_manager/campaigns/data?level=ads` returns `hook_rate`, `hold_rate`, `hold_rate_50` per ad as percentages of summed numbers; a day stored before the video sync (null) does not dilute them; the totals compute them from the summed numbers (28.0, not the 26.67 average of the ad rates) | `test_S1_1_the_ads_level_returns_the_three_rates_per_ad_from_summed_numbers`, `test_S1_1_the_totals_compute_the_rates_from_the_summed_numbers_not_an_average_of_the_ad_rates` | |
+| S-246.1.2 | edge | 0 impressions, 0 or null 3-second plays, a null numerator, an image ad, totals of image ads only: null ("—"), never 0% and never an error | `test_S1_2_a_zero_or_null_divisor_or_a_null_numerator_gives_null_never_zero` | |
+| S-246.1.3 | happy | Each rate sorts the ads level both ways; the campaign and ad set levels are unchanged and ignore a rate sort | `test_S1_3_each_rate_sorts_the_ads_level`, `test_S1_4_the_campaign_and_ad_set_levels_are_unchanged_and_ignore_a_rate_sort` | |
+| S-246.1.4 | happy | The ads CSV has "Hook Rate (%)", "Hold Rate (%)", "Hold Rate 50% (%)" right after "50% views", one decimal, blank for null | `test_S1_4_the_ads_csv_has_the_three_rates_after_50_percent_views_with_one_decimal_and_blank_for_null` | |
+
+### S-246.2 Visibility only through column settings (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-246.2.1 | happy | The Campaigns Manager has the three sortable percent columns after the video columns on the Ads tab only; `/owner/private` shows them on its ads rows only (the campaign and ad set tables leave them out) | `test_S2_1_the_campaigns_manager_has_the_three_percent_columns_after_the_video_columns_on_the_ads_tab`, `test_S2_1_owner_private_shows_the_three_rates_on_its_ads_rows_only` | |
+| S-246.2.2 | happy | Column settings list them after "50% views"; the CEO sees them by default; Marketing and Marketing - OIC only when ticked; an older saved order (with or without the video columns) gets them right after the video columns | `test_S2_2_column_settings_list_them_after_the_video_columns_and_the_ceo_sees_them_by_default`, `test_S2_2_other_roles_see_them_only_when_ticked_in_column_settings`, `test_S2_2_an_older_saved_order_gets_them_right_after_the_video_columns` | |
+
+### S-246.3 The upload requires the three video columns (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-246.3.1 | happy | A file with "3-second video plays", "ThruPlays", "Video plays at 50%" uploads as before and fills the three columns (a real 0 stays 0); a blank, "—", text or negative cell is null and keeps a stored number | `test_S3_1_an_upload_with_the_three_columns_fills_them_on_the_rows_it_writes`, `test_S3_1_a_blank_dash_text_or_negative_cell_is_null_and_keeps_a_stored_number` | |
+| S-246.3.2 | negative | A file missing any one, or all, of the three is refused before any row is written: the upload log fails with "Missing required column(s): …" naming exactly the missing columns, with the existing missing columns in the same message | `test_S3_2_a_file_missing_a_video_column_is_refused_before_any_row_is_written` | |
+| S-246.3.3 | edge | Header variants: any case, extra spaces, and the older names "3-second video views", "ThruPlay", "Video watches at 50%" | `test_S3_3_the_export_header_variants_are_accepted` | |
+| S-246.3.4 | edge | The upload and the sync write the same columns; a later sync without video numbers keeps the uploaded ones, an upload with blank cells keeps the synced ones | `test_S_246_3_the_upload_and_the_sync_write_the_same_columns_and_neither_overwrites_a_number_with_null`, `test_S3_an_uploaded_export_with_blank_video_cells_leaves_the_synced_video_numbers_as_they_are` | |
