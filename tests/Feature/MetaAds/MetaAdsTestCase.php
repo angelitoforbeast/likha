@@ -143,6 +143,8 @@ abstract class MetaAdsTestCase extends OwnerPrivateTestCase
             $t->string('quick_reply_1')->nullable();
             $t->string('quick_reply_2')->nullable();
             $t->string('quick_reply_3')->nullable();
+            // 2025_08_26_001847_add_ad_link_to_ad_campaign_creatives (spec 252: the sync fills it).
+            $t->string('ad_link')->nullable();
             $t->timestamps();
         });
     }
