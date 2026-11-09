@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Support\OwnerPrivateColumns;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -61,72 +62,12 @@ class OwnerColumnSettingsController extends Controller
 
     /**
      * Column catalog: every column the user can show/hide/reorder per table.
-     * IDs here match what each view's render code looks up. Keep in sync.
+     * IDs here match what each view's render code looks up. Keep in sync (owner_private: see OwnerPrivateColumns).
      */
     public const CATALOG = [
-        'owner_private' => [
-            ['id' => 'adspent',       'label' => 'Adspent'],
-            ['id' => 'orders',        'label' => 'Orders'],
-            ['id' => 'orders_1d',     'label' => 'Orders (1D)'],
-            ['id' => 'cpp',           'label' => 'CPP'],
-            ['id' => 'proceed',       'label' => 'Proceed'],
-            ['id' => 'pcpp',          'label' => 'P.CPP'],
-            ['id' => 'tcpr',          'label' => 'TCPR (Pending Rate)'],
-            ['id' => 'breakeven_cpp', 'label' => 'Breakeven CPP'],
-            ['id' => 'proj_profit',   'label' => 'Prof.Profit'],
-            ['id' => 'proj_profit_mira', 'label' => 'Profit (Mira RTS)'],
-            ['id' => 'per_order',     'label' => '/Order'],
-            ['id' => 'np_per_order',     'label' => 'NP/O (1D)'],
-            ['id' => 'np_per_order_3d',  'label' => 'NP/O (3D)'],
-            ['id' => 'np_per_order_7d',  'label' => 'NP/O (7D)'],
-            ['id' => 'np_per_order_1m',  'label' => 'NP/O (1M, entire range)'],
-            ['id' => 'proj_pct',      'label' => 'Prof.%(1M)'],
-            ['id' => 'proj_pct_1d',   'label' => 'Prof.%(1D)'],
-            ['id' => 'proj_pct_3d',   'label' => 'Prof.%(3D)'],
-            ['id' => 'proj_pct_7d',   'label' => 'Prof.%(7D)'],
-            ['id' => 'proj_prof_1d',  'label' => 'Prof.Profit(1D)'],
-            ['id' => 'proj_prof_1d_m', 'label' => 'PROF(1D)-M'],
-            ['id' => 'proj_prof_1d_mira', 'label' => 'Prof 1D (Mira)'],
-            ['id' => 'proj_prof_3d',  'label' => 'Prof.Profit(3D)'],
-            ['id' => 'proj_prof_7d',  'label' => 'Prof.Profit(7D)'],
-            ['id' => 'jnt_rts',       'label' => 'RTS%'],
-            ['id' => 'jnt_del',       'label' => 'Del%'],
-            ['id' => 'jnt_transit',   'label' => 'Transit%'],
-            ['id' => 'rts_set',       'label' => 'Set RTS%'],
-            ['id' => 'mira_rts',      'label' => 'Projected RTS'],
-            // Mira RTS = tinype ng analyst (may dahilan); ang dalawang gap ay para sa Conditional Formatting nito.
-            ['id' => 'analyst_rts',   'label' => 'Mira RTS'],
-            ['id' => 'analyst_gap_pts', 'label' => 'Mira RTS Gap (Set − Mira)'],
-            ['id' => 'analyst_gap_abs', 'label' => 'Mira RTS Gap (abs)'],
-            // Error (puntos) ng Mira RTS 7 at 14 araw na ang nakalipas laban sa totoong RTS ng parehong mga order (AnalystRtsDaily).
-            ['id' => 'analyst_rts_acc', 'label' => 'Mira RTS accuracy'],
-            // Para sa Conditional Formatting ng Projected RTS (target o compare_col); nakatago hanggang buksan.
-            ['id' => 'rts_gap_pts',   'label' => 'RTS Gap (Set − Projected)'],
-            ['id' => 'rts_gap_abs',   'label' => 'RTS Gap (abs)'],
-            ['id' => 'mira_rts_error_pts', 'label' => 'Projected RTS Error (pts)'],
-            ['id' => 'rts_gap_ratio', 'label' => 'RTS Gap ÷ Error'],
-            ['id' => 'mira_rts_matched', 'label' => 'Projected RTS Orders'],
-            ['id' => 'promo',         'label' => 'Promo'],
-            ['id' => 'price',         'label' => 'Price'],
-            ['id' => 'item_val',      'label' => 'Item Val.'],
-            ['id' => 'item_val_ceo',  'label' => 'Item Val. (CEO)'],
-            ['id' => 'ship',          'label' => 'Ship'],
-            ['id' => 'cod_fee',       'label' => 'COD Fee'],
-            ['id' => 'hold',          'label' => 'Hold'],
-            ['id' => 'action',        'label' => 'Action'],
-            ['id' => 'claude_action', 'label' => 'Claude Action (CEO)'],
-            ['id' => 'claude_reason', 'label' => 'Claude Reason (CEO)'],
-            ['id' => 'ceo_action',    'label' => 'CEO Action'],
-            ['id' => 'ceo_reason',    'label' => 'CEO Reason'],
-            // /item lang (item rows) — hindi ginagamit ng /owner/private.
-            ['id' => 'category',      'label' => 'Category (/item)'],
-            ['id' => 'stock',         'label' => 'Stock (/item)'],
-            ['id' => 'incoming',      'label' => 'Paparating (/item)'],
-            ['id' => 'units_per_day', 'label' => 'Benta/araw (/item)'],
-            ['id' => 'doi',           'label' => 'DOI (/item)'],
-            ['id' => 'order_qty',     'label' => 'I-order (/item)'],
-            ['id' => 'lifecycle',     'label' => 'Lifecycle (/item)'],
-        ],
+        // The /owner/private page summary columns live in one place (spec 258): the page builds its JS
+        // column list from the same list, so a column added there shows on both.
+        'owner_private' => OwnerPrivateColumns::COLUMNS,
         'campaigns' => [
             ['id' => 'on',             'label' => 'Off / On'],
             ['id' => 'name',           'label' => 'Name (Campaign / Ad set / Ad)'],
@@ -261,7 +202,7 @@ class OwnerColumnSettingsController extends Controller
         'owner_private' => [
             // Initial defaults derived from existing /owner/private layout.
             // Everything is visible by default — admins shrink as needed.
-            'adspent', 'orders', 'orders_1d', 'cpp', 'proceed', 'pcpp',
+            'days_running', 'adspent', 'orders', 'orders_1d', 'cpp', 'proceed', 'pcpp',
             'tcpr', 'breakeven_cpp',
             'proj_profit', 'proj_profit_mira', 'per_order', 'np_per_order', 'np_per_order_3d', 'np_per_order_7d', 'np_per_order_1m', 'proj_pct',
             'proj_pct_1d', 'proj_pct_3d', 'proj_pct_7d',

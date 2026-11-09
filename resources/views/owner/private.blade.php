@@ -761,6 +761,12 @@
                     @if(!empty($isCEO)) :class="['claude_action','claude_reason','ceo_action','ceo_reason'].includes(col.id) ? 'claude-col' : ''" @endif
                     :style="'text-align:'+col.align+';'+(col.id==='rts_set'&&editIdx!==idx&&row.rts_pct===null?'background:#fef2f2;':'')+(col.id==='item_val'&&editIdx!==idx&&row.item_value===null?'background:#fef2f2;':'')+(col.id==='proj_profit'?pbStyle(row.projected_profit,row):'')+(col.id==='proj_prof_1d'?pbStyleN(row.projected_profit_last_day,1):'')+(col.id==='proj_prof_1d_m'?pbStyleN(row.projected_profit_last_day_m,1):'')+(col.id==='proj_prof_1d_mira'?pbStyleN(row.projected_profit_last_day_mira,1):'')+(col.id==='proj_prof_3d'?pbStyleN(row.projected_profit_last_3d,3):'')+(col.id==='proj_prof_7d'?pbStyleN(row.projected_profit_last_7d,7):'')+cellFormatStyle(col.id, cellValueFor(col, row), row)">
 
+                  <!-- days_running — days since the current primary item became primary, to the range end (both counted) -->
+                  <template x-if="col.id==='days_running'">
+                    <span style="color:#111;" :title="row.anchor_first_date ? 'since ' + fmtMD(row.anchor_first_date) : ''"
+                          x-text="row.days_running != null ? row.days_running : '—'"></span>
+                  </template>
+
                   <!-- adspent -->
                   <template x-if="col.id==='adspent'">
                     <span style="color:#111;font-weight:500;" x-text="money(row.adspent)"></span>
@@ -2191,59 +2197,9 @@
 
       // ── Column definitions ────────────────────────────────────────────────
       defaultCols() {
+        // One column list for this table and its column settings (App\Support\OwnerPrivateColumns, spec 258).
         return [
-          { id:'adspent',    label:'Adspent',    sort:'adspent',              align:'center', minw:90  },
-          { id:'orders',     label:'Orders',     sort:'orders',               align:'center', minw:65  },
-          { id:'orders_1d',  label:'Orders (1D)',sort:'orders_last_day',      align:'center', minw:80  },
-          { id:'cpp',        label:'CPP',        sort:'cpp',                  align:'center', minw:75  },
-          { id:'proceed',    label:'Proceed',    sort:'proceed_orders',       align:'center', minw:70  },
-          { id:'pcpp',       label:'P.CPP',      sort:'proceed_cpp',          align:'center', minw:75  },
-          { id:'tcpr',          label:'TCPR',           sort:'tcpr_computed',               align:'center', minw:65  },
-          { id:'breakeven_cpp', label:this._breakevenLabel(), sort:'breakeven_cpp_computed', align:'center', minw:115 },
-          { id:'proj_profit',label:'Prof.Profit',sort:'projected_profit',     align:'center', minw:95  },
-          { id:'proj_profit_mira', label:'Profit (Mira RTS)', sort:'projected_profit_mira', align:'center', minw:105 },
-          { id:'per_order',  label:'/Order',     sort:'proj_profit_per_order',align:'center', minw:75  },
-          { id:'np_per_order',    label:'NP/O',     sort:'np_per_order_computed',    align:'center', minw:75  },
-          { id:'np_per_order_3d', label:'NP/O(3D)', sort:'np_per_order_3d_computed', align:'center', minw:80  },
-          { id:'np_per_order_7d', label:'NP/O(7D)', sort:'np_per_order_7d_computed', align:'center', minw:80  },
-          { id:'np_per_order_1m', label:'NP/O(1M)', sort:'np_per_order_1m_computed', align:'center', minw:80  },
-          { id:'proj_pct',     label:'Prof.%(1M)',     sort:'proj_pct_computed',           align:'center', minw:75  },
-          { id:'proj_pct_1d',  label:'Prof.%(1D)',     sort:'proj_pct_last_day',           align:'center', minw:75  },
-          { id:'proj_pct_3d',  label:'Prof.%(3D)',     sort:'proj_pct_last_3d',            align:'center', minw:75  },
-          { id:'proj_pct_7d',  label:'Prof.%(7D)',     sort:'proj_pct_last_7d',            align:'center', minw:75  },
-          { id:'proj_prof_1d', label:'Prof.Profit(1D)',sort:'projected_profit_last_day',   align:'center', minw:105 },
-          { id:'proj_prof_1d_m', label:'PROF(1D)-M',  sort:'projected_profit_last_day_m', align:'center', minw:105 },
-          { id:'proj_prof_1d_mira', label:'Prof 1D (Mira)', sort:'projected_profit_last_day_mira', align:'center', minw:105 },
-          { id:'proj_prof_3d', label:'Prof.Profit(3D)',sort:'projected_profit_last_3d',    align:'center', minw:105 },
-          { id:'proj_prof_7d', label:'Prof.Profit(7D)',sort:'projected_profit_last_7d',    align:'center', minw:105 },
-          { id:'jnt_rts',      label:'RTS%',           sort:'jnt_rts_pct',                 align:'center', minw:100 },
-          { id:'jnt_del',    label:'Del%',       sort:'jnt_del_pct',          align:'center', minw:90  },
-          { id:'jnt_transit',label:'Transit%',   sort:'jnt_transit_pct',      align:'center', minw:85  },
-          { id:'rts_set',    label:'Set RTS%',   sort:'rts_pct',              align:'center', minw:110 },
-          { id:'mira_rts',   label:'Projected RTS',   sort:'mira_rts_pct',         align:'center', minw:120 },
-          { id:'analyst_rts',   label:'Mira RTS',   sort:'analyst_rts_pct',      align:'center', minw:110 },
-          { id:'analyst_gap_pts', label:'Mira RTS Gap (Set − Mira)', sort:'analyst_gap_pts', align:'center', minw:90 },
-          { id:'analyst_gap_abs', label:'Mira RTS Gap (abs)',        sort:'analyst_gap_abs', align:'center', minw:80 },
-          { id:'analyst_rts_acc', label:'Mira RTS accuracy', sort:'analyst_rts_acc_abs', align:'center', minw:120 },
-          { id:'rts_gap_pts',   label:'RTS Gap (Set − Projected)', sort:'rts_gap_pts',   align:'center', minw:90 },
-          { id:'rts_gap_abs',   label:'RTS Gap (abs)',        sort:'rts_gap_abs',   align:'center', minw:80 },
-          { id:'mira_rts_error_pts', label:'Projected RTS Error (pts)', sort:'mira_rts_error_pts', align:'center', minw:95 },
-          { id:'rts_gap_ratio', label:'RTS Gap ÷ Error',      sort:'rts_gap_ratio', align:'center', minw:90 },
-          { id:'mira_rts_matched', label:'Projected RTS Orders',   sort:'mira_rts_matched', align:'center', minw:90 },
-          { id:'promo',      label:'Promo',      sort:'promo',                align:'center', minw:90  },
-          { id:'price',      label:'Price',      sort:'price',                align:'center', minw:85  },
-          { id:'item_val',     label:'Item Val.',       sort:'item_value',     align:'center', minw:80  },
-          { id:'item_val_ceo', label:'Item Val. (CEO)', sort:'item_value_ceo', align:'center', minw:90  },
-          { id:'ship',       label:'Ship',       sort:'shipping_fee',         align:'center', minw:58  },
-          { id:'cod_fee',    label:'COD Fee',    sort:'cod_fee',              align:'center', minw:72  },
-          { id:'hold',       label:'Hold',       sort:'hold_units',           align:'center', minw:60  },
-          { id:'action',     label:'Action',     sort:'action_at',            align:'left',   minw:160 },
-@if(!empty($isCEO))
-          { id:'claude_action', label:'Claude Action', sort:'claude_action', align:'left', minw:160 },
-          { id:'claude_reason', label:'Claude Reason', sort:'claude_reason', align:'left', minw:200 },
-          { id:'ceo_action', label:'CEO Action', sort:'ceo_action', align:'left', minw:160 },
-          { id:'ceo_reason', label:'CEO Reason', sort:'ceo_reason', align:'left', minw:200 },
-@endif
+{!! \App\Support\OwnerPrivateColumns::jsList(!empty($isCEO)) !!}
         ];
       },
 

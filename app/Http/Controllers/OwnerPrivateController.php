@@ -294,6 +294,24 @@ class OwnerPrivateController extends Controller
     }
 
     /** Build a deterministic cache key for itemSummary() given request params. */
+    /**
+     * Days running per page row (spec 258): from the row's anchor_first_date (when the current primary item became
+     * primary) to the payload's end_date, both days counted, capped at today. Added when the response goes out, not
+     * stored in the cache, so cached payloads (also ones cached before this field existed) get it and a range that
+     * ends after today keeps counting.
+     */
+    private function withDaysRunning(array $payload): array
+    {
+        $today = (new \DateTime('now', new \DateTimeZone('Asia/Manila')))->format('Y-m-d');
+        $end   = (string) ($payload['end_date'] ?? $today);
+        foreach ($payload['rows'] ?? [] as $i => $row) {
+            if (!is_array($row)) continue;
+            $since = $row['anchor_first_date'] ?? null;
+            $payload['rows'][$i]['days_running'] = \App\Support\OwnerPrivateColumns::daysRunning(is_string($since) ? $since : null, $end, $today);
+        }
+        return $payload;
+    }
+
     private function cacheKeyForItemSummary(Request $request): string
     {
         $parts = [
@@ -1690,7 +1708,7 @@ class OwnerPrivateController extends Controller
         if (!$bypassCache) {
             $cached = Cache::get($cacheKey);
             if (is_array($cached)) {
-                return response()->json($cached + ['_cache' => 'hit']);
+                return response()->json($this->withDaysRunning($cached) + ['_cache' => 'hit']);
             }
         }
 
@@ -2944,7 +2962,7 @@ class OwnerPrivateController extends Controller
         // bumpCacheVersion() or explicit refresh from user.
         Cache::forever($cacheKey, $payload);
 
-        return response()->json($payload + ['_cache' => $bypassCache ? 'refresh' : 'miss']);
+        return response()->json($this->withDaysRunning($payload) + ['_cache' => $bypassCache ? 'refresh' : 'miss']);
     }
 
     public function saveItemSetting(Request $request)
