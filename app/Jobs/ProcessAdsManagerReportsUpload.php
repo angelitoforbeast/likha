@@ -896,6 +896,22 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
                     'updated_at' => $now,
                 ]);
         }
+
+        // Spec 252: ang link ng post mula sa Meta sync (Insights::adLink) ang pumapalit sa ad_link ng ad, kahit may
+        // tina-type na ang staff. Pagkatapos ng insert at ng pag-attach ng ad_id, kaya bago man o luma ang row ay
+        // naisusulat. Ang row na walang link (lahat ng upload, at ang ad na walang post id) ay hindi ginagalaw.
+        $links = [];
+        foreach ($rows as $r) {
+            $adId = !empty($r['ad_id']) ? (string) $r['ad_id'] : null;
+            $link = trim((string) ($r['ad_link'] ?? ''));
+            if ($adId && $link !== '') $links[$adId] = $link;
+        }
+        foreach ($links as $adId => $link) {
+            DB::table('ad_campaign_creatives')
+                ->where('ad_id', $adId)
+                ->where(fn ($q) => $q->whereNull('ad_link')->orWhere('ad_link', '!=', $link))
+                ->update(['ad_link' => $link, 'updated_at' => $now]);
+        }
     }
 
     /**

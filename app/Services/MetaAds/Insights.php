@@ -152,6 +152,18 @@ class Insights
         return null;
     }
 
+    /**
+     * Spec 252. Ang link ng post ng ad mula sa effective_object_story_id ("<page id>_<post id>"):
+     * https://www.facebook.com/<post id>, gaya ng mga link na tina-type ng staff. Digits lang ang tinatanggap na post id;
+     * ang wala o mali ang hugis ay null (hindi ginagalaw ng importer ang nakatabing link).
+     */
+    public static function adLink(mixed $storyId): ?string
+    {
+        if (!is_string($storyId) || !preg_match('/^\d+_(\d+)$/D', $storyId, $m)) return null;
+
+        return 'https://www.facebook.com/' . $m[1];
+    }
+
     /** Isang insights row (+ detalye ng ad) → mga column ng ads_manager_reports, gaya ng normalizeRow ng upload. */
     public function map(string $accountId, array $r, ?array $ad, array $pages): ?array
     {
@@ -196,6 +208,7 @@ class Insights
 
             $row['page_id']            = self::pageId($ad); // hindi column: para sa talaan ng nilaktawan (Sync)
             $row['page_name']          = $pages[(string) $row['page_id']] ?? null;
+            $row['ad_link']            = self::adLink($cr['effective_object_story_id'] ?? null); // ad_campaign_creatives lang (spec 252)
             $row['ad_set_delivery']    = self::delivery($set['effective_status'] ?? null);
             $campaign                  = self::delivery($ad['campaign']['effective_status'] ?? null);
             $row['campaign_delivery']  = $campaign === null ? null
