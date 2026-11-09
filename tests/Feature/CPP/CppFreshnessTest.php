@@ -233,4 +233,48 @@ class CppFreshnessTest extends ChatblastTestCase
         $this->assertSame('Mobile Tripod', $row->page_name);
         $this->assertEquals(1, $row->orders);
     }
+
+    public function test_spec250_the_order_times_add_no_query_on_the_sqlite_page(): void
+    {
+        $this->spend('Mobile Tripod', '2026-11-09 18:45:00');
+        $this->sale('Mobile Tripod', '21:58 09-11-2026');
+        $orderQueries = 0;
+        DB::listen(function ($q) use (&$orderQueries) { if (stripos($q->sql, 'macro_output') !== false) $orderQueries++; });
+
+        $this->assertSame('2026-11-09 21:58', $this->cpp()->viewData('freshness')['Mobile Tripod'][self::DAY]['order']);
+        $this->assertSame(1, $orderQueries, 'only the existing orders query reads macro_output');
+    }
+
+    /**
+     * On MySQL and Postgres the order times come from the rows the existing orders query loads (it selects TIMESTAMP):
+     * a grouped MAX over macro_output takes many seconds on production. Runs buildData under pretend() on a
+     * connection of that driver (nothing is sent; a sqlite PDO only quotes the logged bindings).
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('sqlDrivers')]
+    public function test_spec250_on_mysql_and_pgsql_the_order_times_come_from_the_one_orders_query(string $driver): void
+    {
+        config(["database.connections.$driver" => array_merge(config("database.connections.$driver"),
+            ['host' => '127.0.0.1', 'port' => 1, 'database' => 'none', 'username' => 'none', 'password' => ''])]);
+        $db = DB::connection($driver);
+        $pdo = new \PDO('sqlite::memory:');
+        $db->setPdo($pdo);
+        $db->setReadPdo($pdo);
+        DB::setDefaultConnection($driver);
+        try {
+            $build = new \ReflectionMethod(\App\Http\Controllers\CPPController::class, 'buildData');
+            $log = $db->pretend(fn () => $build->invoke(new \App\Http\Controllers\CPPController(), self::DAY, self::DAY, false, true));
+        } finally {
+            DB::setDefaultConnection('sqlite');
+        }
+
+        $orders = array_values(array_filter($log, fn ($q) => stripos($q['query'], 'macro_output') !== false));
+        $this->assertCount(1, $orders, 'one query reads macro_output: ' . json_encode(array_column($log, 'query')));
+        $this->assertStringNotContainsStringIgnoringCase('max(', $orders[0]['query']);
+        $this->assertMatchesRegularExpression('/,\s*[`"]TIMESTAMP[`"]\s*(,|from)/i', $orders[0]['query'], 'the orders query selects TIMESTAMP as a column');
+    }
+
+    public static function sqlDrivers(): array
+    {
+        return ['mysql' => ['mysql'], 'pgsql' => ['pgsql']];
+    }
 }
