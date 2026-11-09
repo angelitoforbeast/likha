@@ -110,4 +110,64 @@ class AdsUploadVideoColumnsTest extends MetaAdsTestCase
         $this->assertSame(['done', null], [$log->status, $log->error_message]);
         $this->assertSame([4210, 1375, 980], $this->videoOf('a1'));
     }
+
+    /**
+     * Spec 249: Meta's export now names the ThruPlays column "15-second ThruPlays" and also exports a "6-second ThruPlays"
+     * column. Each case: the video headers and their cells for one ad.
+     *
+     * @return array<string, array{0: list<string>, 1: list<string>}>
+     */
+    public static function fifteenSecondThruPlays(): array
+    {
+        return [
+            'current export layout'  => [['3-second video plays', '6-second ThruPlays', '15-second ThruPlays', 'Video plays at 50%'], ['4210', '999', '1375', '980']],
+            'without the 6-second'   => [['3-second video plays', '15-second ThruPlays', 'Video plays at 50%'], ['4210', '1375', '980']],
+            'upper case'             => [['3-second video plays', '6-SECOND THRUPLAYS', '15-SECOND THRUPLAYS', 'Video plays at 50%'], ['4210', '999', '1375', '980']],
+            'extra spaces'           => [['3-second video plays', ' 6-second  ThruPlays', '  15-second   ThruPlays ', 'Video plays at 50%'], ['4210', '999', '1375', '980']],
+        ];
+    }
+
+    #[DataProvider('fifteenSecondThruPlays')]
+    public function test_spec249_S1_a_15_second_thruplays_column_uploads_into_video_thruplays(array $video, array $cells): void
+    {
+        $log = $this->upload(array_merge(self::BASE, $video), [['a1', $cells]]);
+
+        $this->assertSame(['done', 1, null], [$log->status, (int) $log->inserted, $log->error_message]);
+        $this->assertSame([4210, 1375, 980], $this->videoOf('a1'), 'the 15-second value, never the 6-second one');
+    }
+
+    public function test_spec249_S2_the_old_thruplays_header_still_uploads(): void
+    {
+        $log = $this->upload(array_merge(self::BASE, ['3-second video plays', '6-second ThruPlays', 'ThruPlays', 'Video plays at 50%']), [['a1', ['4210', '999', '1375', '980']]]);
+
+        $this->assertSame(['done', 1, null], [$log->status, (int) $log->inserted, $log->error_message]);
+        $this->assertSame([4210, 1375, 980], $this->videoOf('a1'));
+    }
+
+    public function test_spec249_S3_a_file_with_only_6_second_thruplays_is_refused(): void
+    {
+        $log = $this->upload(array_merge(self::BASE, ['3-second video plays', '6-second ThruPlays', 'Video plays at 50%']), [['a1', ['4210', '999', '980']]]);
+
+        $this->assertSame(['failed', 'Missing required column(s): ThruPlays'], [$log->status, $log->error_message]);
+        $this->assertSame(0, DB::table('ads_manager_reports')->count(), 'the 6-second value is never stored as ThruPlays');
+        $this->assertSame(0, DB::table('ad_campaign_creatives')->count());
+    }
+
+    /** @return array<string, array{0: list<string>, 1: list<string>}> */
+    public static function bothThruPlaysHeaders(): array
+    {
+        return [
+            'ThruPlays column first'  => [['3-second video plays', 'ThruPlays', '15-second ThruPlays', 'Video plays at 50%'], ['4210', '111', '1375', '980']],
+            '15-second column first'  => [['3-second video plays', '15-second ThruPlays', 'ThruPlays', 'Video plays at 50%'], ['4210', '1375', '111', '980']],
+        ];
+    }
+
+    #[DataProvider('bothThruPlaysHeaders')]
+    public function test_spec249_S4_with_both_headers_the_15_second_column_wins_whatever_the_column_order(array $video, array $cells): void
+    {
+        $log = $this->upload(array_merge(self::BASE, $video), [['a1', $cells]]);
+
+        $this->assertSame(['done', null], [$log->status, $log->error_message]);
+        $this->assertSame([4210, 1375, 980], $this->videoOf('a1'));
+    }
 }
