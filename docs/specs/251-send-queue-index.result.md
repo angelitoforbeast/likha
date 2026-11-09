@@ -97,8 +97,13 @@ far more than the send queue writes in a minute.
   redispatch query reads the new index (sqlite EXPLAIN QUERY PLAN), and the migration up/down/rerun. The two behaviour
   tests pass before and after the migration; the plan and migration tests failed before it.
 - Existing sweep tests (BotcakeAsyncSendTest S_089_11, BigBroadcastTest) pass.
-- Full suite: FULL_SUITE_RESULT
+- Full suite at code head `d7261ba6`: 4819 tests, 78799 assertions, 2 failures, 6 skipped, 99 PHPUnit deprecations.
+  Baseline `d02ed7a1`: 4815 tests with the same 2 failures. The 4 extra tests are the new file. The 2 failures are the
+  known ones: `ExampleTest::test_the_application_returns_a_successful_response` (302 instead of 200) and
+  `ItemTableFitScriptTest::test_every_catalog_column_id_has_a_minimum_width_and_a_place_in_the_drop_order` (57 vs 45).
+  No new failures. (A first run with `-d memory_limit=-1` gave 5 extra errors in SpeedPrewarmTest: the warm command
+  lowers the limit to 512M and fails once usage is above it. That file passes 12/12 with the default limit.)
 
 ## Final sha
 
-FINAL_SHA (branch fix/251-send-queue-index, from d02ed7a1)
+Branch `fix/251-send-queue-index` from `d02ed7a1`. Code head: `d7261ba6`. This result is committed on top of it.
