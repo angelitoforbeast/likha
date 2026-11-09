@@ -10,7 +10,10 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use PHPUnit\Framework\Attributes\DataProvider;
 
-/** Spec 252: the sync fills ad_campaign_creatives.ad_link from the creative's effective_object_story_id ("<page>_<post>"). */
+/**
+ * Spec 252: the sync fills ad_campaign_creatives.ad_link. Spec 256: a video ad links to /reel/<video id> (object_story_spec
+ * .video_data.video_id), any other ad to /<page id>/posts/<post id> from effective_object_story_id, so the preview embeds.
+ */
 class MetaAdsAdLinkTest extends MetaAdsTestCase
 {
     private const DAY = '2026-10-20';
@@ -36,6 +39,14 @@ class MetaAdsAdLinkTest extends MetaAdsTestCase
         return ['creative' => ['effective_object_story_id' => $id]];
     }
 
+    private static function video(mixed $videoId, ?string $story = null): array
+    {
+        $creative = ['object_story_spec' => ['video_data' => ['video_id' => $videoId]]];
+        if ($story !== null) $creative['effective_object_story_id'] = $story;
+
+        return ['creative' => $creative];
+    }
+
     private function creative(string $ad, ?string $link, ?string $campaign = null): void
     {
         DB::table('ad_campaign_creatives')->insert([
@@ -54,7 +65,7 @@ class MetaAdsAdLinkTest extends MetaAdsTestCase
         $log = $this->sync(['a1' => self::story('123_456')]);
 
         $this->assertSame('done', $log->fresh()->status);
-        $this->assertSame('https://www.facebook.com/456', $this->link('a1'));
+        $this->assertSame('https://www.facebook.com/123/posts/456', $this->link('a1'));
     }
 
     public function test_S1_the_sync_overwrites_a_link_staff_typed(): void
@@ -63,7 +74,7 @@ class MetaAdsAdLinkTest extends MetaAdsTestCase
 
         $this->sync(['a1' => self::story('123_456')]);
 
-        $this->assertSame('https://www.facebook.com/456', $this->link('a1'));
+        $this->assertSame('https://www.facebook.com/123/posts/456', $this->link('a1'));
         // Only the link changes; the other creative fields keep the staff values.
         $this->assertSame('Staff headline', DB::table('ad_campaign_creatives')->where('ad_id', 'a1')->value('headline'));
     }
@@ -76,7 +87,7 @@ class MetaAdsAdLinkTest extends MetaAdsTestCase
         $this->sync(['a1' => self::story('123_456')]);
 
         $this->assertSame(1, DB::table('ad_campaign_creatives')->count());
-        $this->assertSame('https://www.facebook.com/456', $this->link('a1'));
+        $this->assertSame('https://www.facebook.com/123/posts/456', $this->link('a1'));
     }
 
     public static function badStories(): array
@@ -109,10 +120,57 @@ class MetaAdsAdLinkTest extends MetaAdsTestCase
         $insights = app(Insights::class);
         $base     = self::insight('111', 'a1', self::DAY, 10.00);
 
-        $this->assertSame('https://www.facebook.com/456', $insights->map('111', $base, self::adDetail('a1', self::story('123_456')), [])['ad_link']);
+        $this->assertSame('https://www.facebook.com/123/posts/456', $insights->map('111', $base, self::adDetail('a1', self::story('123_456')), [])['ad_link']);
         $this->assertNull($insights->map('111', $base, self::adDetail('a1', self::story('123_')), [])['ad_link']);
         $this->assertNull($insights->map('111', $base, self::adDetail('a1'), [])['ad_link']);
         $this->assertArrayNotHasKey('ad_link', $insights->map('111', $base, null, []));
+    }
+
+    public function test_256_S1_a_video_ad_gets_the_reel_link(): void
+    {
+        $this->creative('a1', self::STAFF_LINK);
+
+        $this->sync(['a1' => self::video('789', '123_456'), 'a2' => self::video('790')]);
+
+        $this->assertSame('https://www.facebook.com/reel/789', $this->link('a1'));
+        $this->assertSame('https://www.facebook.com/reel/790', $this->link('a2'));
+    }
+
+    public function test_256_S2_an_image_or_link_ad_gets_the_page_posts_link(): void
+    {
+        $insights = app(Insights::class);
+        $base     = self::insight('111', 'a1', self::DAY, 10.00);
+        $image    = ['creative' => ['effective_object_story_id' => '123_456', 'object_story_spec' => ['link_data' => ['message' => 'Hi']]]];
+
+        $this->assertSame('https://www.facebook.com/123/posts/456', $insights->map('111', $base, self::adDetail('a1', $image), [])['ad_link']);
+    }
+
+    public static function badVideoIds(): array
+    {
+        return [
+            'empty'            => [''],
+            'not digits'       => ['78x9'],
+            'with a path'      => ['789/../evil'],
+            'trailing newline' => ["789\n"],
+            'an array'         => [['789']],
+            'null'             => [null],
+        ];
+    }
+
+    #[DataProvider('badVideoIds')]
+    public function test_256_S3_a_malformed_video_id_falls_back_to_the_story_id_or_null(mixed $videoId): void
+    {
+        $this->assertSame('https://www.facebook.com/123/posts/456', Insights::adLink(self::video($videoId, '123_456')['creative']));
+        $this->assertNull(Insights::adLink(self::video($videoId)['creative']));
+    }
+
+    public function test_256_S3_no_video_and_no_story_id_is_null(): void
+    {
+        $this->assertNull(Insights::adLink(null));
+        $this->assertNull(Insights::adLink([]));
+        $this->assertNull(Insights::adLink(['object_story_spec' => ['page_id' => '123', 'video_data' => []]]));
+        $this->assertNull(Insights::adLink(['object_story_spec' => 'x', 'effective_object_story_id' => ['123_456']]));
+        $this->assertNull(Insights::adLink(['effective_object_story_id' => '12x_456']));
     }
 
     public function test_S2_the_link_is_not_written_to_ads_manager_reports(): void
