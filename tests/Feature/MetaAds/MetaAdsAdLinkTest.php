@@ -11,8 +11,8 @@ use Illuminate\Support\Facades\Storage;
 use PHPUnit\Framework\Attributes\DataProvider;
 
 /**
- * Spec 252: the sync fills ad_campaign_creatives.ad_link. Spec 256: a video ad links to /reel/<video id> (object_story_spec
- * .video_data.video_id), any other ad to /<page id>/posts/<post id> from effective_object_story_id, so the preview embeds.
+ * Spec 252: the sync fills ad_campaign_creatives.ad_link. Spec 257: every ad, video or not, links to
+ * /<page id>/posts/<post id> from effective_object_story_id, so the preview embeds; video_data.video_id is not used.
  */
 class MetaAdsAdLinkTest extends MetaAdsTestCase
 {
@@ -126,14 +126,27 @@ class MetaAdsAdLinkTest extends MetaAdsTestCase
         $this->assertArrayNotHasKey('ad_link', $insights->map('111', $base, null, []));
     }
 
-    public function test_256_S1_a_video_ad_gets_the_reel_link(): void
+    public function test_257_S1_a_video_ad_gets_the_page_posts_link_not_a_reel_link(): void
+    {
+        $this->creative('a1', 'https://www.facebook.com/reel/789'); // a broken reel link from an earlier sync is rewritten
+
+        $this->sync(['a1' => self::video('789', '123_456'), 'a2' => self::video('790', '124_457')]);
+
+        $this->assertSame('https://www.facebook.com/123/posts/456', $this->link('a1'));
+        $this->assertSame('https://www.facebook.com/124/posts/457', $this->link('a2'));
+        $this->assertSame('https://www.facebook.com/123/posts/456', Insights::adLink(self::video('789', '123_456')['creative']));
+    }
+
+    public function test_257_S2_a_video_ad_without_a_valid_story_id_leaves_the_link_as_it_is(): void
     {
         $this->creative('a1', self::STAFF_LINK);
 
-        $this->sync(['a1' => self::video('789', '123_456'), 'a2' => self::video('790')]);
+        $this->sync(['a1' => self::video('789'), 'a2' => self::video('790', '124_')]);
 
-        $this->assertSame('https://www.facebook.com/reel/789', $this->link('a1'));
-        $this->assertSame('https://www.facebook.com/reel/790', $this->link('a2'));
+        $this->assertSame(self::STAFF_LINK, $this->link('a1'));
+        $this->assertNull($this->link('a2'));
+        $this->assertNull(Insights::adLink(self::video('789')['creative']));
+        $this->assertNull(Insights::adLink(self::video('789', '12x_456')['creative']));
     }
 
     public function test_256_S2_an_image_or_link_ad_gets_the_page_posts_link(): void
@@ -158,7 +171,7 @@ class MetaAdsAdLinkTest extends MetaAdsTestCase
     }
 
     #[DataProvider('badVideoIds')]
-    public function test_256_S3_a_malformed_video_id_falls_back_to_the_story_id_or_null(mixed $videoId): void
+    public function test_256_S3_the_video_id_never_decides_the_link(mixed $videoId): void
     {
         $this->assertSame('https://www.facebook.com/123/posts/456', Insights::adLink(self::video($videoId, '123_456')['creative']));
         $this->assertNull(Insights::adLink(self::video($videoId)['creative']));
