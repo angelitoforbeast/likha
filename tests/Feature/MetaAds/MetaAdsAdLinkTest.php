@@ -64,19 +64,21 @@ class MetaAdsAdLinkTest extends MetaAdsTestCase
         $this->sync(['a1' => self::story('123_456')]);
 
         $this->assertSame('https://www.facebook.com/456', $this->link('a1'));
-        // Only the link changes; the other creative fields keep the staff values.
-        $this->assertSame('Staff headline', DB::table('ad_campaign_creatives')->where('ad_id', 'a1')->value('headline'));
+        // Spec 254: Meta's non-empty headline also replaces the staff value (Meta is the source of the ad's content).
+        $this->assertSame('Headline a1', DB::table('ad_campaign_creatives')->where('ad_id', 'a1')->value('headline'));
     }
 
-    public function test_S1_a_campaign_row_without_an_ad_gets_the_ad_and_its_link(): void
+    public function test_S1_a_campaign_row_without_an_ad_stays_and_the_ad_gets_its_own_row_and_link(): void
     {
         DB::table('ad_campaign_creatives')->insert(['ad_id' => null, 'campaign_id' => 'ca1', 'ad_link' => self::STAFF_LINK,
             'created_at' => now(), 'updated_at' => now()]);
 
         $this->sync(['a1' => self::story('123_456')]);
 
-        $this->assertSame(1, DB::table('ad_campaign_creatives')->count());
+        // Spec 254: the campaign-only row stays the campaign fallback; the ad has a row of its own.
+        $this->assertSame(2, DB::table('ad_campaign_creatives')->count());
         $this->assertSame('https://www.facebook.com/456', $this->link('a1'));
+        $this->assertSame(self::STAFF_LINK, DB::table('ad_campaign_creatives')->whereNull('ad_id')->value('ad_link'));
     }
 
     public static function badStories(): array

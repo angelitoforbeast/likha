@@ -47,6 +47,9 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
      */
     private array $refused = [];
 
+    /** True while importRows runs (the Meta sync): its creative text then updates the ad's own row (spec 254). */
+    private bool $fromSync = false;
+
     private const CHUNK_SIZE = 2000;
 
     public function __construct(
@@ -231,8 +234,13 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
     {
         $this->inserted = $this->updated = $this->skipped = 0;
         $this->protectedByField = $this->refused = [];
-        foreach (array_chunk($rows, self::CHUNK_SIZE) as $chunk) {
-            $this->upsertChunk($chunk);
+        $this->fromSync = true;
+        try {
+            foreach (array_chunk($rows, self::CHUNK_SIZE) as $chunk) {
+                $this->upsertChunk($chunk);
+            }
+        } finally {
+            $this->fromSync = false;
         }
 
         return ['inserted' => $this->inserted, 'updated' => $this->updated, 'skipped' => $this->skipped, 'protected' => $this->protectedByField,
@@ -783,11 +791,14 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
         }
     }
 
+    /** The creative text of an ad that the sync (Meta) keeps current in the ad's own row (spec 254). */
+    private const CREATIVE_CONTENT_FIELDS = ['headline', 'body_ad_settings', 'welcome_message', 'quick_reply_1', 'quick_reply_2', 'quick_reply_3'];
+
     /**
-     * Batch upsert creatives into ad_campaign_creatives in a Postgres-safe way:
-     *  - Uses insertOrIgnore to avoid unique-violation exceptions.
-     *  - When attaching ad_id to an existing campaign_id row, we first check
-     *    if some row already has that ad_id, to avoid conflicts.
+     * Batch upsert creatives into ad_campaign_creatives in a Postgres-safe way, one row per ad (spec 254):
+     *  - Uses insertOrIgnore to avoid unique-violation exceptions (ad_id is unique).
+     *  - An ad without its own row gets one, even when its campaign already has rows.
+     *  - The sync (importRows) also writes Meta's non-empty text into the ad's existing row; the upload does not.
      */
     private function upsertCreativesForChunk(array $rows, string $now): void
     {
@@ -838,23 +849,28 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
         if (!empty($adIds)) {
             $existingByAdId = DB::table('ad_campaign_creatives')
                 ->whereIn('ad_id', array_values(array_unique($adIds)))
-                ->get($cols)
+                ->get(array_merge($cols, self::CREATIVE_CONTENT_FIELDS))
                 ->keyBy('ad_id')
                 ->all();
         }
 
-        $existingByCampaignId = [];
+        // Spec 254: only rows WITHOUT an ad (campaign-only rows of old uploads) stand for their campaign. An ad never
+        // takes over such a row: it gets a row of its own, so it never shows another ad's content.
+        $campaignOnlyById = [];
         if (!empty($campaignIds)) {
-            $existingByCampaignId = DB::table('ad_campaign_creatives')
+            $campaignOnlyById = DB::table('ad_campaign_creatives')
                 ->whereIn('campaign_id', array_values(array_unique($campaignIds)))
+                ->whereNull('ad_id')
+                ->orderBy('id')
                 ->get($cols)
+                ->unique('campaign_id')
                 ->keyBy('campaign_id')
                 ->all();
         }
 
         $toInsert = [];
-        $toUpdateAdId       = []; // [id => ad_id]      fill only if current is NULL
         $toUpdateAccountId  = []; // [id => account_id] fill only if current is NULL
+        $toUpdateContent    = []; // [id => [field => value]] sync only: Meta's non-empty values
 
         foreach ($payloads as $p) {
             $adId       = $p['ad_id'] ?? null;
@@ -866,14 +882,21 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
                 if ($hasAccountIdCol && $accountId && empty($row->account_id ?? null)) {
                     $toUpdateAccountId[(int)$row->id] = $accountId;
                 }
+                // Meta (the sync) is the source of truth for the ad's content; an empty value never blanks a field.
+                // The upload keeps its old behaviour: it never overwrites the text of an existing row.
+                if ($this->fromSync) {
+                    foreach (self::CREATIVE_CONTENT_FIELDS as $field) {
+                        $value = trim((string) ($p[$field] ?? ''));
+                        if ($value !== '' && $value !== (string) ($row->{$field} ?? '')) {
+                            $toUpdateContent[(int) $row->id][$field] = $value;
+                        }
+                    }
+                }
                 continue;
             }
 
-            if ($campaignId && isset($existingByCampaignId[$campaignId])) {
-                $row = $existingByCampaignId[$campaignId];
-                if ($adId && empty($row->ad_id)) {
-                    $toUpdateAdId[(int)$row->id] = $adId;
-                }
+            if (!$adId && $campaignId && isset($campaignOnlyById[$campaignId])) {
+                $row = $campaignOnlyById[$campaignId];
                 if ($hasAccountIdCol && $accountId && empty($row->account_id ?? null)) {
                     $toUpdateAccountId[(int)$row->id] = $accountId;
                 }
@@ -889,17 +912,8 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
             DB::table('ad_campaign_creatives')->insertOrIgnore($toInsert);
         }
 
-        foreach ($toUpdateAdId as $id => $adId) {
-            $taken = DB::table('ad_campaign_creatives')->where('ad_id', $adId)->exists();
-            if ($taken) continue;
-
-            DB::table('ad_campaign_creatives')
-                ->where('id', $id)
-                ->whereNull('ad_id')
-                ->update([
-                    'ad_id'      => $adId,
-                    'updated_at' => $now,
-                ]);
+        foreach ($toUpdateContent as $id => $values) {
+            DB::table('ad_campaign_creatives')->where('id', $id)->update($values + ['updated_at' => $now]);
         }
 
         foreach ($toUpdateAccountId as $id => $accountId) {
