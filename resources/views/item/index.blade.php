@@ -1246,6 +1246,21 @@
                x-text="'⚠ ' + creativeModal.error"></div>
         </template>
 
+        {{-- Spec 254: a campaign or ad set whose ads have different content shows every creative; one button per
+             distinct creative (labelled by ad name, "+N" when more ads share it). One creative = no switcher. --}}
+        <template x-if="!creativeModal.loading && !creativeModal.error && (creativeModal.data?.creatives || []).length > 1">
+          <div class="ow-modal-section creative-switcher" style="border-top:1px solid #e2e8f0;display:flex;flex-wrap:wrap;gap:6px;align-items:center;">
+            <span style="font-size:10.5px;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;margin-right:4px;"
+                  x-text="creativeModal.data.creatives.length + ' different creatives'"></span>
+            <template x-for="(c, i) in creativeModal.data.creatives" :key="i">
+              <button type="button" @click="creativeModal.pick = i; creativeModal.data.creative = c"
+                      :style="'font-size:11.5px;padding:4px 10px;border-radius:999px;cursor:pointer;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:1px solid ' + (creativeModal.pick === i ? '#1e40af;background:#1e40af;color:white;' : '#cbd5e1;background:white;color:#0f172a;')"
+                      :title="'Ad ' + (c.ad_ids || []).join(', ')"
+                      x-text="(c.ad_name || ('Ad ' + (c.ad_id || ''))) + ((c.ad_ids || []).length > 1 ? ' +' + (c.ad_ids.length - 1) : '')"></button>
+            </template>
+          </div>
+        </template>
+
         <template x-if="!creativeModal.loading && !creativeModal.error && creativeModal.data">
           {{-- 3-column grid: FB Post · Body+Headline · Messenger Preview.
                Collapses to single column sa narrow screens (< 900px). --}}
@@ -1499,6 +1514,7 @@
         level: null,    // 'campaign' | 'adset' | 'ad'
         id: null,
         data: null,     // server response payload
+        pick: 0,       // spec 254: which of data.creatives is shown
       },
       skippedCount:0, skippedPages:[],
       isSingleDate:true, rangeDays:1,
@@ -1913,6 +1929,7 @@
         this.creativeModal.error   = null;
         this.creativeModal.level   = level;
         this.creativeModal.id      = String(id);
+        this.creativeModal.pick    = 0;
         // Optimistic header (overridden by server response)
         this.creativeModal.data    = { entity_name: entityName || '', page_name: pageName || '', creative: {} };
         try {

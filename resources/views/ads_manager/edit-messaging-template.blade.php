@@ -103,7 +103,9 @@
                 data-update-url="{{ route('ads_manager_creatives.update', $creative->id) }}">
 
               <td class="px-2 py-2 border text-center whitespace-pre-wrap break-words">{{ $creative->date_created ?? '—' }}</td>
-              <td class="px-2 py-2 border whitespace-pre-wrap break-words" title="{{ $creative->campaign_name }}">{{ $creative->campaign_name }}</td>
+              <td class="px-2 py-2 border whitespace-pre-wrap break-words" title="{{ $creative->campaign_name }}">{{ $creative->campaign_name }}
+                {{-- Spec 254: one row per ad; the campaign-only row (no ad) stands for the campaign. --}}
+                <div class="text-[11px] text-gray-500">{{ $creative->ad_id ? 'Ad ' . $creative->ad_id : 'Campaign row' }}</div></td>
               <td class="px-2 py-2 border whitespace-pre-wrap break-words">{{ $creative->page_name }}</td>
 
               {{-- Body (read-only, clamped) --}}

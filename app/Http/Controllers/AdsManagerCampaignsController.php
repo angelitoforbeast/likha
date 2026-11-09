@@ -336,19 +336,29 @@ class AdsManagerCampaignsController extends Controller
         $campaignIds = array_values(array_unique($campaignIds));
         $adSetIds    = array_values(array_unique($adSetIds));
 
-        // Fetch creatives by campaign_id (representative row per campaign —
-        // pick MAX(id) to grab the latest insert/update order).
+        // Fetch creatives by campaign_id: the row that stands for the campaign (spec 254: a campaign has one row per
+        // ad; the campaign-only row when there is one, else the oldest, as AdCampaignCreative::campaignFallback).
         $creativeByCampaign = [];
         if (!empty($campaignIds)) {
             $rows = DB::table('ad_campaign_creatives')
                 ->whereIn('campaign_id', $campaignIds)
                 ->whereNotNull('campaign_id')
-                ->orderBy('campaign_id')->orderByDesc('id')
+                ->orderBy('campaign_id')->orderByRaw('CASE WHEN ad_id IS NULL THEN 0 ELSE 1 END')->orderBy('id')
                 ->get(['id','campaign_id','ad_id','body_ad_settings','headline','welcome_message','quick_reply_1','quick_reply_2','quick_reply_3','ad_link','feedback']);
             foreach ($rows as $r) {
                 if (!isset($creativeByCampaign[$r->campaign_id])) {
                     $creativeByCampaign[$r->campaign_id] = $r;
                 }
+            }
+        }
+
+        // Ad events: the ad's own row (spec 254), the campaign's row only when the ad has none.
+        $creativeByAd = [];
+        $adEventIds = array_values(array_unique(array_map(fn ($e) => $e['entity_id'], array_filter($events, fn ($e) => $e['level'] === 'ad' && !empty($e['entity_id'])))));
+        foreach (array_chunk($adEventIds, 1000) as $chunk) {
+            foreach (DB::table('ad_campaign_creatives')->whereIn('ad_id', $chunk)
+                ->get(['id','ad_id','body_ad_settings','headline','welcome_message','quick_reply_1','quick_reply_2','quick_reply_3','ad_link','feedback']) as $r) {
+                $creativeByAd[(string) $r->ad_id] = $r;
             }
         }
 
@@ -382,7 +392,7 @@ class AdsManagerCampaignsController extends Controller
             $cre = null;
             if ($e['level'] === 'campaign')      $cre = $creativeByCampaign[$e['entity_id']]   ?? null;
             elseif ($e['level'] === 'adset')     $cre = $creativeByAdSet[$e['entity_id']]      ?? null;
-            elseif ($e['level'] === 'ad')        $cre = $creativeByCampaign[$e['campaign_id']] ?? null;
+            elseif ($e['level'] === 'ad')        $cre = $creativeByAd[$e['entity_id']] ?? ($creativeByCampaign[$e['campaign_id']] ?? null);
 
             $e['creative_id']      = $cre ? (int) $cre->id : null;
             $e['body']             = $cre->body_ad_settings ?? '';
@@ -579,11 +589,13 @@ class AdsManagerCampaignsController extends Controller
      *   - level: 'campaign' | 'adset' | 'ad'
      *   - id:    campaign_id | ad_set_id | ad_id (string)
      *
-     * Lookup strategy:
-     *   - level=ad:       try ad_campaign_creatives.ad_id first; fallback campaign_id
-     *   - level=adset:    join ads_manager_reports.ad_set_id → first matching ad_id
-     *                     → look up via ad_campaign_creatives (or campaign_id if walang ad-level row)
-     *   - level=campaign: ad_campaign_creatives.campaign_id (first match)
+     * Lookup strategy (spec 254: one ad_campaign_creatives row per ad):
+     *   - level=ad:       the ad's own row; fallback the campaign's row (AdCampaignCreative::campaignFallback)
+     *   - level=adset:    every distinct creative of the ads in the ad set (ads_manager_reports.ad_set_id)
+     *   - level=campaign: every distinct creative of the ads in the campaign
+     *     Identical content is shown once (ad_ids lists the ads that share it), highest spend first. When none of the
+     *     ads has a row of its own, the campaign's row as before.
+     * Response: `creatives` (list, each with ad_id, ad_ids, ad_name, spend) and `creative` (= the first one).
      */
     public function creativePreview(Request $request)
     {
@@ -595,25 +607,27 @@ class AdsManagerCampaignsController extends Controller
         }
 
         // Short cache — creative blobs rarely change; bumps along with owner cache.
-        $cacheKey = "ads_mgr_creative_preview:{$level}:{$id}";
+        $cacheKey = "ads_mgr_creative_preview:v2:{$level}:{$id}"; // v2: per-ad creatives list (spec 254)
         $cached = \Illuminate\Support\Facades\Cache::get($cacheKey);
         if (is_array($cached)) {
             return response()->json($cached + ['_cache' => 'hit']);
         }
 
         $cre = null;
+        $creatives = [];
         $entityName = null;
         $pageName = null;
         $campaignName = null;
         $adSetName = null;
+        $creCols = ['campaign_id', 'ad_id', 'page_name', 'campaign_name',
+                    'body_ad_settings', 'headline', 'welcome_message',
+                    'quick_reply_1', 'quick_reply_2', 'quick_reply_3', 'ad_link'];
 
         if ($level === 'ad') {
             // Try by ad_id first
             $cre = DB::table('ad_campaign_creatives')
                 ->where('ad_id', $id)
-                ->first(['campaign_id', 'ad_id', 'page_name', 'campaign_name',
-                         'body_ad_settings', 'headline', 'welcome_message',
-                         'quick_reply_1', 'quick_reply_2', 'quick_reply_3', 'ad_link']);
+                ->first($creCols);
             // Fallback: lookup via reports for headline + campaign info
             $report = DB::table('ads_manager_reports')
                 ->where('ad_id', $id)
@@ -627,53 +641,33 @@ class AdsManagerCampaignsController extends Controller
             }
             // If walang ad-level creative, try campaign-level fallback
             if (!$cre && $report && $report->campaign_id) {
-                $cre = DB::table('ad_campaign_creatives')
-                    ->where('campaign_id', $report->campaign_id)
-                    ->first(['campaign_id', 'ad_id', 'page_name', 'campaign_name',
-                             'body_ad_settings', 'headline', 'welcome_message',
-                             'quick_reply_1', 'quick_reply_2', 'quick_reply_3', 'ad_link']);
+                $cre = \App\Models\AdCampaignCreative::campaignFallback((string) $report->campaign_id, $creCols);
             }
-        } elseif ($level === 'adset') {
-            // Fetch ad_set context from reports
+            if ($cre) {
+                // The ad's own row carries the ad; the campaign fallback row is labelled as the campaign's.
+                $own = (string) ($cre->ad_id ?? '') === $id;
+                $creatives = [$own ? $this->creativeItem($cre, $id, [$id], $this->adNames([$id])[$id] ?? null, null)
+                                   : $this->creativeItem($cre, null, [], null, null)];
+            }
+        } else {
+            $idCol = $level === 'adset' ? 'ad_set_id' : 'campaign_id';
             $report = DB::table('ads_manager_reports')
-                ->where('ad_set_id', $id)
+                ->where($idCol, $id)
                 ->orderByDesc('day')
-                ->first(['ad_set_name', 'campaign_id', 'campaign_name', 'page_name', 'ad_id']);
+                ->first(['ad_set_name', 'campaign_id', 'campaign_name', 'page_name']);
             if ($report) {
-                $entityName   = $report->ad_set_name ?: ('Ad Set ' . $id);
+                $entityName   = $level === 'adset' ? ($report->ad_set_name ?: ('Ad Set ' . $id)) : ($report->campaign_name ?: ('Campaign ' . $id));
                 $pageName     = $report->page_name;
                 $campaignName = $report->campaign_name;
             }
-            // Try to find the creative — adsets don't directly map sa
-            // ad_campaign_creatives, so go via any matching ad_id, fallback campaign_id.
-            if ($report && $report->ad_id) {
-                $cre = DB::table('ad_campaign_creatives')
-                    ->where('ad_id', $report->ad_id)
-                    ->first(['campaign_id', 'ad_id', 'page_name', 'campaign_name',
-                             'body_ad_settings', 'headline', 'welcome_message',
-                             'quick_reply_1', 'quick_reply_2', 'quick_reply_3', 'ad_link']);
-            }
-            if (!$cre && $report && $report->campaign_id) {
-                $cre = DB::table('ad_campaign_creatives')
-                    ->where('campaign_id', $report->campaign_id)
-                    ->first(['campaign_id', 'ad_id', 'page_name', 'campaign_name',
-                             'body_ad_settings', 'headline', 'welcome_message',
-                             'quick_reply_1', 'quick_reply_2', 'quick_reply_3', 'ad_link']);
-            }
-        } else {
-            // level=campaign
-            $cre = DB::table('ad_campaign_creatives')
-                ->where('campaign_id', $id)
-                ->first(['campaign_id', 'ad_id', 'page_name', 'campaign_name',
-                         'body_ad_settings', 'headline', 'welcome_message',
-                         'quick_reply_1', 'quick_reply_2', 'quick_reply_3', 'ad_link']);
-            $report = DB::table('ads_manager_reports')
-                ->where('campaign_id', $id)
-                ->orderByDesc('day')
-                ->first(['campaign_name', 'page_name']);
-            if ($report) {
-                $entityName = $report->campaign_name ?: ('Campaign ' . $id);
-                $pageName   = $report->page_name;
+
+            $creatives = $this->creativesOfAds($idCol, $id, $creCols);
+            if ($creatives) {
+                $cre = DB::table('ad_campaign_creatives')->where('ad_id', $creatives[0]['ad_id'])->first($creCols);
+            } else {
+                // None of the ads has a row of its own: the campaign's row, as before.
+                $cre = \App\Models\AdCampaignCreative::campaignFallback($level === 'adset' ? ($report->campaign_id ?? null) : $id, $creCols);
+                if ($cre) $creatives = [$this->creativeItem($cre, null, [], null, null)];
             }
         }
 
@@ -691,19 +685,80 @@ class AdsManagerCampaignsController extends Controller
             'page_name'  => $pageName ?: '',
             'campaign_name' => $campaignName ?: ($cre->campaign_name ?? ''),
             'ad_set_name'   => $adSetName ?: '',
-            'creative'   => [
-                'body'            => $cre->body_ad_settings ?? '',
-                'headline'        => $cre->headline         ?? '',
-                'welcome_message' => $cre->welcome_message  ?? '',
-                'quick_reply_1'   => $cre->quick_reply_1    ?? '',
-                'quick_reply_2'   => $cre->quick_reply_2    ?? '',
-                'quick_reply_3'   => $cre->quick_reply_3    ?? '',
-                'ad_link'         => $cre->ad_link          ?? '',
-            ],
+            'creative'   => $creatives[0] ?? $this->creativeItem(null, null, [], null, null),
+            // Spec 254: every distinct creative (one per ad content), highest spend first. One item = as before.
+            'creatives'  => $creatives,
         ];
 
         \Illuminate\Support\Facades\Cache::put($cacheKey, $payload, 300); // 5 min
         return response()->json($payload + ['_cache' => 'miss']);
+    }
+
+    /** One creative of the preview, in the shape the modal reads (body, headline, …) plus the ads it belongs to. */
+    private function creativeItem(?object $cre, ?string $adId, array $adIds, ?string $adName, ?float $spend): array
+    {
+        return [
+            'ad_id'           => $adId,
+            'ad_ids'          => $adIds,
+            'ad_name'         => $adId ? ($adName ?: 'Ad ' . $adId) : null,
+            'spend'           => $spend,
+            'body'            => $cre->body_ad_settings ?? '',
+            'headline'        => $cre->headline         ?? '',
+            'welcome_message' => $cre->welcome_message  ?? '',
+            'quick_reply_1'   => $cre->quick_reply_1    ?? '',
+            'quick_reply_2'   => $cre->quick_reply_2    ?? '',
+            'quick_reply_3'   => $cre->quick_reply_3    ?? '',
+            'ad_link'         => $cre->ad_link          ?? '',
+        ];
+    }
+
+    /**
+     * Spec 254: the distinct creatives of the ads of one ad set or campaign, from each ad's own row. Ads ordered by
+     * spend (all days), then latest day; identical content is kept once, under the first (highest-spend) ad, with
+     * every ad that shares it in ad_ids. For a campaign, ad rows stored under it without report rows come last.
+     */
+    private function creativesOfAds(string $idCol, string $id, array $creCols): array
+    {
+        $ads = DB::table('ads_manager_reports')
+            ->where($idCol, $id)->whereNotNull('ad_id')->where('ad_id', '!=', '')
+            ->selectRaw('ad_id, COALESCE(SUM(amount_spent_php), 0) AS spend, MAX(day) AS last_day')
+            ->groupBy('ad_id')
+            ->orderByDesc('spend')->orderByDesc('last_day')->orderBy('ad_id')
+            ->get()
+            ->mapWithKeys(fn ($r) => [(string) $r->ad_id => (float) $r->spend])
+            ->all();
+
+        $rows = $ads ? DB::table('ad_campaign_creatives')->whereIn('ad_id', array_keys($ads))->get($creCols)->keyBy(fn ($r) => (string) $r->ad_id)->all() : [];
+        if ($idCol === 'campaign_id') {
+            foreach (DB::table('ad_campaign_creatives')->where('campaign_id', $id)->whereNotNull('ad_id')->orderBy('id')->get($creCols) as $r) {
+                if (!isset($rows[(string) $r->ad_id])) { $rows[(string) $r->ad_id] = $r; $ads[(string) $r->ad_id] = 0.0; }
+            }
+        }
+
+        $names = $this->adNames(array_keys($rows));
+        $items = [];
+        foreach ($ads as $adId => $spend) {
+            $r = $rows[(string) $adId] ?? null;
+            if (!$r) continue; // no row of its own: never shown with another ad's content
+            $key = md5(json_encode(array_map(fn ($f) => trim((string) ($r->{$f} ?? '')),
+                ['body_ad_settings', 'headline', 'welcome_message', 'quick_reply_1', 'quick_reply_2', 'quick_reply_3', 'ad_link'])));
+            if (isset($items[$key])) {
+                $items[$key]['ad_ids'][] = (string) $adId;
+                continue;
+            }
+            $items[$key] = $this->creativeItem($r, (string) $adId, [(string) $adId], $names[(string) $adId] ?? null, $spend);
+        }
+
+        return array_values($items);
+    }
+
+    /** Ad names from ad_catalog (when the table is there), by ad id. */
+    private function adNames(array $adIds): array
+    {
+        if (!$adIds || !Schema::hasTable('ad_catalog') || !Schema::hasColumn('ad_catalog', 'ad_name')) return [];
+
+        return DB::table('ad_catalog')->whereIn('ad_id', $adIds)->whereNotNull('ad_name')->where('ad_name', '!=', '')
+            ->pluck('ad_name', 'ad_id')->map(fn ($v) => (string) $v)->all();
     }
 
     /**
@@ -2035,23 +2090,36 @@ class AdsManagerCampaignsController extends Controller
                     ->flip()
                     ->all();
             }
+            // Spec 254: an ad with a row of its own uses only that row's link (never a sibling ad's); the campaign's
+            // link is the fallback for an ad without a row.
+            $ownAdIds = [];
+            $fallbackLinked = []; // campaign_id => the campaign's fallback row has a link
+            if (!empty($adIdsForLinks) && !empty($campaignIdsForLinks)) {
+                $seenCampaign = [];
+                foreach (DB::table('ad_campaign_creatives')->whereIn('campaign_id', $campaignIdsForLinks)
+                    ->orderByRaw('CASE WHEN ad_id IS NULL THEN 0 ELSE 1 END')->orderBy('id')
+                    ->get(['campaign_id', 'ad_link']) as $c) {
+                    if (isset($seenCampaign[(string) $c->campaign_id])) continue;
+                    $seenCampaign[(string) $c->campaign_id] = true;
+                    if (trim((string) $c->ad_link) !== '') $fallbackLinked[(string) $c->campaign_id] = true;
+                }
+            }
             if (!empty($adIdsForLinks)) {
-                $linkedAdIds = DB::table('ad_campaign_creatives')
+                $own = DB::table('ad_campaign_creatives')
                     ->whereIn('ad_id', $adIdsForLinks)
-                    ->whereNotNull('ad_link')
-                    ->where('ad_link', '!=', '')
-                    ->pluck('ad_id')
-                    ->map(fn($v) => (string)$v)
-                    ->unique()
-                    ->flip()
-                    ->all();
+                    ->get(['ad_id', 'ad_link']);
+                foreach ($own as $o) {
+                    $ownAdIds[(string) $o->ad_id] = true;
+                    if (trim((string) $o->ad_link) !== '') $linkedAdIds[(string) $o->ad_id] = true;
+                }
             }
 
-            $rowsArr = array_map(function ($r) use ($linkedCampaignIds, $linkedAdIds, $level) {
+            $rowsArr = array_map(function ($r) use ($linkedCampaignIds, $linkedAdIds, $ownAdIds, $fallbackLinked, $level) {
                 $cid = !empty($r['campaign_id']) ? (string)$r['campaign_id'] : null;
                 $aid = !empty($r['ad_id'])       ? (string)$r['ad_id']       : null;
                 $hasLink = false;
-                if ($aid && isset($linkedAdIds[$aid]))            $hasLink = true;
+                if ($aid && isset($ownAdIds[$aid]))               $hasLink = isset($linkedAdIds[$aid]);
+                elseif ($aid)                                     $hasLink = $cid !== null && isset($fallbackLinked[$cid]);
                 elseif ($cid && isset($linkedCampaignIds[$cid]))  $hasLink = true;
                 $r['has_ad_link'] = $hasLink;
                 return $r;
