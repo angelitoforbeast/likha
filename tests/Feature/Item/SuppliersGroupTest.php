@@ -18,17 +18,17 @@ class SuppliersGroupTest extends ItemTestCase
     /**
      * sha1 ng normalised render ng item.index, galing sa base commit (bago ang anumang pagbabago).
      * Key: <layout>.<viewer>. Ang old.ceo ay ikinukumpara sa orihinal na table ng CEO, pagkatapos tanggalin ang link nito sa toolbar at ang salitang pinapanatili nito sa address.
-     * Muling na-pin nang palitan ang mensahe ng Primary Items recompute ("ties skipped" → "tie(s) resolved"); iyon lang ang diff. Muling na-pin nang idagdag sa expand partial (owner._private_expand_inline, kasama sa /item) ang delivery label, ang "Walang ad id" at ang "Total ng page (ayon sa order)" na linya ang tanda ng campaign na walang spend sa range, at ang RTS / DEL / INT na cell (owner._ad_rdt_cell), naka-$data. kaya walang epekto sa /item; iyon lang ang diff. Muling na-pin (spec 246) nang ipasa ng ads table ng expand ang level nito (visibleCampaignsCols('ads'), 2 o 4 na lugar kada render); iyon lang ang diff, ang /item ay walang column na may tab.
+     * Muling na-pin nang palitan ang mensahe ng Primary Items recompute ("ties skipped" → "tie(s) resolved"); iyon lang ang diff. Muling na-pin nang idagdag sa expand partial (owner._private_expand_inline, kasama sa /item) ang delivery label, ang "Walang ad id" at ang "Total ng page (ayon sa order)" na linya ang tanda ng campaign na walang spend sa range, at ang RTS / DEL / INT na cell (owner._ad_rdt_cell), naka-$data. kaya walang epekto sa /item; iyon lang ang diff. Muling na-pin (spec 246) nang ipasa ng ads table ng expand ang level nito (visibleCampaignsCols('ads'), 2 o 4 na lugar kada render); iyon lang ang diff, ang /item ay walang column na may tab. Muling na-pin (spec 254, lahat ng walo) nang idagdag ang switcher ng creative preview sa modal ng /item (ang template ng "N different creatives" at ang creativeModal.pick); iyon lang ang diff: sa view ng 078a87e0 ay lumalabas pa rin ang lumang walong hash.
      */
     private const BASE = [
-        'default.ceo'              => '326de906ae816e4745ddee0a3c76871f6bb88ff0', // muling na-pin (lahat): pinanggalingan ng stock sa To order at sa script
-        'default.ceo_as_marketing' => 'f46908cbe880b28e8dfdb2fce07f8746e5820cf8',
-        'default.marketing'        => 'f691ca26b345b98d50a7103d5bd3841f7dd0c1fd',
-        'default.marketing_oic'    => 'dfb1674e4e6b8e2641b4d7de8a212bb7af34184a', // muling na-pin: may supplier work na ang Marketing - OIC
-        'old.ceo'                  => 'a5de27984d183f95945c2e4df566475072af13d9', // ikinukumpara pagkatapos tanggalin ang link sa toolbar at ang salita sa address
-        'old.ceo_as_marketing'     => '6ff625cdbcee5519a1257e15cbc5bc3f969b5849',
-        'old.marketing'            => '8d5ed6bdc48c073e2fd0cb8570f21fcf745464db',
-        'old.marketing_oic'        => 'a0a590cbef5dcc54beda812285f8fb906720c9d0', // muling na-pin: table na may suppliers para sa Marketing - OIC
+        'default.ceo'              => '9a4a63ff5498fc065197d447cf9700fc9afbf621', // muling na-pin (lahat): pinanggalingan ng stock sa To order at sa script
+        'default.ceo_as_marketing' => 'b98a71fa603f42ee8d803cab224ed4e989881533',
+        'default.marketing'        => '979307f56470f35d4ad8120c06592dd4f286a926',
+        'default.marketing_oic'    => 'f831ae8229ce04e58211c67528ce06f3ee3bab1d', // muling na-pin: may supplier work na ang Marketing - OIC
+        'old.ceo'                  => 'cbc4bdb31ea4fa22343acac0d67970a37229aa0a', // ikinukumpara pagkatapos tanggalin ang link sa toolbar at ang salita sa address
+        'old.ceo_as_marketing'     => '6083828e7b14e3ff2662c2f14d8e381b7705782a',
+        'old.marketing'            => 'ed1b21e752f462bb8c7d42d4533961804e43499b',
+        'old.marketing_oic'        => '74426313a8e715e326daae5fbf78a53d7dc776d3', // muling na-pin: table na may suppliers para sa Marketing - OIC
     ];
 
     protected function setUp(): void
