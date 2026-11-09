@@ -366,9 +366,9 @@ class ChatblastSetupCheck
     public function sentVia(string $page, string $flowId, string $since): int
     {
         if (!Schema::hasTable('botcake_messages')) return 0;
-        $trim = \Illuminate\Support\Facades\DB::getDriverName() === 'pgsql' ? 'BTRIM' : 'TRIM';
-        $rows = BotcakeMessage::where('status', 'sent')->where('is_test', false)
-            ->whereRaw("LOWER($trim(page_name)) = ?", [$this->settings->pageKey($page)])
+        $names = $this->storedNames($page);
+        if (!$names) return 0;
+        $rows = BotcakeMessage::whereIn('page_name', $names)->where('status', 'sent')->where('is_test', false)
             ->when($since !== '', fn ($q) => $q->where('sent_at', '>=', Carbon::parse($since)))
             ->where('sent_at', '<=', now()->subMinutes(self::DELIVERY_WAIT_MINUTES))
             ->orderByDesc('id')->limit(50)->get(['steps']);
@@ -379,5 +379,18 @@ class ChatblastSetupCheck
             }
             return false;
         })->count();
+    }
+
+    /**
+     * Ang eksaktong mga page_name sa botcake_messages na ang LOWER(TRIM(...)) ay ang key ng page (iba-ibang case o may
+     * espasyo sa gilid), para ang sentVia ay "page_name IN (...)" na nagagamit ang (page_name, status, sent_at) index.
+     * Ang DISTINCT page_name ay binabasa mula sa index lang (loose index scan sa MySQL: isang hakbang kada page).
+     */
+    private function storedNames(string $page): array
+    {
+        $key = $this->settings->pageKey($page);
+
+        return BotcakeMessage::query()->distinct()->pluck('page_name')
+            ->filter(fn ($n) => mb_strtolower(trim((string) $n, ' '), 'UTF-8') === $key)->values()->all();
     }
 }

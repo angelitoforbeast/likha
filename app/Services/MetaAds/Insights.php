@@ -153,15 +153,20 @@ class Insights
     }
 
     /**
-     * Spec 252. Ang link ng post ng ad mula sa effective_object_story_id ("<page id>_<post id>"):
-     * https://www.facebook.com/<post id>, gaya ng mga link na tina-type ng staff. Digits lang ang tinatanggap na post id;
-     * ang wala o mali ang hugis ay null (hindi ginagalaw ng importer ang nakatabing link).
+     * Spec 252/256/257. Ang link ng ad na nae-embed ng preview (fbEmbedSrc), para sa lahat ng ad, video man o hindi:
+     * https://www.facebook.com/<page id>/posts/<post id>, mula sa effective_object_story_id ("<page id>_<post id>";
+     * post plugin). Hindi ginagamit ang video_data.video_id: hindi iyon ang pampublikong reel id (spec 257).
+     * Digits lang ang tinatanggap na id; ang wala o mali ang hugis ay null (hindi ginagalaw ng importer ang nakatabing
+     * link).
      */
-    public static function adLink(mixed $storyId): ?string
+    public static function adLink(mixed $creative): ?string
     {
-        if (!is_string($storyId) || !preg_match('/^\d+_(\d+)$/D', $storyId, $m)) return null;
+        if (!is_array($creative)) return null;
 
-        return 'https://www.facebook.com/' . $m[1];
+        $storyId = $creative['effective_object_story_id'] ?? null;
+        if (!is_string($storyId) || !preg_match('/^(\d+)_(\d+)$/D', $storyId, $m)) return null;
+
+        return 'https://www.facebook.com/' . $m[1] . '/posts/' . $m[2];
     }
 
     /** Isang insights row (+ detalye ng ad) → mga column ng ads_manager_reports, gaya ng normalizeRow ng upload. */
@@ -208,7 +213,7 @@ class Insights
 
             $row['page_id']            = self::pageId($ad); // hindi column: para sa talaan ng nilaktawan (Sync)
             $row['page_name']          = $pages[(string) $row['page_id']] ?? null;
-            $row['ad_link']            = self::adLink($cr['effective_object_story_id'] ?? null); // ad_campaign_creatives lang (spec 252)
+            $row['ad_link']            = self::adLink($cr); // ad_campaign_creatives lang (spec 252/257)
             $row['ad_set_delivery']    = self::delivery($set['effective_status'] ?? null);
             $campaign                  = self::delivery($ad['campaign']['effective_status'] ?? null);
             $row['campaign_delivery']  = $campaign === null ? null
