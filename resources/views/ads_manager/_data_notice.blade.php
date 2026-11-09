@@ -1,4 +1,4 @@
-{{-- Pulang paalala mula sa huling 12:00 na check (ads:data-health --record) kapag may account na Missing / New / Not readable. --}}
+{{-- Pulang paalala mula sa huling naitalang check (12:00 o pagkatapos ng upload) kapag may account na Missing / New / Not readable. --}}
 @php
   use App\Services\MetaAds\DataHealth;
   $check = $health['last'];
