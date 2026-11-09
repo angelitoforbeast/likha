@@ -405,7 +405,9 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
      */
     private const VIDEO_HEADERS = [
         '3-second video plays' => ['column' => 'video_plays_3s',  'accepts' => ['3-second video plays', '3-second video views']],
-        'ThruPlays'            => ['column' => 'video_thruplays', 'accepts' => ['thruplays', 'thruplay']],
+        // Meta renamed the export column to "15-second ThruPlays" (spec 249). The export also has a separate "6-second
+        // ThruPlays" column, which is a different metric and is never read as ThruPlays.
+        'ThruPlays'            => ['column' => 'video_thruplays', 'accepts' => ['15-second thruplays', 'thruplays', 'thruplay']],
         'Video plays at 50%'   => ['column' => 'video_p50',       'accepts' => ['video plays at 50%', 'video watches at 50%']],
     ];
 
