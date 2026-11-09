@@ -162,7 +162,7 @@ class AnalystRtsTest extends RtsProjectionTestCase
         $this->assertNull($rows['pahina beta']['analyst_gap_abs']);
 
         $html = $this->get('/owner/private')->assertOk()->getContent();
-        foreach (["id:'mira_rts',   label:'Projected RTS'", "id:'analyst_rts'", "label:'Mira RTS'", 'analystTip(row)',
+        foreach (["id:'mira_rts', label:'Projected RTS'", "id:'analyst_rts'", "label:'Mira RTS'", 'analystTip(row)',
             "id:'analyst_gap_pts'", "id:'analyst_gap_abs'"] as $needle) {
             $this->assertStringContainsString($needle, $html, $needle);
         }
