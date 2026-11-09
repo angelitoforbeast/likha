@@ -89,6 +89,7 @@ class MetaAdsAdLinkTest extends MetaAdsTestCase
             'post not digits'  => ['123_45x6'],
             'post with a path' => ['123_456/../evil'],
             'three parts'      => ['123_456_789'],
+            'trailing newline' => ["123_456\n"],
         ];
     }
 
