@@ -171,6 +171,7 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
                     'finished_at'       => now(),
                 ]);
                 \App\Services\MetaAds\DataHealth::recordRefusals($log, 'upload', $this->refused);
+                $this->recordDataHealth();
             }
 
             // Bagong ads data → invalidate /owner/private cache so users see
@@ -204,6 +205,20 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
                     @unlink($p);
                 }
             }
+        }
+    }
+
+    /**
+     * Ang data health check pagkatapos ng natapos na upload (trigger "upload"), para hindi na hintayin ang 12:00. Isang
+     * beses kada natapos na upload; ang importRows ng Meta sync ay hindi dumadaan dito. Ang mali rito ay hindi nagpapabagsak
+     * sa upload (tapos na ito); ang 12:00 na check ang sasalo.
+     */
+    private function recordDataHealth(): void
+    {
+        try {
+            \App\Services\MetaAds\DataHealth::record(null, \App\Services\MetaAds\DataHealth::TRIGGER_UPLOAD);
+        } catch (\Throwable $e) {
+            Log::warning('[AdsMgr Import] Data health check after the upload failed: ' . $e->getMessage(), ['log_id' => $this->uploadLogId]);
         }
     }
 

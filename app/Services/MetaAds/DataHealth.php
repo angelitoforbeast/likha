@@ -23,7 +23,7 @@ class DataHealth
     /** Ilang tinanggihang row ang itinatabi ang detalye kada upload o run (lahat ay binibilang pa rin). */
     public const LIST_MAX = 200;
 
-    /** Ang huling 12:00 na check (JSON ng evaluate) at ang unang kita ng bawat account sa connection (id => Y-m-d). */
+    /** Ang huling naitalang check (JSON ng evaluate + trigger) at ang unang kita ng bawat account sa connection (id => Y-m-d). */
     public const LAST = 'meta_ads.data_health';
     public const FIRST_SEEN = 'meta_ads.first_seen';
 
@@ -75,13 +75,16 @@ class DataHealth
             $first = min(array_filter([$u['first_day'] ?? null, $bookSince[$id] ?? null, $firstSeen[$id] ?? null]) ?: [$today->format('Y-m-d')]);
             $hasY  = ($u['rows'] ?? 0) > 0;
 
+            // Ang upload ang batayan: "Not readable by API" lang kapag may upload rows sa araw na iyon at hindi ito mabasa ng
+            // API (bago man); ang hindi mabasa na walang row ay "No recent spend", walang paalala (kahit bagong idinagdag sa
+            // /ads_manager/ad_account).
             $status = match (true) {
-                !$hasY && ($u['prior'] ?? 0) > 0 => self::MISSING,
-                $id !== '' && $first >= $newFrom => self::NEW,
-                $hasY                            => self::OK,
-                $inApi && !isset($selected[$id]) => self::UNTICKED,
-                !$inApi && $id !== ''            => self::NOT_READABLE,
-                default                          => self::QUIET,
+                !$hasY && ($u['prior'] ?? 0) > 0      => self::MISSING,
+                $hasY && !$inApi && $id !== ''        => self::NOT_READABLE,
+                $inApi && $first >= $newFrom          => self::NEW,
+                $hasY                                 => self::OK,
+                $inApi && !isset($selected[$id])      => self::UNTICKED,
+                default                               => self::QUIET,
             };
             $out[] = [
                 'id'         => $id,
@@ -106,10 +109,17 @@ class DataHealth
         ];
     }
 
-    /** Ang 12:00 na check: sinusuri ang kahapon at itinatabi sa app_settings (LAST). */
-    public static function record(?string $day = null): array
+    /** Ang pinagmulan ng naitabing check: ang 12:00 na schedule (o ang command), o pagkatapos ng isang natapos na upload. */
+    public const TRIGGER_SCHEDULED = 'scheduled';
+    public const TRIGGER_UPLOAD = 'upload';
+
+    /**
+     * Ang naitatalang check: sinusuri ang kahapon at itinatabi sa app_settings (LAST), kasama ang trigger. Tumatakbo sa
+     * 12:00 (scheduled) at pagkatapos ng bawat natapos na Ads Manager upload (upload); ang huli ang nananaig.
+     */
+    public static function record(?string $day = null, string $trigger = self::TRIGGER_SCHEDULED): array
     {
-        $result = self::evaluate($day);
+        $result = self::evaluate($day) + ['trigger' => $trigger];
         AppSetting::set(self::LAST, json_encode($result));
 
         return $result;
