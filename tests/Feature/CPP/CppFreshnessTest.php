@@ -210,8 +210,10 @@ class CppFreshnessTest extends ChatblastTestCase
         $this->assertLessThan(strpos($html, 'id="singlePageLayout"'), strpos($html, 'id="cppFreshness"'));
         // Filled by textContent; the tooltips go through esc() into title attributes; amber for the warning.
         $this->assertStringContainsString('freshEl.textContent = line.text;', $html);
-        $this->assertStringContainsString('title="${esc(cppFreshTip(page, filteredDates))}"', $html);
-        $this->assertStringContainsString('title="${esc(cppFreshTip(pageFilter, [date]))}"', $html);
+        $this->assertStringContainsString('const freshTip = esc(cppFreshTip(page, rangeDates));', $html);
+        $this->assertStringContainsString('const dayTip = esc(cppFreshTip(pageFilter, [date]));', $html);
+        $this->assertSame(4, substr_count($html, 'title="${freshTip}"'), 'page rows and ad-group rows: Amount Spent and Orders');
+        $this->assertSame(2, substr_count($html, 'title="${dayTip}"'), 'per-date rows: Amount Spent and Orders');
         $this->assertStringContainsString('text-amber-700', $html);
 
         // The existing cell keys are unchanged.

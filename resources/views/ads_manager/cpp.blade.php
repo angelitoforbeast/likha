@@ -201,6 +201,9 @@
     </div>
   </div>
 
+  {{-- When the ads spend and the orders shown were last updated (filled by refreshAll; outside the copied tables). --}}
+  <div id="cppFreshness" class="text-xs text-gray-500 mb-2" aria-live="polite"></div>
+
   {{-- Display Area --}}
   <div id="singlePageLayout" class="hidden lg:flex gap-6 mb-10">
     <div class="basis-full lg:basis-1/3 lg:shrink-0">
@@ -228,6 +231,8 @@
     const srvEnd    = @json($end ?? null);
     // Ad-based na page => [{label, kind, cells: {date: cell}}]: ang mga row kada ad group (gaya ng cell ng rawData).
     const adGroupRows = @json($adGroupRows ?? []);
+    // Page => date => {ads, order}: last write of the spend rows and the newest order, Manila time 'Y-m-d H:i'.
+    const freshness = @json($freshness ?? []);
     // Ang sort ng bawat table (page, date, single) sa pagbisitang ito; inilalapat ulit sa bawat re-render, hindi sine-save.
     const cppSorts = {};
     const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
@@ -247,6 +252,63 @@
         if (spentDay && r.tcpr_fail) tcprFail += r.tcpr_fail;
       });
       return {sumSpent, sumOrders, wImps, wCPI, tcprFail};
+    }
+
+    // cpp-freshness:begin
+    // When the ads spend and the orders were last updated. The times are Manila wall-clock strings from the server and
+    // are only reformatted here (no Date objects, so the viewer's time zone never shifts them).
+    const CPP_FRESH_LAG_MIN = 60;
+    const CPP_FRESH_MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    // 'Y-m-d H:i' → 'Nov 9, 6:45 PM'
+    function cppFreshStamp(s) {
+      const m = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})/.exec(s || '');
+      if (!m) return '';
+      const h = +m[4];
+      return `${CPP_FRESH_MONTHS[+m[2] - 1]} ${+m[3]}, ${h % 12 || 12}:${m[5]} ${h < 12 ? 'AM' : 'PM'}`;
+    }
+    // Minutes on a common clock (UTC arithmetic only; both stamps are the same Manila wall clock).
+    function cppFreshMinutes(s) {
+      const m = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})/.exec(s || '');
+      return m ? Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]) / 60000 : null;
+    }
+    // Latest ads and order stamps of the pages (null = all) over the dates (null = all dates in the data).
+    function cppFreshLatest(pages, dates) {
+      let ads = null, order = null;
+      (pages || Object.keys(freshness)).forEach(page => {
+        const byDate = freshness[page] || {};
+        (dates || Object.keys(byDate)).forEach(date => {
+          const f = byDate[date];
+          if (!f) return;
+          if (f.ads && (ads === null || f.ads > ads)) ads = f.ads;
+          if (f.order && (order === null || f.order > order)) order = f.order;
+        });
+      });
+      return {ads, order};
+    }
+    // The line above the table: {text, warn}. warn when the last order is more than 60 minutes after the ads time.
+    function cppFreshLine(pages, dates) {
+      const {ads, order} = cppFreshLatest(pages, dates);
+      let text = (ads ? `Ads spend as of ${cppFreshStamp(ads)}` : 'Ads spend: none for this range')
+        + ' · ' + (order ? `Last order ${cppFreshStamp(order)}` : 'Last order: none');
+      const lag = ads && order ? cppFreshMinutes(order) - cppFreshMinutes(ads) : 0;
+      const warn = lag > CPP_FRESH_LAG_MIN;
+      if (warn) text += ` (ads spend is ${Math.floor(lag / 60)} h ${lag % 60} min behind orders; CPP may look low)`;
+      return {text, warn};
+    }
+    // The tooltip of a page's Amount Spent and Orders cells (dates: the row's dates; one date in the per-date table).
+    function cppFreshTip(page, dates) {
+      const {ads, order} = cppFreshLatest([page], dates);
+      return `Ads spend updated ${ads ? cppFreshStamp(ads) : 'none'} · Last order ${order ? cppFreshStamp(order) : 'none'}`;
+    }
+    // cpp-freshness:end
+
+    // Fills the line for the pages and dates in view (textContent only).
+    function renderFreshness(pages, dates) {
+      const freshEl = document.getElementById('cppFreshness');
+      if (!freshEl) return;
+      const line = cppFreshLine(pages, dates);
+      freshEl.textContent = line.text;
+      freshEl.className = 'text-xs mb-2 ' + (line.warn ? 'text-amber-700' : 'text-gray-500');
     }
 
     // --- Elements ---
@@ -457,6 +519,7 @@
       const pageSet    = new Set(selectedPages);
       const isFiltered = selectedPages.length > 0;
       const isSinglePage = selectedPages.length === 1;
+      const rangeDates = filterDates(); // the selected range: the hover times of a page row cover all of it
 
       // SINGLE-PAGE layout when exactly one page is selected (legacy behavior).
       if (isSinglePage) {
@@ -540,11 +603,12 @@
             const pageItemContent = modeItemsText(pageModeLines);
             const pagePriceContent = modePriceText(pageModeLines);
 
+            const freshTip = esc(cppFreshTip(page, rangeDates));
             summaryHtml += `
               <tr class="cpp-page-row">
                 <td class="border px-2 py-1">${page}</td>
-                <td class="border px-2 py-1">₱${sumSpent.toFixed(2)}</td>
-                <td class="border px-2 py-1">${sumOrders}</td>
+                <td class="border px-2 py-1" title="${freshTip}">₱${sumSpent.toFixed(2)}</td>
+                <td class="border px-2 py-1" title="${freshTip}">${sumOrders}</td>
                 <td class="border px-2 py-1">${cpp != null ? `₱${cpp.toFixed(2)}` : '—'}</td>
                 <td class="border px-2 py-1">${cpi != null ? `₱${cpi.toFixed(2)}` : '—'}</td>
                 <td class="border px-2 py-1">${cpm != null ? `₱${cpm.toFixed(2)}` : '—'}</td>
@@ -569,8 +633,8 @@
               summaryHtml += `
                 <tr class="cpp-ag-row text-xs" data-ag-kind="${esc(g.kind)}">
                   <td class="border px-2 py-1">${esc(g.label)}</td>
-                  <td class="border px-2 py-1">₱${s.sumSpent.toFixed(2)}</td>
-                  <td class="border px-2 py-1">${s.sumOrders}</td>
+                  <td class="border px-2 py-1" title="${freshTip}">₱${s.sumSpent.toFixed(2)}</td>
+                  <td class="border px-2 py-1" title="${freshTip}">${s.sumOrders}</td>
                   <td class="border px-2 py-1">${gCpp != null ? `₱${gCpp.toFixed(2)}` : '—'}</td>
                   <td class="border px-2 py-1">${gCpi != null ? `₱${gCpi.toFixed(2)}` : '—'}</td>
                   <td class="border px-2 py-1">${gCpm != null ? `₱${gCpm.toFixed(2)}` : '—'}</td>
@@ -738,12 +802,13 @@
           const orders = Number(r.orders || 0);
           const fail   = Number(r.tcpr_fail || 0);
           const tcpr   = orders > 0 ? (fail / orders) : null;
+          const dayTip = esc(cppFreshTip(pageFilter, [date]));
 
           html += `
             <tr>
               <td class="border px-2 py-1 text-center" data-sort="${date}">${fmtISO(date)}</td>
-              <td class="border px-2 py-1 text-center">₱${r.spent.toFixed(2)}</td>
-              <td class="border px-2 py-1 text-center">${r.orders ?? '—'}</td>
+              <td class="border px-2 py-1 text-center" title="${dayTip}">₱${r.spent.toFixed(2)}</td>
+              <td class="border px-2 py-1 text-center" title="${dayTip}">${r.orders ?? '—'}</td>
               <td class="border px-2 py-1 text-center">${r.cpp != null ? `₱${r.cpp.toFixed(2)}` : '—'}</td>
               <td class="border px-2 py-1 text-center">${r.cpm != null ? `₱${r.cpm.toFixed(2)}` : '—'}</td>
               <td class="border px-2 py-1 text-center">${tcpr != null ? tcprBadge(tcpr * 100) : '—'}</td>
@@ -868,6 +933,14 @@
 
       // Repopulate item dropdown based on current date range
       populateItemDropdown(dates);
+
+      // Freshness line: the selected pages (all when none), narrowed by the item filter the same way as the table,
+      // over the whole selected range.
+      const freshItem = getSelectedItemName();
+      const freshPages = Object.keys(rawData).filter(page =>
+        (pageSet.size === 0 || pageSet.has(page))
+        && (freshItem === '' || dates.some(d => ((rawData[page][d] || {}).item_names || []).includes(freshItem))));
+      renderFreshness(freshPages, baseDates);
 
       if (!dates.length) {
         if (cppChart) cppChart.destroy();
