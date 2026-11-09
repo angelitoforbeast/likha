@@ -153,21 +153,15 @@ class Insights
     }
 
     /**
-     * Spec 252/256. Ang link ng ad na nae-embed ng preview (fbEmbedSrc):
-     * - video ad: https://www.facebook.com/reel/<video id>, mula sa creative.object_story_spec.video_data.video_id
-     *   (video plugin; ito lang ang video id sa mga field na hinihingi sa AD_FIELDS);
-     * - iba pa: https://www.facebook.com/<page id>/posts/<post id>, mula sa effective_object_story_id
-     *   ("<page id>_<post id>"; post plugin).
+     * Spec 252/256/257. Ang link ng ad na nae-embed ng preview (fbEmbedSrc), para sa lahat ng ad, video man o hindi:
+     * https://www.facebook.com/<page id>/posts/<post id>, mula sa effective_object_story_id ("<page id>_<post id>";
+     * post plugin). Hindi ginagamit ang video_data.video_id: hindi iyon ang pampublikong reel id (spec 257).
      * Digits lang ang tinatanggap na id; ang wala o mali ang hugis ay null (hindi ginagalaw ng importer ang nakatabing
-     * link). Ang dynamic/asset_feed creative (walang video_data) ay napupunta sa post link.
+     * link).
      */
     public static function adLink(mixed $creative): ?string
     {
         if (!is_array($creative)) return null;
-
-        $oss     = is_array($creative['object_story_spec'] ?? null) ? $creative['object_story_spec'] : [];
-        $videoId = is_array($oss['video_data'] ?? null) ? ($oss['video_data']['video_id'] ?? null) : null;
-        if (is_string($videoId) && preg_match('/^\d+$/D', $videoId)) return 'https://www.facebook.com/reel/' . $videoId;
 
         $storyId = $creative['effective_object_story_id'] ?? null;
         if (!is_string($storyId) || !preg_match('/^(\d+)_(\d+)$/D', $storyId, $m)) return null;
@@ -219,7 +213,7 @@ class Insights
 
             $row['page_id']            = self::pageId($ad); // hindi column: para sa talaan ng nilaktawan (Sync)
             $row['page_name']          = $pages[(string) $row['page_id']] ?? null;
-            $row['ad_link']            = self::adLink($cr); // ad_campaign_creatives lang (spec 252/256)
+            $row['ad_link']            = self::adLink($cr); // ad_campaign_creatives lang (spec 252/257)
             $row['ad_set_delivery']    = self::delivery($set['effective_status'] ?? null);
             $campaign                  = self::delivery($ad['campaign']['effective_status'] ?? null);
             $row['campaign_delivery']  = $campaign === null ? null
