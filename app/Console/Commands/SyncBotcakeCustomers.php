@@ -12,7 +12,8 @@ use Illuminate\Console\Command;
  * --nightly: para sa simpleng cron line (walang schedule:run, hal. Incepxion): --full kapag Linggo sa Manila, by date sa
  * ibang araw; agad na lalabas kapag naka-off ang services.botcake.sync_enabled.
  * --all-time (spec 262): bawat page mula batch 1 hanggang dulo, itinutuloy mula sa naabot; --shard=K/N = ang mga page na
- * ang index sa pages() ay index % N == K-1, para sabay ang N proseso. Ang tapos na ay nilalaktawan, maliban sa --again.
+ * ang index sa pages() ay index % N == K-1, para sabay ang N proseso. Ang tapos na ay nilalaktawan, maliban sa --again:
+ * ang all-time read na umabot sa end, o (amendment 262-1) ang malinis na --full mula batch 1 hanggang end.
  */
 class SyncBotcakeCustomers extends Command
 {
@@ -111,14 +112,22 @@ class SyncBotcakeCustomers extends Command
         $count = ['end' => 0, 'finished' => 0, 'locked' => 0, 'failed' => 0];
         foreach ($pages as $page) {
             $fresh = $again;
+            $first = true;
             while (true) {
-                // Sinusuri habang hawak ang lock: ang ibang proseso ay maaaring katatapos lang ng page.
-                $run = $hold($page, fn () => !$fresh && $sync->allTimeFinished($page) ? false : $sync->syncPage($page, false, true, $sleepMs));
-                if ($run === false) {
-                    $this->line('Laktaw ang ' . $page . ': tapos na ang all-time read (end); --again para basahin ulit.');
+                // Sinusuri habang hawak ang lock: ang ibang proseso ay maaaring katatapos lang ng page. Ang malinis na
+                // --full mula batch 1 hanggang end (amendment 262-1) ay sa unang run lang tinitingnan, para hindi maputol
+                // ang chain na sinimulan ng --again.
+                $run = $hold($page, function () use ($sync, $page, $fresh, $first, $sleepMs) {
+                    if (!$fresh && $sync->allTimeFinished($page)) return 'all-time read';
+                    if (!$fresh && $first && $sync->fullReadFinished($page)) return 'full read mula batch 1';
+                    return $sync->syncPage($page, false, true, $sleepMs);
+                });
+                if (is_string($run)) {
+                    $this->line('Laktaw ang ' . $page . ': tapos na ang ' . $run . ' (end); --again para basahin ulit.');
                     $count['finished']++;
                     break;
                 }
+                $first = false;
                 if ($run === null) {
                     $this->skippedLocked($sync, $page);
                     $count['locked']++;

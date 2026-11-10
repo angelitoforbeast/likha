@@ -284,4 +284,67 @@ class BotcakeAllTimeReadTest extends BotcakeApiTestCase
         $this->assertSame('end', $this->runsOf('Page Dos')->get()->last()->stop_reason);
         $this->assertSame('available', $dos->fresh()->status);
     }
+
+    /** Amendment 262-1: ang malinis na --full mula batch 1 hanggang end ay nabasa na ang buong listahan. */
+    private function fullRun(string $page, array $fields): BotcakePsidImportRun
+    {
+        return BotcakePsidImportRun::create($fields + ['source' => 'api', 'page_name' => $page, 'read_kind' => 'full', 'start_batch' => 1]);
+    }
+
+    public function test_a_page_with_a_clean_full_read_from_batch_1_to_the_end_is_skipped(): void
+    {
+        // Gaya ng Alexa Angeles: run 2854 (full, mula 1, end), saka isang all-time run na naiwang running bago ang amendment.
+        $this->fullRun('Page Uno', ['status' => 'done', 'batches_read' => 13444, 'stop_reason' => 'end']);
+        $left = BotcakePsidImportRun::create(['status' => 'running', 'source' => 'api', 'page_name' => 'Page Uno', 'read_kind' => 'all_time', 'start_batch' => 1, 'batches_read' => 900]);
+
+        $out = $this->allTime();
+
+        $this->assertArrayNotHasKey('1001', $this->asked, 'hindi binasa ulit mula batch 1');
+        $this->assertSame([1, 2, 3], $this->asked['1002'], 'ang ibang page ay binabasa pa rin');
+        $this->assertStringContainsString('Laktaw ang Page Uno: tapos na ang full read mula batch 1 (end); --again para basahin ulit.', $out);
+        $this->assertStringContainsString('1 natapos ngayon, 1 tapos na dati', $out);
+        $this->assertSame(['running', 900], [$left->fresh()->status, $left->fresh()->batches_read], 'ang naiwang running ay hindi ginagalaw');
+        $this->assertSame(2, $this->runsOf('Page Uno')->count(), 'walang bagong run');
+    }
+
+    public function test_a_full_read_that_stopped_before_the_end_or_did_not_start_at_batch_1_is_not_finished(): void
+    {
+        $this->page('Page Tres', '1003', 10);
+        $this->page('Page Cuatro', '1004', 10);
+        $this->page('Page Cinco', '1005', 3);
+        $this->page('Page Seis', '1006', 3);
+        $this->ends['1002'] = 10;
+
+        $this->fullRun('Page Uno', ['status' => 'done', 'batches_read' => 8, 'stop_reason' => 'age']);
+        $this->fullRun('Page Dos', ['status' => 'done', 'batches_read' => 8, 'stop_reason' => 'cap']);
+        $this->fullRun('Page Tres', ['status' => 'done', 'batches_read' => 8, 'stop_reason' => 'time']);
+        $this->fullRun('Page Cuatro', ['status' => 'failed', 'batches_read' => 8, 'stop_reason' => 'killed']);
+        $this->fullRun('Page Cinco', ['status' => 'done', 'batches_read' => 8, 'stop_reason' => 'end', 'start_batch' => 40]);
+        $this->fullRun('Page Seis', ['status' => 'done', 'batches_read' => 3, 'stop_reason' => 'end']);
+
+        $out = $this->allTime();
+
+        $this->assertSame([1, 2, 3, 4], $this->asked['1001'], 'age: mula 1, gaya ng dati');
+        $this->assertSame(range(3, 11), $this->asked['1002'], 'cap: itinutuloy mula sa naabot (8 minus overlap)');
+        $this->assertSame(range(3, 11), $this->asked['1003'], 'time: itinutuloy');
+        $this->assertSame(range(3, 11), $this->asked['1004'], 'killed: itinutuloy');
+        $this->assertSame([1, 2, 3, 4], $this->asked['1005'], 'end pero hindi mula batch 1: hindi tapos');
+        $this->assertArrayNotHasKey('1006', $this->asked, 'ang malinis na full mula 1 hanggang end lang ang tapos');
+        $this->assertStringContainsString('5 natapos ngayon, 1 tapos na dati', $out);
+    }
+
+    public function test_again_reads_a_page_finished_by_a_full_read_and_goes_on_after_each_hour(): void
+    {
+        $this->fullRun('Page Uno', ['status' => 'done', 'batches_read' => 26, 'stop_reason' => 'end']);
+        $this->ends['1001'] = 25;
+
+        $this->allTime(['--page' => 'Page Uno']);
+        $this->assertSame([], $this->asked, 'walang --again: laktaw');
+
+        // --again: mula batch 1; ang tuloy pagkatapos ng time ay hindi nilalaktawan dahil sa lumang full read.
+        $this->allTime(['--page' => 'Page Uno', '--again' => true, '--sleep-ms' => 200000]);
+        $runs = $this->runsOf('Page Uno')->where('read_kind', 'all_time')->get()->map(fn ($r) => [$r->status, $r->stop_reason, $r->start_batch, $r->batches_read])->all();
+        $this->assertSame([['done', 'time', 1, 19], ['done', 'end', 14, 13]], $runs);
+        $this->assertSame(array_merge(range(1, 19), range(14, 26)), $this->asked['1001']);
+    }
 }

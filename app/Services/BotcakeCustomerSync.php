@@ -251,6 +251,16 @@ class BotcakeCustomerSync
     }
 
     /**
+     * Amendment 262-1: nabasa na ba ang buong listahan ng page ng isang malinis na --full: mula batch 1, done / end. Ang
+     * --full ay laging mula batch 1 (plan()), kaya isang run ang chain nito. Ang age / cap / time / failed / killed ay hindi.
+     */
+    public function fullReadFinished(string $page): bool
+    {
+        return $this->runsOf($page)->where('read_kind', 'full')->where('start_batch', 1)
+            ->where('status', 'done')->where('stop_reason', 'end')->exists();
+    }
+
+    /**
      * Saang batch magsisimula ang all-time run. Tapos na ang chain (o wala pa): mula 1 (ang command ang lumalaktaw sa tapos
      * na, maliban sa --again). Hindi tapos: mula sa naabot ng huling run, minus RESUME_OVERLAP; walang nabasa = parehong
      * simula (hindi bumabalik sa 1). Ang tuloy pagkatapos ng time ay laging umuusad nang kahit isang batch. Wala pang

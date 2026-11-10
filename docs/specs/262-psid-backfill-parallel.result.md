@@ -135,6 +135,41 @@ Because that chain did not start at batch 1 in all-time mode, its end does not m
 - The leftover config `services.botcake.sync_max_batches` (default 300) is still unused, as before.
 - Measurement scripts (read-only): C:\Users\Forbeast\AppData\Local\Temp\claude\2e760ef270dbe960\07319e29-2afc-45d1-9b8d-9083b1ed643e\scratchpad\m262\est.sql and C:\Users\Forbeast\AppData\Local\Temp\claude\2e760ef270dbe960\07319e29-2afc-45d1-9b8d-9083b1ed643e\scratchpad\m262\shard.sql.
 
+## Amendments
+
+### 262-1: a clean `full` read from batch 1 to the end counts as finished
+
+The amendment, as given: handoff/262-psid-backfill-parallel/AMENDMENT-1.md (main checkout, not committed). Owner, 2026-11-10: Alexa Angeles (run 2854: full, start 1, 13,444 batches, end), Alyssa Aquino (2856) and Amanda Villadolid (2857) were read again from batch 1 after the deploy. Run 2854 had reached `end` before the deploy, so the "Alexa Angeles" paragraph above (continue from its batches_read minus 5) no longer applied: a finished `full` was not continued and not counted as finished, so the all-time read started at batch 1.
+
+| File | What |
+|---|---|
+| app/Services/BotcakeCustomerSync.php | `fullReadFinished($page)`: the page has a `full` run with start_batch 1, status done, stop_reason end. `--full` always starts at batch 1 (`plan($page, true)`), so its chain is that one run. `age`, `cap`, `time`, failed and killed do not count, and neither does an `end` that started past batch 1. `planAllTime()` is unchanged: such a `full` is still continued from its reached batch, `age` still starts at 1. |
+| app/Console/Commands/SyncBotcakeCustomers.php | `--all-time` skips a page when its last all-time run is done / end (as before) or, on the page's first run in this command, when `fullReadFinished()` (checked inside the page lock). Line: `Laktaw ang <page>: tapos na ang full read mula batch 1 (end); --again para basahin ulit.`, counted in the summary's "tapos na dati". `--again` reads it from batch 1 (no all-time run yet) or continues its unfinished all-time chain. The full check is only on the first run, so the hourly continuation (`time`) of an `--again` chain is not cut off by the old `full`. |
+
+A skipped page's all-time run that is still `running` from before (e.g. run 2859) is left alone, as the amendment says. Note: the killed-run cleanup is `markKilled()`, called at the start of an all-time `syncPage()` of that page and by the sync jobs' `failed()`. A skipped page reaches neither, so such a row stays `running` in the grid until someone reads that page with `--again` (or marks it by hand). Nothing else reads it: `plan()` and `plans()` ignore all-time runs, and the lock is in the cache.
+
+Finished pages for the progress check (step 4), now including the `full` rule:
+
+```sql
+SELECT COUNT(DISTINCT LOWER(TRIM(page_name))) FROM botcake_psid_import_runs r
+ WHERE r.source = 'api' AND (
+   (r.read_kind = 'full' AND r.start_batch = 1 AND r.status = 'done' AND r.stop_reason = 'end')
+   OR r.id IN (SELECT MAX(id) FROM botcake_psid_import_runs WHERE source = 'api' AND read_kind = 'all_time' AND status = 'done' AND stop_reason = 'end'
+               GROUP BY LOWER(TRIM(page_name))));
+```
+
+(The inner query gives each page's last done / end all-time run, a slight over-count if a later all-time run of the same page is unfinished; that only happens with `--again`.)
+
+Tests, new in BotcakeAllTimeReadTest (3), each failed first on 144403a2 (3 failures), all pass now:
+
+- `test_a_page_with_a_clean_full_read_from_batch_1_to_the_end_is_skipped`: Page Uno has a full / 1 / 13,444 / end and an all-time run left `running`: not read, the skip line, "1 natapos ngayon, 1 tapos na dati", the running row unchanged, no new run; Page Dos is read.
+- `test_a_full_read_that_stopped_before_the_end_or_did_not_start_at_batch_1_is_not_finished`: full + age → from 1; full + cap, + time, failed / killed (8 batches) → from 3 (8 − 5); full end from batch 40 → from 1; only full / 1 / end is skipped.
+- `test_again_reads_a_page_finished_by_a_full_read_and_goes_on_after_each_hour`: without `--again` nothing is read; with `--again` and 200 s per batch: all-time runs time 1..19, then end 14..26 in the same command. Without the first-run guard the second run is skipped (checked by removing it: the test fails).
+
+tests/Feature/Botcake 144 and tests/Feature/PageSettings 149: 293 tests, all pass (290 before + 3).
+
+Full suite: 4960 tests (4957 + 3), 2 failures, the two known ones (ExampleTest::test_the_application_returns_a_successful_response, ItemTableFitScriptTest::test_every_catalog_column_id_has_a_minimum_width_and_a_place_in_the_drop_order), 6 skipped. No new failures.
+
 ## Final sha
 
-The tip of the branch is the commit that adds this file; the code is at cdd74800.
+The tip of the branch is the commit that adds this file; the code is at cdd74800. Amendment 262-1 is in the commit after it (code, tests and this section together).
