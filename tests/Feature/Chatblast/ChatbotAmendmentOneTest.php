@@ -160,4 +160,48 @@ class ChatbotAmendmentOneTest extends ChatblastTestCase
         $this->assertSame(0, Artisan::call('botcake:chats-normalize'));
         $this->assertStringContainsString('like: 0, photo: 0, untouched: 6', Artisan::output(), 'isang beses lang');
     }
+
+    public function test_259_several_photos_sent_at_once_are_stored_as_one_photo_with_all_links(): void
+    {
+        Http::fake();
+        $two = str_replace('464012345', '464099999', self::PHOTO);
+        // Ang magkaparehong mensahe sa loob ng 10 segundo ay duplicate ("[Photo]" na ang iniimbak), kaya may pagitan.
+        foreach ([self::PHOTO . ', ' . $two, self::LIKE_BIG . ', ' . self::LIKE_SMALL, self::LIKE_BIG . ', ' . self::PHOTO, self::PHOTO] as $m) {
+            $this->send($m); // dalawang larawan, puro Like, Like at isang larawan, isang larawan (gaya ng dati)
+            $this->travel(11)->seconds();
+        }
+
+        [$many, $like, $mixed, $one] = BotcakeChat::orderBy('id')->get()->all();
+        $this->assertSame('[Photo]', $many->message);
+        $this->assertSame(self::PHOTO, $many->payload['image_url']);
+        $this->assertSame([self::PHOTO, $two], $many->payload['image_urls']);
+        $this->assertSame(['type' => 'image', 'url' => self::PHOTO], $many->payload['attachment']);
+
+        $this->assertSame('👍', $like->message);
+        $this->assertStringNotContainsString('fbcdn', json_encode($like->payload));
+
+        foreach ([$mixed, $one] as $c) {
+            $this->assertSame('[Photo]', $c->message);
+            $this->assertSame(self::PHOTO, $c->payload['image_url']);
+            $this->assertArrayNotHasKey('image_urls', $c->payload, 'isang link lang: walang image_urls');
+            $this->assertSame(['type' => 'image', 'url' => self::PHOTO], $c->payload['attachment']);
+        }
+    }
+
+    public function test_259_the_normalize_command_also_cleans_several_photos_and_stays_a_dry_run_by_default(): void
+    {
+        $two = str_replace('464012345', '464099999', self::PHOTO);
+        foreach ([self::PHOTO . ', ' . $two, self::LIKE_BIG . ', ' . self::LIKE_BY_ID, 'magkano?, ' . self::PHOTO] as $i => $m) {
+            DB::table('botcake_chats')->insert(['page_id' => '1001', 'page_name' => 'Page Uno', 'psid' => (string) (7000 + $i), 'name' => 'C', 'message' => $m,
+                'payload' => json_encode(['source' => 'default_reply']), 'received_at' => now()]);
+        }
+
+        $this->assertSame(0, Artisan::call('botcake:chats-normalize'));
+        $this->assertStringContainsString('like: 1, photo: 1, untouched: 1', Artisan::output());
+        $this->assertSame(3, BotcakeChat::where('message', 'like', '%fbcdn%')->count(), 'ang dry run ay walang binabago');
+
+        $this->assertSame(0, Artisan::call('botcake:chats-normalize', ['--apply' => true, '--expect' => 2]));
+        $this->assertSame(['[Photo]', '👍', 'magkano?, ' . self::PHOTO], BotcakeChat::orderBy('id')->pluck('message')->all());
+        $this->assertSame(self::PHOTO, BotcakeChat::where('message', '[Photo]')->sole()->payload['image_url']);
+    }
 }
