@@ -149,19 +149,41 @@
         $('preview').classList.remove('hidden');
         $('warning').textContent = b.warning || '';
         $('warning').classList.toggle('hidden', !b.warning);
-        $('preview-rows').replaceChildren(...b.pages.map(p => el('tr', {},
-            el('td', {}, p.page),
-            el('td', { class: 'text-right' + (p.error ? ' text-slate-400 line-through' : '') }, fmt(p.count)),
-            el('td', { class: p.error ? 'text-red-700' : '' }, p.error ? p.error + ' (left out)' : (p.flow_name || '') + ' #' + (p.flow_id || '')),
-            el('td', {}, p.error ? '' : el('button', { type: 'button', class: 'cb-btn cb-btn-sm', onclick: () => test(b.id, p.page) }, 'Send test')),
-        )));
-        $('total').textContent = fmt(b.total);
-        $('send').disabled = b.state !== 'draft' || b.total === 0 || !b.text.trim();
+        $('preview-rows').replaceChildren(...b.pages.map(p => p.count === null
+            ? el('tr', {}, el('td', {}, p.page), el('td', { class: 'text-right text-slate-400' }, counting.has(p.page) ? 'counting…' : '–'), el('td', {}), el('td', {}))
+            : el('tr', {},
+                el('td', {}, p.page),
+                el('td', { class: 'text-right' + (p.error ? ' text-slate-400 line-through' : '') }, fmt(p.count)),
+                el('td', { class: p.error ? 'text-red-700' : '' }, p.error ? p.error + ' (left out)' : (p.flow_name || '') + ' #' + (p.flow_id || '')),
+                el('td', {}, p.error ? '' : el('button', { type: 'button', class: 'cb-btn cb-btn-sm', onclick: () => test(b.id, p.page) }, 'Send test')),
+            )));
+        const left = b.pages.filter(p => p.count === null).length;
+        $('total').textContent = left ? 'counting ' + left + ' page' + (left === 1 ? '' : 's') + '…' : fmt(b.total);
+        $('send').disabled = b.state !== 'draft' || !b.counted || b.total === 0 || !b.text.trim();
+    };
+
+    // One count request per page (a big page can take ~30 s), at most 3 at a time; each number shows as it arrives.
+    const counting = new Set();
+    const countAll = async (b) => {
+        const todo = b.pages.filter(p => p.count === null).map(p => p.page);
+        todo.forEach(p => counting.add(p));
+        showPreview(b);
+        const worker = async () => {
+            while (todo.length) {
+                const page = todo.shift();
+                try {
+                    const r = await api('POST', '/' + b.id + '/count', { page });
+                    if (current && current.id === r.id) showPreview(r);
+                } catch (e) { notice(page + ': ' + e.message, true); }
+                finally { counting.delete(page); if (current) showPreview(current); }
+            }
+        };
+        await Promise.all([worker(), worker(), worker()]);
     };
 
     form.addEventListener('submit', async (ev) => {
         ev.preventDefault();
-        try { showPreview(await api('POST', '/preview', input())); notice('Preview saved as a draft. Nothing was sent.'); }
+        try { const b = await api('POST', '/preview', input()); notice('Draft saved. Counting each page; nothing is sent.'); await countAll(b); }
         catch (e) { notice(e.message, true); }
     });
 
@@ -202,14 +224,14 @@
             head.append(el('button', { class: 'cb-btn cb-btn-sm', onclick: () => { const c = prompt('Cap per page per hour', b.cap); if (c) control(b.id, 'cap', { cap: Number(c) }); } }, 'Change cap'));
             head.append(el('button', { class: 'cb-btn cb-btn-sm text-red-700', onclick: () => confirm('Stop this broadcast? The rows not sent yet are cancelled.') && control(b.id, 'stop') }, 'Stop'));
         }
-        if (b.state === 'draft') head.append(el('button', { class: 'cb-btn cb-btn-sm', onclick: () => { fill(b); showPreview(b); } }, 'Open draft'));
+        if (b.state === 'draft') head.append(el('button', { class: 'cb-btn cb-btn-sm', onclick: () => { fill(b); countAll(b); } }, 'Open draft'));
         const th = (t, right) => el('th', right ? { class: 'text-right' } : {}, t);
         const td = (v, cls = 'text-right') => el('td', { class: cls }, v);
-        const rows = p.progress.map(x => el('tr', {}, td(x.page, ''), td(x.error ? '–' : fmt(x.audience)), td(fmt(x.queued)), td(fmt(x.sent)), td(fmt(x.failed)), td(fmt(x.unknown)),
+        const rows = p.progress.map(x => el('tr', {}, td(x.page, ''), td(x.error ? '–' : fmt(x.audience)), td(x.error ? '–' : (b.queued_all ? fmt(x.matched) : fmt(x.matched) + '…')), td(fmt(x.queued)), td(fmt(x.sent)), td(fmt(x.failed)), td(fmt(x.unknown)),
             td(fmt(x.skipped + x.cancelled)), td(x.error ? 'Left out: ' + x.error : (x.paused ? 'Paused: ' + x.paused : (x.flow_name || '')), x.error || x.paused ? 'text-red-700' : 'text-slate-500')));
         return el('div', { class: 'space-y-2 border-t border-slate-100 pt-3 first:border-0 first:pt-0' }, head,
             el('p', { class: 'whitespace-pre-wrap rounded bg-slate-50 px-2 py-1 font-mono text-xs' }, b.text),
-            b.state === 'draft' ? el('span') : el('table', { class: 'cb-table' }, el('thead', {}, el('tr', {}, th('Page'), th('Audience', 1), th('Queued', 1), th('Sent', 1), th('Failed', 1), th('Unknown', 1), th('Skipped / cancelled', 1), th('Flow / paused'))), el('tbody', {}, ...rows)));
+            b.state === 'draft' ? el('span') : el('table', { class: 'cb-table' }, el('thead', {}, el('tr', {}, th('Page'), th('Previewed', 1), th('Matched now', 1), th('Queued', 1), th('Sent', 1), th('Failed', 1), th('Unknown', 1), th('Skipped / cancelled', 1), th('Flow / paused'))), el('tbody', {}, ...rows)));
     };
 
     const fill = (b) => {

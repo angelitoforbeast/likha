@@ -73,9 +73,17 @@ class BroadcastTest extends ChatblastTestCase
         return array_merge(['pages' => ['Page A'], 'orders' => 'any', 'phone' => 'any', 'text' => 'Sale today, 11.11!', 'flow' => '', 'cap' => 300], $over);
     }
 
+    /**
+     * What the page does: save the draft (no count), then ask the count of each page, one request per page. Returns the
+     * last answer (the summary with every page counted), or the draft's answer when it was refused.
+     */
     private function preview(array $over = [], ?int $id = null)
     {
-        return $this->postJson('/chatblast/broadcast/preview', $this->input($over) + ($id ? ['id' => $id] : []));
+        $r = $this->postJson('/chatblast/broadcast/preview', $this->input($over) + ($id ? ['id' => $id] : []));
+        if ($r->status() !== 200) return $r;
+        foreach ($r->json('pages') as $p) $r = $this->postJson('/chatblast/broadcast/' . $r->json('id') . '/count', ['page' => $p['page']])->assertOk();
+
+        return $r;
     }
 
     /** Preview, then start with the total the preview showed. */
@@ -116,7 +124,29 @@ class BroadcastTest extends ChatblastTestCase
         $this->psid(' page b ', null, 'b2', ['subscribed_at' => '2026-05-01 00:00:00']); // no page_id yet, same page by name: in
         $this->psid('Page B', '1002', 'b3', ['subscribed_at' => null]);              // no subscribed date: out
 
-        $r = $this->preview(['pages' => ['Page A', 'Page B'], 'orders' => 'without', 'subscribed_before' => '2026-08-01'])->assertOk()->json();
+        $in = $this->input(['pages' => ['Page A', 'Page B'], 'orders' => 'without', 'subscribed_before' => '2026-08-01']);
+        $draft = $this->postJson('/chatblast/broadcast/preview', $in)->assertOk()->json();
+        $this->assertSame(['Page A' => null, 'Page B' => null], array_column($draft['pages'], 'count', 'page'), 'saving the draft counts nothing');
+        $this->assertFalse($draft['counted']);
+
+        // One request per page; each answer has that page's number, and the total when all are in.
+        $a = $this->postJson('/chatblast/broadcast/' . $draft['id'] . '/count', ['page' => 'Page A'])->assertOk()->json();
+        $this->assertSame(['Page A' => 2, 'Page B' => null], array_column($a['pages'], 'count', 'page'));
+        $this->assertFalse($a['counted']);
+        $r = $this->postJson('/chatblast/broadcast/' . $draft['id'] . '/count', ['page' => 'Page B'])->assertOk()->json();
+        $this->assertTrue($r['counted']);
+
+        // A reload (same draft, same filters) keeps the cached counts and does not count again.
+        $queries = [];
+        DB::listen(function ($q) use (&$queries) { $queries[] = $q->sql; });
+        $again = $this->postJson('/chatblast/broadcast/preview', $in + ['id' => $draft['id']])->assertOk()->json();
+        $this->postJson('/chatblast/broadcast/' . $draft['id'] . '/count', ['page' => 'Page A'])->assertOk();
+        $this->assertSame([], array_values(array_filter($queries, fn ($s) => str_contains($s, 'botcake_psids'))));
+        $this->assertSame(['Page A' => 2, 'Page B' => 2], array_column($again['pages'], 'count', 'page'));
+        // Other filters clear them.
+        $other = $this->postJson('/chatblast/broadcast/preview', ['orders' => 'any'] + $in + ['id' => $draft['id']])->assertOk()->json();
+        $this->assertSame(['Page A' => null, 'Page B' => null], array_column($other['pages'], 'count', 'page'));
+        $r = $this->preview(['pages' => ['Page A', 'Page B'], 'orders' => 'without', 'subscribed_before' => '2026-08-01'], $draft['id'])->assertOk()->json();
 
         $counts = array_column($r['pages'], 'count', 'page');
         $this->assertSame(['Page A' => 2, 'Page B' => 2], $counts);
@@ -347,23 +377,68 @@ class BroadcastTest extends ChatblastTestCase
         $r = $this->preview()->assertOk()->json();
 
         $this->postJson('/chatblast/broadcast/' . $r['id'] . '/start', ['total' => 3])->assertOk();
-        $this->postJson('/chatblast/broadcast/' . $r['id'] . '/start', ['total' => 3])->assertStatus(422);
+        $this->postJson('/chatblast/broadcast/' . $r['id'] . '/start', ['total' => 3])->assertStatus(422)->assertJsonPath('error', 'This broadcast has already started.');
+        $this->postJson('/chatblast/broadcast/' . $r['id'] . '/count', ['page' => 'Page A'])->assertStatus(422); // no recount once started
         (new \App\Jobs\QueueBroadcast($r['id']))->handle(app(Broadcast::class)); // a re-run of the queue job
 
         $this->assertSame(3, $this->rows($r['id'])->count());
         $this->assertCount(9, $this->sends());
     }
 
-    public function test_s4_start_refuses_a_count_that_changed_since_the_preview(): void
+    public function test_s4_start_does_not_recount_and_the_queue_job_inserts_what_matches_at_queue_time(): void
     {
         $this->psid('Page A', '1001', 'a1');
         $r = $this->preview()->assertOk()->json();
-        $this->psid('Page A', '1001', 'a2');
+        $this->psid('Page A', '1001', 'a2'); // subscribed after the preview
 
-        $this->postJson('/chatblast/broadcast/' . $r['id'] . '/start', ['total' => 1])->assertStatus(422)->assertJsonPath('error', 'The count changed (now 2); check the preview and press Send again.');
+        $this->postJson('/chatblast/broadcast/' . $r['id'] . '/start', ['total' => 2])->assertStatus(422)
+            ->assertJsonPath('error', 'The total is 1 now; check the preview and press Send again.');
         $this->assertSame(0, BotcakeMessage::count());
-        $this->postJson('/chatblast/broadcast/' . $r['id'] . '/start', ['total' => 2])->assertOk();
+        $this->postJson('/chatblast/broadcast/' . $r['id'] . '/start', ['total' => 1])->assertOk();
+
         $this->assertSame(2, $this->rows($r['id'])->count());
+        $p = $this->getJson('/chatblast/broadcast/' . $r['id'] . '/progress')->json('progress.0');
+        $this->assertSame([1, 2], [$p['audience'], $p['matched']], 'previewed 1, matched 2 at queue time');
+    }
+
+    public function test_s4_start_needs_every_page_counted_for_the_current_filters(): void
+    {
+        $this->psid('Page A', '1001', 'a1');
+        $this->psid('Page B', '1002', 'b1');
+        $draft = $this->postJson('/chatblast/broadcast/preview', $this->input(['pages' => ['Page A', 'Page B']]))->assertOk()->json();
+        $this->postJson('/chatblast/broadcast/' . $draft['id'] . '/count', ['page' => 'Page A'])->assertOk();
+
+        $this->postJson('/chatblast/broadcast/' . $draft['id'] . '/start', ['total' => 1])->assertStatus(422)
+            ->assertJsonPath('error', 'Count every page first (missing: Page B).');
+        $this->postJson('/chatblast/broadcast/' . $draft['id'] . '/count', ['page' => 'Page Z'])->assertStatus(422);
+
+        // The filters stored on the row no longer match the hash of the counts (e.g. changed in another tab).
+        app(Broadcast::class)->mutate($draft['id'], fn ($d) => array_merge($d, ['filters' => array_merge($d['filters'], ['orders' => 'with'])]));
+        $this->postJson('/chatblast/broadcast/' . $draft['id'] . '/count', ['page' => 'Page B'])->assertOk();
+        $this->postJson('/chatblast/broadcast/' . $draft['id'] . '/start', ['total' => 2])->assertStatus(422)
+            ->assertJsonPath('error', 'The filters changed since the count; preview again.');
+        $this->assertSame(0, BotcakeMessage::count());
+    }
+
+    public function test_s4_a_start_request_with_three_pages_makes_no_count_query(): void
+    {
+        app(PageSettings::class)->set('Page C', 'botcake', 'page_id', '1003');
+        $this->page('Page C', '1003');
+        $this->flows['1003'] = $this->flows['1001'];
+        foreach (['Page A' => '1001', 'Page B' => '1002', 'Page C' => '1003'] as $page => $id) $this->psid($page, $id, 'p-' . $id);
+        $r = $this->preview(['pages' => ['Page A', 'Page B', 'Page C']])->assertOk()->json();
+        $this->assertSame(3, $r['total']);
+        Queue::fake([\App\Jobs\QueueBroadcast::class]);
+        $calls = count(Http::recorded()); // nothing may reach Botcake either
+        $queries = [];
+        DB::listen(function ($q) use (&$queries) { $queries[] = $q->sql; });
+
+        $this->postJson('/chatblast/broadcast/' . $r['id'] . '/start', ['total' => 3])->assertOk()->assertJsonPath('state', 'sending');
+
+        $this->assertSame([], array_values(array_filter($queries, fn ($s) => str_contains($s, 'botcake_psids') || str_contains($s, 'macro_output'))));
+        Queue::assertPushed(\App\Jobs\QueueBroadcast::class, 1);
+        $this->assertSame(0, BotcakeMessage::count(), 'the rows are inserted by the job');
+        $this->assertCount($calls, Http::recorded());
     }
 
     public function test_s4_3_twenty_failures_in_a_row_pause_page_a_and_page_b_goes_on(): void

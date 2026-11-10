@@ -70,6 +70,15 @@ class ChatblastBroadcastController extends Controller
         return $this->result($this->broadcast->preview($id, $request->only(['pages', 'orders', 'phone', 'text', 'flow', 'cap', 'name', ...Broadcast::DATES]), Auth::id()));
     }
 
+    /** The count of one page of the draft (the browser asks page by page, at most 3 at a time). */
+    public function count(Request $request, int $id)
+    {
+        $this->checkAccess();
+        $page = $request->input('page');
+
+        return $this->result($this->broadcast->countPage($id, is_string($page) ? $page : '', $request->boolean('fresh')));
+    }
+
     public function start(Request $request, int $id)
     {
         $this->checkAccess();

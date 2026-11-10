@@ -13,7 +13,7 @@ New:
 - `app/Http/Controllers/ChatblastBroadcastController.php`, `resources/views/chatblast/broadcast.blade.php`, routes under
   `/chatblast/broadcast` (same group, `auth` + `allowed_ip`, same NavAccess check, chatblast throttles), nav item "Broadcast".
 - `database/migrations/2026_11_19_100000_add_broadcast_to_chatblast_campaigns.php`.
-- `tests/Feature/Chatblast/BroadcastTest.php` (32 tests).
+- `tests/Feature/Chatblast/BroadcastTest.php` (34 tests).
 - `docs/plans/263-broadcast.md`.
 
 Changed:
@@ -82,18 +82,25 @@ CO-ROUTINE u
 SCAN u
 ```
 
-**Not done: EXPLAIN on production MySQL.** This session could not reach the server (access was refused, as it
-should be for a builder). To confirm before use, run `EXPLAIN` on the statement above with a real page id and name:
-expected `ref` on `botcake_psids_page_id_psid_index` for both branches and `ref` on `macro_output_botcake_psid_idx`
-for the subquery. The cost of the second branch is the number of rows with `page_id IS NULL` (it scans them all once
-per page); if that number is large on production, run the page_id backfill first.
+Production (checked by the reviewer, not from this session, which has no server access): botcake_psids 2,448,021 rows,
+0 with `page_id IS NULL`; EXPLAIN shows `ref` on `botcake_psids_page_id_psid_index` and on `macro_output_botcake_psid_idx`
+as expected. One big page (238,852 rows, "subscribed before 2026-08-01, no order") took 27.6 s, which is why a web
+request now counts one page at most (below).
 
 The queueing reads the same branches by keyset on the same index (`… AND b.psid > :last ORDER BY b.psid LIMIT 1000`).
 
 ## Queueing in batches
 
-`Start` re-counts; the confirmed total must match (else the new preview is saved and the start refused). Draft →
-sending happens in one locked step, so a second Start does nothing. `QueueBroadcast` (chatblast queue) reads 1,000 PSIDs
+**No web request counts more than one page** (fix after the production timing: one big page, 238,852 rows, took
+27.6 s). "Preview count" saves the draft without counting; the browser then asks `POST /chatblast/broadcast/{id}/count`
+once per page, at most 3 at a time, and shows each number as it arrives and the total when all are in. Each page's
+count, flow and reason are cached on the broadcast row with the hash of the filters and flow name, so a reload or
+reopening the draft does not count again; other filters clear the counts.
+
+`Start` does not count: it checks that the filters hash still matches, that every chosen page has a cached count for
+it, and that the confirmed total equals the total of those counts, then queues. Draft → sending happens in one locked
+step, so a second Start does nothing. What is inserted is what matches at queue time; progress shows "Previewed" (the
+cached count) next to "Matched now" (the rows the job inserted). `QueueBroadcast` (chatblast queue) reads 1,000 PSIDs
 at a time per page and branch and `insertOrIgnore`s them as `waiting`; the cursor is saved after each batch; after 120 s
 it dispatches itself again. No `INSERT … SELECT`, no CTAS, nothing in the web request.
 
@@ -114,9 +121,10 @@ is never re-sent.
 
 ## Tests
 
-`tests/Feature/Chatblast/BroadcastTest.php`: 32 tests, 170 assertions, all pass. Every case of S1–S4 has a test
+`tests/Feature/Chatblast/BroadcastTest.php`: 34 tests, all pass. Every case of S1–S4 has a test
 (S1.1–S1.5, S2.1–S2.3, S3.1–S3.2, S4.1–S4.5), plus: other filters, removed flows, text rules, text exactly as written,
-count changed since preview, restricted page, stop while a row waits in the job, pause/resume, unknown not retried,
+the per-page count and its cache (S1.1), Start without a recount inserting what matches at queue time, Start refused
+when a page is not counted or the filters hash changed, a Start with 3 pages making no count query, restricted page, stop while a row waits in the job, pause/resume, unknown not retried,
 chatblast pause, a 1,005-row audience queued in batches with only 20 handed out, isolation from sequences and the
 daily cap, access, page render.
 

@@ -271,6 +271,7 @@ Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('chatblast')->name('cha
         Route::get('/data', [ChatblastBroadcastController::class, 'data'])->name('data');
         Route::post('/flows', [ChatblastBroadcastController::class, 'flows'])->middleware('throttle:30,1,chatblast-broadcast-flows')->name('flows');
         Route::post('/preview', [ChatblastBroadcastController::class, 'preview'])->middleware('throttle:60,1,chatblast-broadcast-preview')->name('preview');
+        Route::post('/{id}/count', [ChatblastBroadcastController::class, 'count'])->whereNumber('id')->middleware('throttle:200,1,chatblast-broadcast-count')->name('count');
         Route::get('/{id}/progress', [ChatblastBroadcastController::class, 'progress'])->whereNumber('id')->name('progress');
         Route::post('/{id}/test', [ChatblastBroadcastController::class, 'test'])->whereNumber('id')->middleware('throttle:20,1,chatblast-test')->name('test');
         Route::post('/{id}/start', [ChatblastBroadcastController::class, 'start'])->whereNumber('id')->middleware('throttle:10,1,chatblast-send-filtered')->name('start');

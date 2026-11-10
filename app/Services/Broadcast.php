@@ -247,9 +247,18 @@ class Broadcast
 
     // ---- Draft, preview, start ----
 
+    /** The hash of what a page's count and flow depend on: the filters and the flow name. */
+    public static function hash(array $filters, ?string $flow): string
+    {
+        ksort($filters);
+
+        return sha1((string) json_encode([$filters, $flow], JSON_UNESCAPED_UNICODE));
+    }
+
     /**
-     * Save the draft (new, or the same draft) and return the preview: per page the count and the flow (or why it is
-     * left out), the total of the pages that will be sent, and the no-filter warning.
+     * Save the draft (new, or the same draft). No count here: a web request counts one page at most (countPage, asked
+     * per page by the browser). A page keeps its cached count when the filters and flow are the same as when it was
+     * counted (a reload does not recount); otherwise its count is cleared.
      */
     public function preview(?int $id, array $input, ?int $userId): array|string
     {
@@ -259,8 +268,14 @@ class Broadcast
         if ($id !== null && !$b) return 'No such broadcast.';
         if ($b && $b->state() !== self::DRAFT) return 'This broadcast has started; it cannot be changed.';
 
-        $pages = $this->look($v['pages'], $v['filters'], $v['flow']);
-        $data = ['filters' => $v['filters'], 'flow' => $v['flow'], 'cap' => $v['cap'], 'state' => self::DRAFT, 'pages' => $pages, 'previewed_at' => now()->format('Y-m-d H:i:s')];
+        $hash = self::hash($v['filters'], $v['flow']);
+        $old = $b ? (array) ($b->broadcast['pages'] ?? []) : [];
+        $pages = [];
+        foreach ($v['pages'] as $page) {
+            $prev = $old[$page] ?? null;
+            $pages[$page] = is_array($prev) && ($prev['hash'] ?? null) === $hash && ($prev['count'] ?? null) !== null ? $prev : $this->blankPage($page);
+        }
+        $data = ['filters' => $v['filters'], 'flow' => $v['flow'], 'cap' => $v['cap'], 'state' => self::DRAFT, 'hash' => $hash, 'pages' => $pages, 'previewed_at' => now()->format('Y-m-d H:i:s')];
         if (!$b) {
             $b = ChatblastBroadcast::create(['kind' => 'broadcast-' . Str::lower(Str::random(16)), 'name' => $v['name'], 'pages' => $v['pages'], 'days' => [[$v['text']]], 'broadcast' => $data + ['created_by' => $userId]]);
             $b->forceFill(['kind' => 'broadcast-' . $b->id])->save();
@@ -271,48 +286,79 @@ class Broadcast
         return $this->summary($b->fresh());
     }
 
-    /** Per page: page id, count, flow id and name, or the reason it is left out. */
-    private function look(array $pages, array $filters, ?string $flow): array
+    private function blankPage(string $page): array
     {
-        $out = [];
-        $ready = app(ChatblastReady::class);
-        foreach ($pages as $page) {
-            $f = $this->resolveFlow($page, $flow);
-            $error = $f['error'] ?? $ready->reason($page);
-            $out[$page] = [
-                'page_id' => trim((string) $this->settings->get($page, 'botcake', 'page_id')),
-                'count' => $this->count($page, $filters),
-                'flow_id' => $f['id'], 'flow_name' => $f['name'], 'error' => $error, 'paused' => null,
-            ];
-        }
-
-        return $out;
+        return ['page_id' => trim((string) $this->settings->get($page, 'botcake', 'page_id')), 'count' => null, 'flow_id' => null, 'flow_name' => null,
+            'error' => null, 'paused' => null, 'hash' => null];
     }
 
-    /** The broadcast for the page: definition, per-page preview and total, state. */
+    /**
+     * The count of ONE page of a draft (the only place that counts), with its flow (or why it is left out), cached on
+     * the broadcast row with the filters hash. $fresh: count again even when cached. Returns the summary and the page.
+     */
+    public function countPage(int $id, string $page, bool $fresh = false): array|string
+    {
+        $b = ChatblastBroadcast::find($id);
+        if (!$b) return 'No such broadcast.';
+        if ($b->state() !== self::DRAFT) return 'This broadcast has started; it cannot be counted again.';
+        $d = (array) $b->broadcast;
+        [$name, $p] = $this->pageEntry($d, $page);
+        if ($name === null) return 'This page is not in the broadcast.';
+        $hash = (string) ($d['hash'] ?? '');
+        if (!$fresh && ($p['count'] ?? null) !== null && ($p['hash'] ?? null) === $hash) return $this->summary($b) + ['page' => $name];
+
+        $f = $this->resolveFlow($name, $d['flow'] ?? null);
+        $entry = array_merge($this->blankPage($name), [
+            'count' => $this->count($name, (array) ($d['filters'] ?? [])),
+            'flow_id' => $f['id'], 'flow_name' => $f['name'], 'error' => $f['error'] ?? app(ChatblastReady::class)->reason($name), 'hash' => $hash,
+        ]);
+        $this->mutate($id, function (array $x) use ($name, $hash, $entry) {
+            if (($x['state'] ?? null) === self::DRAFT && ($x['hash'] ?? null) === $hash && isset($x['pages'][$name])) $x['pages'][$name] = $entry;
+            return $x;
+        });
+
+        return $this->summary(ChatblastBroadcast::findOrFail($id)) + ['page' => $name];
+    }
+
+    /** [stored page name, entry] of a page of the broadcast by page key, or [null, null]. */
+    private function pageEntry(array $d, string $page): array
+    {
+        $key = $this->settings->pageKey($page);
+        foreach ((array) ($d['pages'] ?? []) as $name => $p) {
+            if ($this->settings->pageKey((string) $name) === $key) return [(string) $name, (array) $p];
+        }
+
+        return [null, null];
+    }
+
+    /** The broadcast for the page: definition, per-page cached count and total, state. */
     public function summary(ChatblastBroadcast $b): array
     {
         $d = (array) $b->broadcast;
         $pages = [];
         $total = 0;
+        $counted = true;
         foreach ((array) ($d['pages'] ?? []) as $page => $p) {
-            $pages[] = ['page' => $page, 'count' => (int) $p['count'], 'flow_id' => $p['flow_id'], 'flow_name' => $p['flow_name'],
+            $count = $p['count'] ?? null;
+            $pages[] = ['page' => $page, 'count' => $count === null ? null : (int) $count, 'flow_id' => $p['flow_id'], 'flow_name' => $p['flow_name'],
                 'error' => $p['error'], 'paused' => $p['paused'] ?? null, 'audience' => $p['audience'] ?? null];
-            if ($p['error'] === null) $total += (int) $p['count'];
+            if ($count === null) $counted = false;
+            elseif ($p['error'] === null) $total += (int) $count;
         }
 
         return [
             'id' => $b->id, 'name' => $b->name, 'text' => $b->text(), 'state' => $b->state(), 'filters' => $d['filters'] ?? [], 'flow' => $d['flow'] ?? null,
-            'cap' => (int) ($d['cap'] ?? self::DEFAULT_CAP), 'pages' => $pages, 'total' => $total,
+            'cap' => (int) ($d['cap'] ?? self::DEFAULT_CAP), 'pages' => $pages, 'total' => $total, 'counted' => $counted,
             'warning' => self::noFilter((array) ($d['filters'] ?? [])) ? self::ALL_WARNING : null,
             'queued_all' => (bool) ($d['queued_all'] ?? false), 'started_at' => $d['started_at'] ?? null, 'stopped_at' => $d['stopped_at'] ?? null,
         ];
     }
 
     /**
-     * Start: the draft is counted again, and the total must be the one the owner confirmed (else the new preview is
-     * saved and the start refused). Draft → sending in one locked step, so a second start does nothing. The rows are
-     * queued by QueueBroadcast, never in the request. @return array|string the summary, or the error
+     * Start: no count in the request. Every chosen page must have a cached count for the current filters hash, and the
+     * total the owner confirmed must be the total of those counts. Draft → sending in one locked step, so a second start
+     * does nothing. QueueBroadcast inserts what matches at queue time (progress shows it next to the previewed count).
+     * @return array|string the summary, or the error
      */
     public function start(int $id, ?int $confirmTotal, ?int $userId): array|string
     {
@@ -322,24 +368,24 @@ class Broadcast
         $d = (array) $b->broadcast;
         $v = $this->validate(['pages' => $b->pages, 'text' => $b->text(), 'flow' => $d['flow'] ?? null, 'cap' => $d['cap'] ?? self::DEFAULT_CAP, 'name' => $b->name] + (array) ($d['filters'] ?? []), true);
         if (is_string($v)) return $v;
+        $hash = self::hash($v['filters'], $v['flow']);
+        if (($d['hash'] ?? null) !== $hash) return 'The filters changed since the count; preview again.';
 
-        $pages = $this->look($v['pages'], $v['filters'], $v['flow']);
-        $total = array_sum(array_map(fn ($p) => $p['error'] === null ? $p['count'] : 0, $pages));
-        if ($total === 0) return 'Nothing to send: no PSID on the pages that can be sent.';
-        if ($confirmTotal === null || $confirmTotal !== $total) {
-            $this->mutate($id, function (array $d) use ($pages) {
-                if (($d['state'] ?? self::DRAFT) === self::DRAFT) $d['pages'] = $pages;
-                return $d;
-            });
-            return 'The count changed (now ' . number_format($total) . '); check the preview and press Send again.';
+        $total = 0;
+        foreach ($v['pages'] as $page) {
+            [, $p] = $this->pageEntry($d, $page);
+            if ($p === null || ($p['count'] ?? null) === null || ($p['hash'] ?? null) !== $hash) return 'Count every page first (missing: ' . $page . ').';
+            if ($p['error'] === null) $total += (int) $p['count'];
         }
+        if ($total === 0) return 'Nothing to send: no PSID on the pages that can be sent.';
+        if ($confirmTotal === null || $confirmTotal !== $total) return 'The total is ' . number_format($total) . ' now; check the preview and press Send again.';
 
         $started = false;
-        $this->mutate($id, function (array $d) use ($pages, $userId, &$started) {
+        $this->mutate($id, function (array $d) use ($userId, &$started) {
             if (($d['state'] ?? self::DRAFT) !== self::DRAFT) return $d;
-            $pages = array_map(fn (array $p) => $p + ['audience' => $p['count']], $pages);
+            $d['pages'] = array_map(fn (array $p) => $p + ['audience' => $p['count']], (array) $d['pages']);
             $started = true;
-            return array_merge($d, ['state' => self::SENDING, 'pages' => $pages, 'cursor' => ['i' => 0, 'branch' => 0, 'psid' => ''], 'queued_all' => false,
+            return array_merge($d, ['state' => self::SENDING, 'cursor' => ['i' => 0, 'branch' => 0, 'psid' => ''], 'queued_all' => false,
                 'started_at' => now()->format('Y-m-d H:i:s'), 'started_by' => $userId]);
         });
         if (!$started) return 'This broadcast has already started.';
@@ -557,6 +603,7 @@ class Broadcast
         }
         if ($p === null) return 'This page is not in the broadcast.';
         if (trim($b->text()) === '') return 'Write the text first.';
+        if (($p['count'] ?? null) === null) return 'Count this page first (Preview count).';
         if ($p['flow_id'] === null || $p['flow_id'] === '') return $p['error'] ?? 'This page has no flow.';
         $psid = trim((string) $this->settings->get($page, 'botcake', 'test_psid'));
         if ($psid === '') return 'This page has no Test PSID. Pick one under "Test PSID" on /chatblast first.';
@@ -587,7 +634,8 @@ class Broadcast
             $s = $by[mb_strtolower((string) $page)] ?? [];
             $pages[] = [
                 'page' => $page, 'flow_name' => $p['flow_name'], 'error' => $p['error'], 'paused' => $p['paused'] ?? null,
-                'audience' => $p['audience'] ?? $p['count'], 'rows' => array_sum($s),
+                // audience: the previewed count; matched: the rows the queue job inserted (what matched at queue time).
+                'audience' => $p['audience'] ?? $p['count'], 'matched' => array_sum($s), 'rows' => array_sum($s),
                 'queued' => $sum($s, [self::WAITING, 'queued', 'sending']), 'sent' => $s['sent'] ?? 0,
                 'failed' => $sum($s, ['failed', 'field_mismatch']), 'unknown' => $s['unknown'] ?? 0,
                 'skipped' => $sum($s, ['skipped', 'no_config']), 'cancelled' => $s[self::CANCELLED] ?? 0,
