@@ -824,13 +824,46 @@ class AdsManagerCampaignsController extends Controller
             ? 'COALESCE(day, DATE(reporting_starts))'
             : 'COALESCE(`day`, DATE(`reporting_starts`))';
 
-        // Subqueries (GLOBAL, hindi nakaka-depende sa page filter — reused
-        // sa main data() endpoint. Mas mabuti i-run sila once per batch.)
-        $latestCampaignDay = DB::table('ads_manager_reports')
+        // Spec 261: page filter = page_name IN (stored names), hindi LOWER(TRIM(page_name)) = LOWER(TRIM(?)).
+        // Ang stored names ay hinahanap muna (isang maliit na query, isang row kada page name), tapos
+        // tinutugma sa PHP sa parehong trim + lower na tuntunin. Kaya nagagamit ang ads_report_page_day_idx
+        // (page_name, day) at pareho pa rin ang tumatama, kasama ang iba ang case o may space.
+        // Ang windows query (end-6 .. end) ay gumagamit din ng mga pangalang ito, kaya kasama ang end-6.
+        $nameDates = array_column($pageList, 'start');
+        if ($includeWindows) $nameDates[] = (new \DateTime($endDate))->modify('-6 days')->format('Y-m-d');
+        $resolved = $this->storedPageNames(array_column($pageList, 'name'), self::earliestDay($nameDates));
+
+        // Isang grupo kada page na may tumama: (page_name IN (...) AND day BETWEEN start AND end).
+        $groups = [];
+        foreach ($pageList as $i => $p) {
+            if (!empty($resolved[$i])) $groups[] = ['names' => $resolved[$i], 'start' => $p['start']];
+        }
+        $pageFilter = function ($q) use ($groups, $endDate) {
+            $q->where(function ($w) use ($groups, $endDate) {
+                foreach ($groups as $g) {
+                    $w->orWhere(function ($qq) use ($g, $endDate) {
+                        $qq->whereIn('page_name', $g['names'])
+                           ->whereBetween('day', [$g['start'], $endDate]);
+                    });
+                }
+            });
+        };
+
+        // Latest on/off status: para lang sa mga campaign at ad set na nasa resulta (hindi GROUP BY sa
+        // buong table). Pareho ang tuntunin: ang pinakahuling COALESCE(day, reporting_starts) ng entity
+        // sa BUONG table, active kung may row na active sa araw na iyon. Bawat entity sa resulta ay may
+        // row na day >= sa pinakamaagang start, kaya ang mga row na mas maaga (day < start) ay hindi
+        // kailanman ang pinakahuling araw: ligtas silang laktawan.
+        $ids = empty($groups)
+            ? ['campaign_id' => [], 'ad_set_id' => []]
+            : self::idsIn(DB::table('ads_manager_reports')->where($pageFilter), ['campaign_id', 'ad_set_id']);
+        $statusSince = self::earliestDay(array_column($groups, 'start'));
+
+        $latestCampaignDay = self::onlyLatestCandidates(DB::table('ads_manager_reports'), 'campaign_id', $ids['campaign_id'], $statusSince)
             ->selectRaw("campaign_id, MAX($dayExpr) AS latest_day")
             ->groupBy('campaign_id');
 
-        $campaignLatestStatus = DB::table('ads_manager_reports as a')
+        $campaignLatestStatus = self::onlyLatestCandidates(DB::table('ads_manager_reports as a'), 'campaign_id', $ids['campaign_id'], $statusSince, 'a')
             ->joinSub($latestCampaignDay, 'lcd', function ($j) use ($dayExpr) {
                 $j->on('a.campaign_id', '=', 'lcd.campaign_id')
                   ->whereRaw("COALESCE(a.day, DATE(a.reporting_starts)) = lcd.latest_day");
@@ -838,11 +871,11 @@ class AdsManagerCampaignsController extends Controller
             ->selectRaw("a.campaign_id, MAX(CASE WHEN LOWER(COALESCE(a.campaign_delivery,'')) LIKE 'active%' THEN 1 ELSE 0 END) AS is_on_latest")
             ->groupBy('a.campaign_id');
 
-        $latestAdSetDay = DB::table('ads_manager_reports')
+        $latestAdSetDay = self::onlyLatestCandidates(DB::table('ads_manager_reports'), 'ad_set_id', $ids['ad_set_id'], $statusSince)
             ->selectRaw("ad_set_id, MAX($dayExpr) AS latest_day")
             ->groupBy('ad_set_id');
 
-        $adSetLatestStatus = DB::table('ads_manager_reports as a')
+        $adSetLatestStatus = self::onlyLatestCandidates(DB::table('ads_manager_reports as a'), 'ad_set_id', $ids['ad_set_id'], $statusSince, 'a')
             ->joinSub($latestAdSetDay, 'lad', function ($j) {
                 $j->on('a.ad_set_id', '=', 'lad.ad_set_id')
                   ->whereRaw("COALESCE(a.day, DATE(a.reporting_starts)) = lad.latest_day");
@@ -871,9 +904,8 @@ class AdsManagerCampaignsController extends Controller
             ->whereRaw('1=0');
 
         // ── Main aggregation: per (page, campaign) for all requested pages ──
-        // Using orWhere groups for per-page date filtering. MySQL handles this
-        // with index_merge if (page_name, day) index exists; otherwise still
-        // faster than 40+ separate roundtrips.
+        // Using orWhere groups for per-page date filtering: page_name IN + day
+        // range per page, a range on ads_report_page_day_idx (spec 261).
         $query = DB::table('ads_manager_reports')
             ->leftJoinSub($campaignLatestStatus, 'ls', function ($j) {
                 $j->on('ads_manager_reports.campaign_id', '=', 'ls.campaign_id');
@@ -887,14 +919,7 @@ class AdsManagerCampaignsController extends Controller
             ->leftJoinSub($adSetLatestStatus, 'asls', function ($j) {
                 $j->on('ads_manager_reports.ad_set_id', '=', 'asls.ad_set_id');
             })
-            ->where(function ($q) use ($pageList, $endDate) {
-                foreach ($pageList as $p) {
-                    $q->orWhere(function ($qq) use ($p, $endDate) {
-                        $qq->whereRaw('LOWER(TRIM(page_name)) = LOWER(TRIM(?))', [$p['name']])
-                           ->whereBetween('day', [$p['start'], $endDate]);
-                    });
-                }
-            })
+            ->where($pageFilter)
             ->selectRaw('
                 ads_manager_reports.page_name,
                 ads_manager_reports.campaign_id,
@@ -926,27 +951,27 @@ class AdsManagerCampaignsController extends Controller
         if ($onlyWithSpend) $query->havingRaw('COALESCE(SUM(amount_spent_php),0) > 0');
 
         // Default sort: active first, then by spend desc.
-        $rawRows = $query->orderByDesc('is_on')
+        // Walang page na tumama: walang row (ang walang laman na OR ay tatama sa lahat).
+        $rawRows = empty($groups) ? collect() : $query->orderByDesc('is_on')
                          ->orderBy('campaign_name', 'asc')
                          ->orderByDesc('spend')
                          ->get();
 
         // ── Windowed CPPs (today / 3d / 7d) — batched query ──
-        // Reuses the same per-page WHERE pattern. Trailing 7-day window ending
-        // sa end_date. Skipped if !$includeWindows.
+        // Same page names (all requested pages, resolved to stored names).
+        // Trailing 7-day window ending sa end_date. Skipped if !$includeWindows.
         $windowMap = []; // [page_name][campaign_id] => [cpp_today, cpp_3d, cpp_7d]
-        if ($includeWindows) {
+        $windowNames = array_values(array_unique(array_merge([], ...array_values($resolved))));
+        if ($includeWindows && !empty($windowNames)) {
             $endObj    = new \DateTime($endDate);
             $endStr    = $endObj->format('Y-m-d');
             $endMinus2 = (clone $endObj)->modify('-2 days')->format('Y-m-d');
             $endMinus6 = (clone $endObj)->modify('-6 days')->format('Y-m-d');
 
             $winQuery = DB::table('ads_manager_reports')
-                ->where(function ($q) use ($pageList, $endMinus6, $endStr) {
+                ->where(function ($q) use ($windowNames, $endMinus6, $endStr) {
                     // For windowed, all pages share same 7-day window (end-6 .. end).
-                    // Page filter still per-page (via OR).
-                    $pageNames = array_column($pageList, 'name');
-                    $q->whereRaw('LOWER(TRIM(page_name)) IN (' . implode(',', array_fill(0, count($pageNames), 'LOWER(TRIM(?))')) . ')', $pageNames)
+                    $q->whereIn('page_name', $windowNames)
                       ->whereBetween('day', [$endMinus6, $endStr]);
                 })
                 ->selectRaw("
@@ -1171,14 +1196,19 @@ class AdsManagerCampaignsController extends Controller
         // Rule: on the latest day per entity, Active if ANY row is "active%".
         // --------------------------------------------------------------------
 
+        // Spec 261: the status subqueries cover only the campaigns / ad sets in the
+        // filtered rows ($ids), and skip rows dated before the start date (never
+        // anyone's latest day, since every filtered row is on or after it).
+        $statusSince = self::earliestDay($start ? [$start] : []);
+
         // Latest day per campaign
-        $latestCampaignDay = DB::table('ads_manager_reports')
+        $latestCampaignDay = fn (array $ids) => self::onlyLatestCandidates(DB::table('ads_manager_reports'), 'campaign_id', $ids, $statusSince)
             ->selectRaw("campaign_id, MAX($dayExpr) AS latest_day")
             ->groupBy('campaign_id');
 
         // Campaign status on latest day (1 row per campaign_id)
-        $campaignLatestStatus = DB::table(DB::raw('ads_manager_reports a'))
-            ->joinSub($latestCampaignDay, 't', function ($j) use ($dayExprA) {
+        $campaignLatestStatus = fn (array $ids) => self::onlyLatestCandidates(DB::table(DB::raw('ads_manager_reports a')), 'campaign_id', $ids, $statusSince, 'a')
+            ->joinSub($latestCampaignDay($ids), 't', function ($j) use ($dayExprA) {
                 $j->on('a.campaign_id', '=', 't.campaign_id')
                   ->whereRaw("$dayExprA = t.latest_day");
             })
@@ -1307,13 +1337,13 @@ class AdsManagerCampaignsController extends Controller
         $adFreshStart       = $buildFreshStart('ad_id',       'ad_set_delivery');
 
         // Latest day per ad set
-        $latestAdSetDay = DB::table('ads_manager_reports')
+        $latestAdSetDay = fn (array $ids) => self::onlyLatestCandidates(DB::table('ads_manager_reports'), 'ad_set_id', $ids, $statusSince)
             ->selectRaw("ad_set_id, MAX($dayExpr) AS latest_day")
             ->groupBy('ad_set_id');
 
         // Ad set status on latest day (1 row per ad_set_id)
-        $adSetLatestStatus = DB::table(DB::raw('ads_manager_reports a'))
-            ->joinSub($latestAdSetDay, 't', function ($j) use ($dayExprA) {
+        $adSetLatestStatus = fn (array $ids) => self::onlyLatestCandidates(DB::table(DB::raw('ads_manager_reports a')), 'ad_set_id', $ids, $statusSince, 'a')
+            ->joinSub($latestAdSetDay($ids), 't', function ($j) use ($dayExprA) {
                 $j->on('a.ad_set_id', '=', 't.ad_set_id')
                   ->whereRaw("$dayExprA = t.latest_day");
             })
@@ -1330,9 +1360,13 @@ class AdsManagerCampaignsController extends Controller
         if ($start) $base->whereRaw("$dayExpr >= ?", [$start]);
         if ($end)   $base->whereRaw("$dayExpr <= ?", [$end]);
 
-        // Page filter (trim + case-insensitive)
+        // Page filter (trim + case-insensitive). Spec 261: resolved to the stored
+        // names first, then page_name IN (...) so the page index is used. No date
+        // bound on the lookup: the range here is COALESCE(day, reporting_starts).
+        $storedPages = null;
         if ($pageName && $pageName !== 'all') {
-            $base->whereRaw('LOWER(TRIM(page_name)) = LOWER(TRIM(?))', [$pageName]);
+            $storedPages = $this->storedPageNames([(string) $pageName], null)[0];
+            $base->whereIn('page_name', $storedPages);
         }
 
         // Item filter — substring match (case-insensitive) to tolerate
@@ -1381,9 +1415,11 @@ class AdsManagerCampaignsController extends Controller
         // =========================
         if ($level === 'campaigns') {
             if ($campaignId) $base->where('campaign_id', $campaignId);
+            // Spec 261: ang mga campaign at ad set na nasa filtered rows lang ang kinukuwentahan ng status.
+            $statusIds = self::idsIn($base, ['campaign_id', 'ad_set_id']);
 
             $query = (clone $base)
-                ->leftJoinSub($campaignLatestStatus, 'ls', function ($j) {
+                ->leftJoinSub($campaignLatestStatus($statusIds['campaign_id']), 'ls', function ($j) {
                     $j->on('ads_manager_reports.campaign_id', '=', 'ls.campaign_id');
                 })
                 ->leftJoinSub($campaignStartedDates, 'sd', function ($j) {
@@ -1395,7 +1431,7 @@ class AdsManagerCampaignsController extends Controller
                 // Join the adset latest-status snapshot so we can count distinct
                 // ad_set_ids per campaign whose latest delivery is ACTIVE.
                 // Powers the "Inside" column (active adsets per campaign).
-                ->leftJoinSub($adSetLatestStatus, 'asls', function ($j) {
+                ->leftJoinSub($adSetLatestStatus($statusIds['ad_set_id']), 'asls', function ($j) {
                     $j->on('ads_manager_reports.ad_set_id', '=', 'asls.ad_set_id');
                 })
                 ->selectRaw('
@@ -1481,9 +1517,10 @@ class AdsManagerCampaignsController extends Controller
         // =========================
         } elseif ($level === 'adsets') {
             if (empty($campaignIds) && $campaignId) $base->where('campaign_id', $campaignId);
+            $statusIds = self::idsIn($base, ['ad_set_id']);
 
             $query = (clone $base)
-                ->leftJoinSub($adSetLatestStatus, 'ls', function ($j) {
+                ->leftJoinSub($adSetLatestStatus($statusIds['ad_set_id']), 'ls', function ($j) {
                     $j->on('ads_manager_reports.ad_set_id', '=', 'ls.ad_set_id');
                 })
                 ->leftJoinSub($adSetStartedDates, 'sd', function ($j) {
@@ -1581,10 +1618,11 @@ class AdsManagerCampaignsController extends Controller
         } else {
             // Naka-qualify: ang ls subquery ay may sariling ad_set_id (ambiguous kung wala, HTTP 500).
             if (empty($adSetIds) && $adSetId) $base->where('ads_manager_reports.ad_set_id', $adSetId);
+            $statusIds = self::idsIn($base, ['ad_set_id']);
 
             // Ads inherit status from latest-day Ad Set status
             $query = (clone $base)
-                ->leftJoinSub($adSetLatestStatus, 'ls', function ($j) {
+                ->leftJoinSub($adSetLatestStatus($statusIds['ad_set_id']), 'ls', function ($j) {
                     $j->on('ads_manager_reports.ad_set_id', '=', 'ls.ad_set_id');
                 })
                 ->leftJoinSub($adStartedDates, 'sd', function ($j) {
@@ -1710,8 +1748,8 @@ class AdsManagerCampaignsController extends Controller
             $winQuery = DB::table('ads_manager_reports')
                 ->whereRaw("$dayExpr BETWEEN ? AND ?", [$endMinus6, $endStr]);
 
-            if ($pageName && $pageName !== 'all') {
-                $winQuery->whereRaw('LOWER(TRIM(page_name)) = LOWER(TRIM(?))', [$pageName]);
+            if ($storedPages !== null) {
+                $winQuery->whereIn('page_name', $storedPages);
             }
             if (is_string($itemName) && trim($itemName) !== '') {
                 $likeItem = '%'.mb_strtolower(trim($itemName)).'%';
@@ -2227,6 +2265,85 @@ class AdsManagerCampaignsController extends Controller
      * video numbers (no backfill), and counting their impressions would make every rate that spans them look low.
      * A divisor of 0 or a null numerator gives NULL, shown as "—".
      */
+    /**
+     * Spec 261: the stored page_name values per requested name, by the old rule
+     * LOWER(TRIM(page_name)) = LOWER(TRIM(?)) (TRIM = spaces only), matched in PHP.
+     * One small query: one row per stored page name (loose index scan on the page index),
+     * limited to names with rows on or after $since when given.
+     *
+     * @param  string[]  $requested
+     * @return array<int, string[]>  stored names per requested index (empty = no rows)
+     */
+    private function storedPageNames(array $requested, ?string $since): array
+    {
+        $q = DB::table('ads_manager_reports')->whereNotNull('page_name')->groupBy('page_name')->select('page_name');
+        if ($since !== null) $q->havingRaw('MAX(day) >= ?', [$since]);
+
+        $byKey = [];
+        foreach ($q->pluck('page_name') as $stored) {
+            $byKey[self::pageKey((string) $stored)][] = (string) $stored;
+        }
+        $out = [];
+        foreach ($requested as $i => $name) {
+            $out[$i] = $byKey[self::pageKey((string) $name)] ?? [];
+        }
+
+        return $out;
+    }
+
+    /**
+     * Spec 261: the distinct non-null values of $cols in the filtered rows of $base
+     * (a reports query without joins), for the latest-status subqueries.
+     *
+     * @return array<string, array>  column => ids
+     */
+    private static function idsIn($base, array $cols): array
+    {
+        $rows = (clone $base)->distinct()->get(array_map(fn ($c) => 'ads_manager_reports.' . $c, $cols));
+        $out = [];
+        foreach ($cols as $c) {
+            $out[$c] = $rows->pluck($c)->filter(fn ($v) => $v !== null)->unique()->values()->all();
+        }
+
+        return $out;
+    }
+
+    /** LOWER(TRIM(x)) in PHP: MySQL TRIM strips spaces only. */
+    private static function pageKey(string $name): string
+    {
+        return mb_strtolower(trim($name, ' '));
+    }
+
+    /** The earliest of the given Y-m-d dates, or null when any is not a plain Y-m-d (then no bound). */
+    private static function earliestDay(array $dates): ?string
+    {
+        if (empty($dates)) return null;
+        foreach ($dates as $d) {
+            if (!is_string($d) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $d)) return null;
+        }
+
+        return min($dates);
+    }
+
+    /**
+     * Spec 261: limit a latest-status subquery to the entities in the result ($col IN $ids),
+     * and, when every result row is on or after $since, skip rows dated before it: such a row
+     * can never be the entity's latest COALESCE(day, reporting_starts) day. Rows without a day
+     * stay in (their day comes from reporting_starts).
+     */
+    private static function onlyLatestCandidates($q, string $col, array $ids, ?string $since, string $alias = '')
+    {
+        $p = $alias !== '' ? $alias . '.' : '';
+        $q->whereIn($p . $col, $ids);
+        if ($since !== null) {
+            $q->where(function ($w) use ($p, $since) {
+                $w->where($p . 'day', '>=', $since)->orWhereNull($p . 'day');
+            });
+        }
+
+        return $q;
+    }
+
     private static function videoRatesSql(): string
     {
         $t = 'ads_manager_reports.';
