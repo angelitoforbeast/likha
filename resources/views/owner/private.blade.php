@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" x-data="privateUI()" x-init="init()" x-cloak>
+<html lang="en" x-data="privateUI()" x-cloak>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -3784,6 +3784,8 @@
         }
       },
 
+      // Alpine 3 calls init() by itself. No x-init="init()" on <html>: that ran it
+      // twice, two identical item-summary requests per load (spec 261).
       async init(){
         window.addEventListener('ow-fit-mode', e => { this.owCompact = !!e.detail; });
         this.initCols();
