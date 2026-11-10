@@ -56,6 +56,7 @@ use App\Http\Controllers\AdAccountController;
 use App\Http\Controllers\Pancake\RetrieveOrdersController;
 use App\Http\Controllers\BotcakePsidGsheetController;
 use App\Http\Controllers\PageSettingController;
+use App\Http\Controllers\ChatblastBroadcastController;
 use App\Http\Controllers\ChatblastCampaignController;
 use App\Http\Controllers\ChatblastChatController;
 use App\Http\Controllers\ChatblastController;
@@ -263,6 +264,21 @@ Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('chatblast')->name('cha
     Route::post('/test', [ChatblastController::class, 'test'])->middleware('throttle:20,1,chatblast-test')->name('test');
     Route::get('/test-psid', [ChatblastController::class, 'searchTestPsid'])->middleware('throttle:60,1,chatblast-test-psid')->name('test-psid.search');
     Route::post('/test-psid', [ChatblastController::class, 'saveTestPsid'])->middleware('throttle:20,1,chatblast-test-psid-save')->name('test-psid.save');
+
+    // Broadcast (spec 263): one message to a chosen audience of PSIDs; the throttles of the send routes above.
+    Route::prefix('broadcast')->name('broadcast.')->group(function () {
+        Route::get('/', [ChatblastBroadcastController::class, 'index'])->name('index');
+        Route::get('/data', [ChatblastBroadcastController::class, 'data'])->name('data');
+        Route::post('/flows', [ChatblastBroadcastController::class, 'flows'])->middleware('throttle:30,1,chatblast-broadcast-flows')->name('flows');
+        Route::post('/preview', [ChatblastBroadcastController::class, 'preview'])->middleware('throttle:60,1,chatblast-broadcast-preview')->name('preview');
+        Route::get('/{id}/progress', [ChatblastBroadcastController::class, 'progress'])->whereNumber('id')->name('progress');
+        Route::post('/{id}/test', [ChatblastBroadcastController::class, 'test'])->whereNumber('id')->middleware('throttle:20,1,chatblast-test')->name('test');
+        Route::post('/{id}/start', [ChatblastBroadcastController::class, 'start'])->whereNumber('id')->middleware('throttle:10,1,chatblast-send-filtered')->name('start');
+        Route::post('/{id}/pause', [ChatblastBroadcastController::class, 'pause'])->whereNumber('id')->middleware('throttle:30,1,chatblast-control')->name('pause');
+        Route::post('/{id}/resume', [ChatblastBroadcastController::class, 'resume'])->whereNumber('id')->middleware('throttle:30,1,chatblast-control')->name('resume');
+        Route::post('/{id}/stop', [ChatblastBroadcastController::class, 'stop'])->whereNumber('id')->middleware('throttle:30,1,chatblast-control')->name('stop');
+        Route::post('/{id}/cap', [ChatblastBroadcastController::class, 'cap'])->whereNumber('id')->middleware('throttle:30,1,chatblast-control')->name('cap');
+    });
 
     // Mga mensahe (gaya ng flow sa Botcake): /chatblast/campaigns.
     Route::prefix('campaigns')->name('campaigns.')->group(function () {

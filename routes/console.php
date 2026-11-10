@@ -177,6 +177,13 @@ Schedule::command('chatblast:auto')
     ->everyFiveMinutes()
     ->withoutOverlapping(30);
 
+// Broadcast (spec 263): every minute, the waiting rows of the sending broadcasts go to the chatblast sender under each
+// page's hourly cap and the in-flight limit. Does nothing while no broadcast is sending.
+Schedule::command('chatblast:broadcast-feed')
+    ->everyMinute()
+    ->withoutOverlapping(5)
+    ->runInBackground();
+
 // Ang bantay ng Forbeast: kada minuto, ang health check at ang paghahambing ng chat ng bawat page na nasa Forbeast; ang
 // pumapalya ay kusang lumilipat sa Botcake (ForbeastWatch). Sa background, para hindi maantala ang ibang naka-schedule.
 Schedule::command('chatbot:forbeast-watch')

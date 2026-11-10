@@ -257,7 +257,7 @@ class ChatblastController extends Controller
     public function retryFailed(Request $request)
     {
         $this->checkAccess();
-        return response()->json(['queued' => $this->queueAll($this->filtered($request, false, 'history')->whereIn('status', ['failed', 'field_mismatch'])), 'state' => $this->state()]);
+        return response()->json(['queued' => $this->queueAll($this->filtered($request, false, 'history')->whereIn('status', ['failed', 'field_mismatch'])->where('kind', '<>', \App\Services\Broadcast::KIND)), 'state' => $this->state()]);
     }
 
     public function pause()

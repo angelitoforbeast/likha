@@ -36,4 +36,10 @@ class ChatblastCampaign extends Model
         'send_range'           => 'array',
         'auto_runs'            => 'array',
     ];
+
+    /** A broadcast (spec 263, ChatblastBroadcast) is a row of the same table: it is never a sequence to any query here. */
+    protected static function booted(): void
+    {
+        static::addGlobalScope('sequences', fn (\Illuminate\Database\Eloquent\Builder $q) => $q->where($q->qualifyColumn('mode'), '<>', ChatblastBroadcast::MODE));
+    }
 }
