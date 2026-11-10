@@ -158,6 +158,8 @@ class BotcakeChatController extends Controller
             $clean = ChatMessageCleaner::clean($f['message']);
             $f['message'] = $clean['message'];
             if ($clean['image_url'] !== null) $payload['image_url'] = $clean['image_url'];
+            // Ilang larawang sabay na pinadala: lahat ng link ay nasa image_urls (ang una pa rin ang image_url at attachment).
+            if (count($clean['image_urls'] ?? []) > 1) $payload['image_urls'] = $clean['image_urls'];
             // Ang uri at link ng attachment ("[audio](link)", "[audio] link" o ang larawan), para sa susunod na transcribe o paglalarawan.
             $attachment = $clean['image_url'] !== null ? ['type' => 'image', 'url' => $clean['image_url']] : (\App\Services\Chatbot\ChatAttachments::fromMarker($f['message']) ?? \App\Services\Chatbot\ChatAttachments::gif($f['message']));
             if ($attachment !== null) $payload['attachment'] = $attachment;
