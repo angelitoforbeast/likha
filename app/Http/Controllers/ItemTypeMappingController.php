@@ -63,7 +63,8 @@ class ItemTypeMappingController extends Controller
     {
         $search = $request->input('search');
 
-        $query = DB::table('item_type_mappings')->orderBy('item_type')->orderBy('item_name');
+        // Pinakabago muna (spec 260): makita agad ng staff ang kaka-upload lang.
+        $query = DB::table('item_type_mappings')->orderByDesc('created_at')->orderByDesc('id');
 
         if ($search) {
             $query->where(function ($q) use ($search) {
