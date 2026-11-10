@@ -278,16 +278,18 @@ class BotcakeCustomerSyncTest extends BotcakeApiTestCase
         $sync = app(BotcakeCustomerSync::class);
         $this->assertNull($sync->lockedSince());
 
-        $sync->withLock(function () use ($sync) {
+        $key = $sync->lockKey('Page Uno');
+        $sync->withLock('Page Uno', function () use ($sync, $key) {
             $this->assertSame(now()->format('Y-m-d H:i:s'), $sync->lockedSince()->format('Y-m-d H:i:s'));
-            $this->assertNull($sync->withLock(fn () => 'second'), 'may hawak: laktaw');
+            $this->assertSame(now()->format('Y-m-d H:i:s'), $sync->lockedSince('Page Uno')->format('Y-m-d H:i:s'));
+            $this->assertNull($sync->withLock('Page Uno', fn () => 'second'), 'may hawak: laktaw');
 
             // Isang run na pinatay (hindi nakapag-release): pagkalipas ng 2 oras, malaya na ulit.
             $this->travel(119)->minutes();
-            $this->assertFalse(Cache::lock(BotcakeCustomerSync::LOCK, 10)->get());
+            $this->assertFalse(Cache::lock($key, 10)->get());
             $this->travel(2)->minutes();
-            $this->assertTrue(Cache::lock(BotcakeCustomerSync::LOCK, 10)->get());
-            Cache::lock(BotcakeCustomerSync::LOCK)->forceRelease();
+            $this->assertTrue(Cache::lock($key, 10)->get());
+            Cache::lock($key)->forceRelease();
         });
 
         $this->assertNull($sync->lockedSince(), 'nawawala kasama ng lock');
@@ -297,11 +299,12 @@ class BotcakeCustomerSyncTest extends BotcakeApiTestCase
     {
         $sync = app(BotcakeCustomerSync::class);
         $this->travelTo('2026-10-17 08:30:00');
-        Cache::lock(BotcakeCustomerSync::LOCK, BotcakeCustomerSync::LOCK_TTL)->get();
-        Cache::put(BotcakeCustomerSync::LOCK . ':since', now()->toIso8601String(), BotcakeCustomerSync::LOCK_TTL);
-
         app(PageSettings::class)->set('Page Dos', 'botcake', 'page_id', '2002');
         app(PageSettings::class)->set('Page Dos', 'botcake', 'token', 'tok-sync-test-dos');
+        foreach (['Page Uno', 'Page Dos'] as $page) {
+            Cache::lock($sync->lockKey($page), BotcakeCustomerSync::LOCK_TTL)->get();
+            Cache::put($sync->lockKey($page) . ':since', now()->toIso8601String(), BotcakeCustomerSync::LOCK_TTL);
+        }
 
         Artisan::call('botcake:sync-customers');
         $out = Artisan::output();
@@ -309,8 +312,9 @@ class BotcakeCustomerSyncTest extends BotcakeApiTestCase
         $this->assertStringContainsString('Laktaw ang Page Uno', $out);
         $this->assertStringContainsString('Laktaw ang Page Dos', $out, 'hindi tumitigil sa unang abalang page: tuloy sa susunod');
 
-        $sync->forceRelease();
-        $this->assertNull($sync->lockedSince());
-        $this->assertTrue(Cache::lock(BotcakeCustomerSync::LOCK, 10)->get());
+        $sync->forceRelease('Page Uno');
+        $this->assertNull($sync->lockedSince('Page Uno'));
+        $this->assertTrue(Cache::lock($sync->lockKey('Page Uno'), 10)->get());
+        $this->assertFalse(Cache::lock($sync->lockKey('Page Dos'), 10)->get(), 'ang lock lang ng page na iyon');
     }
 }

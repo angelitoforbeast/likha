@@ -146,7 +146,7 @@ class SyncAllTest extends BotcakeApiTestCase
         $this->press()->assertOk();
         $first = $this->jobs()->sole();
 
-        $held = Cache::lock(BotcakeCustomerSync::LOCK, 60);
+        $held = Cache::lock(app(BotcakeCustomerSync::class)->lockKey('Page Dos'), 60);
         $this->assertTrue($held->get(), 'ang row Sync now o ang schedule ay may hawak');
         $this->runJob($first);
 
@@ -343,7 +343,7 @@ class SyncAllTest extends BotcakeApiTestCase
         Queue::fake();
         Http::fake(['botcake.io/*' => Http::response([])]);
         $this->press()->assertOk();
-        $held = Cache::lock(BotcakeCustomerSync::LOCK, 60);
+        $held = Cache::lock(app(BotcakeCustomerSync::class)->lockKey('Page Dos'), 60);
         $held->get();
         $this->runJob($this->jobs()->sole());
         $this->assertTrue($this->panel()['waiting']);

@@ -16,7 +16,7 @@ use Throwable;
  * Isang page ng "Sync lahat". Ang run ay nasa database (BotcakeSyncAll); ang job ay tumatakbo lang kapag ang run ay
  * running at ang page_index nito ay ang page ng job. Pagkatapos ng page (tagumpay man o hindi), ang BotcakeSyncAll ang
  * kumukuha ng susunod na page at nagpapadala ng job, kung running pa: kaya laging nananalo ang Pause at Stop, at isa-isa
- * ang mga page. Kapag may ibang sync na may hawak ng lock, hindi nilalaktawan ang page: babalik pagkalipas ng
+ * ang mga page. Kapag may ibang sync na may hawak ng lock ng page, hindi nilalaktawan ang page: babalik pagkalipas ng
  * WAIT_SECONDS. Timeout 1800 s, mas maikli sa retry_after (1900 s) ng database queue para hindi ito maulit habang
  * tumatakbo. Ang $runId ay ang run_key (pareho ang pangalan ng property sa lumang job, para mabasa ang naka-queue pa).
  */
@@ -61,7 +61,7 @@ class SyncAllBotcakeCustomersJob implements ShouldQueue
         }
 
         try {
-            $apiRun = $sync->withLock(fn () => $sync->syncPage($page));
+            $apiRun = $sync->withLock($page, fn () => $sync->syncPage($page));
         } catch (Throwable $e) {
             report($e);
             $apiRun = false;

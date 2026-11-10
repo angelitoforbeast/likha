@@ -113,7 +113,7 @@
 
     {{-- Ang lock ng Botcake sync: habang hawak, "Skipped" ang ibang sync (schedule, button, command). --}}
     <div id="sync-lock" class="mb-3 px-4 py-2 rounded bg-amber-100 text-amber-900 text-sm {{ $grid['sync_lock'] ? '' : 'hidden' }}">
-        A Botcake sync has been running since <span id="sync-lock-since">{{ $grid['sync_lock'] }}</span>. Other syncs skip until it ends (or for up to 2 hours if it was cut off).
+        A Botcake sync has been running since <span id="sync-lock-since">{{ $grid['sync_lock'] }}</span>. Another sync of the same page skips it until it ends (or for up to 2 hours if it was cut off); other pages still sync.
     </div>
 
     <p class="mb-2 text-xs text-gray-500">

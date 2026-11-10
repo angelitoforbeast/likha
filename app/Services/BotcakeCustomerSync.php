@@ -33,12 +33,23 @@ use Illuminate\Support\Facades\Schema;
  * Chain: ang mga run mula batch 1 hanggang sa huling tuloy. Bawat tuloy ay may dalang pinakabagong petsa ng unang run, kaya
  * ang chain na natapos nang malinis (date / age / end) ay malinis, at iyon ang petsa nito. Ang lumang run (bago naitala ang
  * petsa) na malinis na window o full mula batch 1: ang petsa ng created_at nito (Manila) ang ginagamit; hindi ito isinusulat.
- * Isang page sa isang pagkakataon; bawat sync ay isang run na may stop_reason, read_kind, start_batch at mga petsa.
+ * All time (spec 262, --all-time): mula batch 1 hanggang dulo (end), walang age stop at walang cap. Humihinto pagkatapos
+ * ng ALL_TIME_SECONDS (time) para hindi lumampas sa LOCK_TTL ang hawak, at agad itong itinutuloy ng command. Ang
+ * hindi natapos (time, error, pinatay) ay itinutuloy mula sa naabot, minus RESUME_OVERLAP; hindi bumabalik sa batch 1
+ * habang hindi tapos ang chain. Walang all-time run pa: itinutuloy ang huling --full mula batch 1 na hindi natapos (hal.
+ * ang one-off na pinatay). Tapos = ang huling all-time run ay done / end. Inactive lang kapag ang chain ay mula batch 1
+ * hanggang dulo: ang hindi nakita mula nang magsimula ang chain at nang 30 araw. Hindi ito nagpapasya ng plan() ng
+ * ibang basa.
+ * Isang lock kada page: sabay ang magkaibang page, hindi kailanman ang parehong page. Bawat sync ay isang run na may
+ * stop_reason, read_kind, start_batch at mga petsa.
  */
 class BotcakeCustomerSync
 {
-    public const LOCK = 'botcake-sync-customers';
+    public const LOCK = 'botcake-sync-customers'; // + ':' + pageKey: isang lock kada page
     public const MAX_BATCHES = 20000; // pananggalang ng --full kung paulit-ulit ang sagot ng API
+    public const ALL_TIME = 'all_time';
+    // All-time run: titigil (time) pagkatapos nito at itutuloy agad, para ang hawak ng lock ay laging kulang sa LOCK_TTL.
+    public const ALL_TIME_SECONDS = 60 * 60;
     public const INACTIVE_DAYS = 30;
     public const LOCK_TTL = 2 * 3600; // kada page; ang run na pinatay (hindi nakapag-release) ay hindi humaharang nang higit dito
     // Window read: titigil (time) pagkatapos nito. Sinusuri sa pagitan ng mga batch; ang isang batch ay hanggang ~5 min
@@ -48,6 +59,9 @@ class BotcakeCustomerSync
     private const DECIDING_STOPS = ['cap', 'time', 'age', 'end', 'date']; // ang mga run na nagpapasya sa plan(), kasama ang window read
 
     private ?bool $hasAdFilled = null;
+
+    /** Ang cap ng ibang basa (hindi ng all time); napapalitan sa tests. */
+    public int $maxBatches = self::MAX_BATCHES;
 
     public function __construct(
         private PageSettings $settings,
@@ -62,33 +76,71 @@ class BotcakeCustomerSync
         return $this->settings->pagesWith('botcake', ['page_id', 'token']);
     }
 
-    /** Patakbuhin habang hawak ang lock (isa lang sabay: schedule, command at button). Null = may tumatakbo na. */
-    public function withLock(callable $fn): mixed
+    /** Ang lock ng isang page (ayon sa pageKey, kaya iisa ang "Page Uno" at " page uno "). */
+    public function lockKey(string $page): string
     {
-        $lock = Cache::lock(self::LOCK, self::LOCK_TTL);
+        return self::LOCK . ':' . $this->settings->pageKey($page);
+    }
+
+    /**
+     * Patakbuhin habang hawak ang lock ng page (isa lang sabay kada page: schedule, command, button at Sync lahat; ang
+     * magkaibang page ay sabay). Null = may tumatakbo na sa page na ito.
+     */
+    public function withLock(string $page, callable $fn): mixed
+    {
+        $key  = $this->lockKey($page);
+        $lock = Cache::lock($key, self::LOCK_TTL);
         if (!$lock->get()) return null;
 
-        Cache::put(self::LOCK . ':since', now()->toIso8601String(), self::LOCK_TTL);
+        Cache::put($key . ':since', now()->toIso8601String(), self::LOCK_TTL);
+        $this->held($key, true);
         try {
             return $fn();
         } finally {
             $lock->release();
-            Cache::forget(self::LOCK . ':since');
+            Cache::forget($key . ':since');
+            $this->held($key, false);
         }
     }
 
-    /** Kailan nagsimula ang sync na may hawak ng lock, o null kapag walang tumatakbo. */
-    public function lockedSince(): ?Carbon
+    /**
+     * Kailan nagsimula ang sync na may hawak ng lock ng page, o null kapag walang tumatakbo. Walang page: ang
+     * pinakamaagang hawak sa lahat ng page (para sa grid), mula sa listahan ng mga hawak (walang database query).
+     */
+    public function lockedSince(?string $page = null): ?Carbon
     {
-        $since = Cache::get(self::LOCK . ':since');
-        return is_string($since) ? Carbon::parse($since)->setTimezone(config('app.timezone')) : null;
+        $keys = $page === null ? array_keys((array) Cache::get(self::LOCK . ':held', [])) : [$this->lockKey($page)];
+        if (!$keys) return null;
+
+        // Ang ":since" ang totoo (may TTL gaya ng lock); ang listahan ay mga kandidato lang (hal. pinatay na proseso).
+        $since = array_filter(Cache::many(array_map(fn ($k) => $k . ':since', $keys)), 'is_string');
+        if (!$since) return null;
+
+        return collect($since)->map(fn ($s) => Carbon::parse($s))->min()->setTimezone(config('app.timezone'));
     }
 
-    /** Para sa SIGTERM / SIGINT ng command: bitawan ang lock kahit hindi natapos ang run. */
-    public function forceRelease(): void
+    /** Para sa SIGTERM / SIGINT ng command: bitawan ang lock ng page kahit hindi natapos ang run. */
+    public function forceRelease(string $page): void
     {
-        Cache::lock(self::LOCK)->forceRelease();
-        Cache::forget(self::LOCK . ':since');
+        $key = $this->lockKey($page);
+        Cache::lock($key)->forceRelease();
+        Cache::forget($key . ':since');
+        $this->held($key, false);
+    }
+
+    /** Ang listahan ng mga hawak na lock (para sa lockedSince() ng grid). Pang-display lang: hindi pumapalya ang sync dito. */
+    private function held(string $key, bool $on): void
+    {
+        try {
+            Cache::lock(self::LOCK . ':held-lock', 10)->block(5, function () use ($key, $on) {
+                $held = (array) Cache::get(self::LOCK . ':held', []);
+                if ($on) $held[$key] = true;
+                else unset($held[$key]);
+                $held ? Cache::put(self::LOCK . ':held', $held, self::LOCK_TTL) : Cache::forget(self::LOCK . ':held');
+            });
+        } catch (\Throwable $e) {
+            Log::warning('BotcakeCustomerSync: hindi naisulat ang listahan ng lock', ['key' => $key, 'error' => $e->getMessage()]);
+        }
     }
 
     /**
@@ -103,7 +155,7 @@ class BotcakeCustomerSync
         // Ang nagpapasya: ang pinakabagong run na cap / time / age / end / date, o window / by date read na hindi natapos
         // (failed, pinatay, rate limit). Ang ibang run sa pagitan (known_batch, failed na --full) ay hindi binibilang,
         // para hindi maging by date habambuhay ang page na may customer pa sa window na hindi nababasa.
-        [$last, $before] = array_pad($this->runsOf($page)
+        [$last, $before] = array_pad($this->runsOf($page)->where(fn ($w) => $this->notAllTime($w))
             ->where(fn ($w) => $w->whereIn('stop_reason', self::DECIDING_STOPS)->orWhereIn('read_kind', ['window', 'by_date']))
             ->orderByDesc('id')->limit(2)->get()->all(), 2, null);
 
@@ -121,6 +173,7 @@ class BotcakeCustomerSync
     {
         $trim  = DB::getDriverName() === 'pgsql' ? 'BTRIM' : 'TRIM';
         $inner = DB::table('botcake_psid_import_runs')->where('source', 'api')->whereNotNull('page_name')
+            ->where(fn ($w) => $this->notAllTime($w))
             ->where(fn ($w) => $w->whereIn('stop_reason', self::DECIDING_STOPS)->orWhereIn('read_kind', ['window', 'by_date']))
             ->selectRaw("id, page_name, status, stop_reason, read_kind, start_batch, batches_read, stop_date, subscribed_newest, ROW_NUMBER() OVER (PARTITION BY LOWER($trim(page_name)) ORDER BY id DESC) AS rn");
         $byPage = DB::query()->fromSub($inner, 'r')->where('rn', '<=', 2)->orderByDesc('id')->get()
@@ -184,6 +237,60 @@ class BotcakeCustomerSync
         return [$kind, $next, $kind === 'by_date' ? $this->ymd($last->stop_date) : null, $this->ymd($last->subscribed_newest)];
     }
 
+    /** Ang all-time run ay hindi nagpapasya ng ibang basa (ang lumang run na walang read_kind ay kasama pa rin). */
+    private function notAllTime($q)
+    {
+        return $q->whereNull('read_kind')->orWhere('read_kind', '!=', self::ALL_TIME);
+    }
+
+    /** Tapos na ba ang all-time read ng page: ang huling all-time run nito ay done / end. */
+    public function allTimeFinished(string $page): bool
+    {
+        $last = $this->runsOf($page)->where('read_kind', self::ALL_TIME)->orderByDesc('id')->first(['status', 'stop_reason']);
+        return $last && $last->status === 'done' && $last->stop_reason === 'end';
+    }
+
+    /**
+     * Saang batch magsisimula ang all-time run. Tapos na ang chain (o wala pa): mula 1 (ang command ang lumalaktaw sa tapos
+     * na, maliban sa --again). Hindi tapos: mula sa naabot ng huling run, minus RESUME_OVERLAP; walang nabasa = parehong
+     * simula (hindi bumabalik sa 1). Ang tuloy pagkatapos ng time ay laging umuusad nang kahit isang batch. Wala pang
+     * all-time run: ang huling --full mula batch 1 na hindi natapos (hindi end / age) ay itinutuloy sa parehong paraan.
+     */
+    private function planAllTime(string $page): array
+    {
+        $last = $this->runsOf($page)->where('read_kind', self::ALL_TIME)->orderByDesc('id')->first();
+        if ($last && !($last->status === 'done' && $last->stop_reason === 'end')) {
+            $start = (int) ($last->start_batch ?: 1);
+            $read  = (int) $last->batches_read;
+            if ($read === 0) return [self::ALL_TIME, $start];
+            $next = $start + $read - 1 - self::RESUME_OVERLAP;
+            return [self::ALL_TIME, max($last->stop_reason === 'time' ? $start + 1 : 1, $next)];
+        }
+        if ($last) return [self::ALL_TIME, 1];
+
+        $full = $this->runsOf($page)->where('read_kind', 'full')->orderByDesc('id')->first();
+        if ($full && (int) $full->start_batch === 1 && (int) $full->batches_read > 0
+            && !($full->status === 'done' && in_array($full->stop_reason, ['end', 'age'], true))) {
+            return [self::ALL_TIME, max(1, (int) $full->batches_read - self::RESUME_OVERLAP)];
+        }
+
+        return [self::ALL_TIME, 1];
+    }
+
+    /**
+     * Ang chain ng all-time run: ang mga all-time run ng page mula sa huling natapos (done / end) bago nito. Mula batch 1
+     * ba ito, at kailan ito nagsimula (para sa inactive).
+     * @return array{0:bool, 1:Carbon}
+     */
+    private function allTimeChain(string $page, BotcakePsidImportRun $run): array
+    {
+        $runs = $this->runsOf($page)->where('read_kind', self::ALL_TIME);
+        $prevEnd = (clone $runs)->where('id', '<', $run->id)->where('status', 'done')->where('stop_reason', 'end')->max('id') ?? 0;
+        $first = (clone $runs)->where('id', '>', $prevEnd)->orderBy('id')->first(['start_batch', 'created_at']);
+
+        return [(int) $first->start_batch === 1, $first->created_at];
+    }
+
     /**
      * Malinis: natapos hanggang sa stop date nito (date / age / end), walang error, may petsa (dala ng chain kapag tuloy).
      * Ang lumang malinis na window o full mula batch 1 na walang petsa ay kasama rin (tingnan ang cleanDate()).
@@ -245,6 +352,7 @@ class BotcakeCustomerSync
     {
         if ($kind === 'by_date') return $start > 1 ? 'by date, resumed from batch ' . $start : 'by date';
         if ($kind === 'window' && $start > 1) return 'window, resumed from batch ' . $start;
+        if ($kind === self::ALL_TIME) return $start > 1 ? 'all time, resumed from batch ' . $start : 'all time';
         return $kind;
     }
 
@@ -256,10 +364,15 @@ class BotcakeCustomerSync
         return ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][$d->month - 1] . ' ' . $d->day;
     }
 
-    public function syncPage(string $page, bool $full = false): BotcakePsidImportRun
+    /**
+     * $allTime: ang all-time read (spec 262); tawagin habang hawak ang lock ng page, kaya ang naiwang "running" na run ng
+     * page ay patay na (killed). $sleepMs: hinihintay sa pagitan ng mga batch.
+     */
+    public function syncPage(string $page, bool $full = false, bool $allTime = false, int $sleepMs = 0): BotcakePsidImportRun
     {
         $started = $this->clock->now();
-        [$kind, $start, $stopDate, $chainNewest] = $this->plan($page, $full) + [2 => null, 3 => null];
+        if ($allTime) $this->markKilled($page);
+        [$kind, $start, $stopDate, $chainNewest] = ($allTime ? $this->planAllTime($page) : $this->plan($page, $full)) + [2 => null, 3 => null];
         $run = BotcakePsidImportRun::create([
             'status' => 'running', 'source' => 'api', 'page_name' => $page, 'read_kind' => $kind, 'start_batch' => $start,
             'stop_date' => $stopDate, 'subscribed_newest' => $chainNewest, // tuloy: dala ang pinakabagong petsa ng chain
@@ -289,10 +402,15 @@ class BotcakeCustomerSync
 
                     $this->store($page, $batch, $run, (string) $pageId);
                     $run->save();
-                    if ($this->reachesBefore($batch, $oldest)) $reason = 'age';
+                    if ($kind === self::ALL_TIME) {
+                        // Walang age stop at walang cap: hanggang dulo, hinahati lang sa oras.
+                        if ($this->clock->now() - $started >= self::ALL_TIME_SECONDS) $reason = 'time';
+                    }
+                    elseif ($this->reachesBefore($batch, $oldest)) $reason = 'age';
                     elseif ($kind === 'by_date' && $this->allBefore($batch, $stopDate)) $reason = 'date';
                     elseif (in_array($kind, ['window', 'by_date'], true) && $this->clock->now() - $started >= self::WINDOW_SECONDS) $reason = 'time';
-                    elseif ($run->batches_read >= self::MAX_BATCHES) $reason = 'cap';
+                    elseif ($run->batches_read >= $this->maxBatches) $reason = 'cap';
+                    if ($reason === null && $sleepMs > 0) $this->clock->sleep($sleepMs / 1000);
                 }
                 $this->tokenStatus($page, 'ok');
 
@@ -304,6 +422,18 @@ class BotcakeCustomerSync
                         ->where('subscribed_at', '>=', $oldest)
                         ->where(fn ($w) => $w->whereNull('last_seen_at')->orWhere('last_seen_at', '<', now()->subDays(self::INACTIVE_DAYS))),
                         (string) $pageId, fn ($q) => $q->where('page', $page), ['status' => 'inactive', 'last_checked_at' => now()]);
+                }
+
+                // All time: ang chain mula batch 1 na umabot sa dulo ay nakita ang lahat ng customer (anumang petsa, kahit
+                // walang petsa). Inactive ang hindi nakita mula nang magsimula ang chain at nang 30 araw.
+                if ($kind === self::ALL_TIME && $reason === 'end') {
+                    [$fromOne, $chainStart] = $this->allTimeChain($page, $run);
+                    if ($fromOne) {
+                        $cutoff = now()->subDays(self::INACTIVE_DAYS)->min($chainStart);
+                        $inactive = BotcakePsid::updateOfPage(fn () => BotcakePsid::where('source', 'api')->where('status', 'available')
+                            ->where(fn ($w) => $w->whereNull('last_seen_at')->orWhere('last_seen_at', '<', $cutoff)),
+                            (string) $pageId, fn ($q) => $q->where('page', $page), ['status' => 'inactive', 'last_checked_at' => now()]);
+                    }
                 }
             } catch (BotcakeException $e) {
                 $error = $e->getMessage();
