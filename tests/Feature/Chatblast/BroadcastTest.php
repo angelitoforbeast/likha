@@ -456,7 +456,7 @@ class BroadcastTest extends ChatblastTestCase
 
     public function test_s4_3_twenty_failures_in_a_row_pause_page_a_and_page_b_goes_on(): void
     {
-        for ($i = 1; $i <= 25; $i++) $this->psid('Page A', '1001', 'a' . str_pad((string) $i, 2, '0', STR_PAD_LEFT));
+        for ($i = 1; $i <= Broadcast::IN_FLIGHT + 5; $i++) $this->psid('Page A', '1001', 'a' . str_pad((string) $i, 2, '0', STR_PAD_LEFT));
         foreach (['b1', 'b2', 'b3'] as $p) $this->psid('Page B', '1002', $p);
         $this->answers['1001']['flow'] = [['success' => false, 'message' => 'flow off'], 200];
 
@@ -472,6 +472,19 @@ class BroadcastTest extends ChatblastTestCase
 
         app(Broadcast::class)->feed();
         $this->assertSame(5, (clone $a)->where('status', Broadcast::WAITING)->count(), 'a paused page is not fed');
+    }
+
+    public function test_s4_the_feed_command_feeds_several_times_in_one_run(): void
+    {
+        foreach (['a1', 'a2'] as $p) $this->psid('Page A', '1001', $p);
+        Queue::fake([SendChatblastMessage::class]);
+        $this->startNew();
+
+        $mock = \Mockery::mock(Broadcast::class);
+        $mock->shouldReceive('feed')->times(3)->andReturn(1);
+        $this->app->instance(Broadcast::class, $mock);
+
+        $this->artisan('chatblast:broadcast-feed', ['--loops' => 3, '--every' => 0])->expectsOutput('3 handed out')->assertExitCode(0);
     }
 
     public function test_s4_3_customers_not_reachable_551_do_not_pause_the_page_and_are_counted_on_their_own(): void
