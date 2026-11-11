@@ -201,7 +201,7 @@ class BroadcastTest extends ChatblastTestCase
         $id = $this->startNew();
 
         $this->assertSame(1, $this->rows($id)->count());
-        $this->assertSame([['1001', 'write'], ['1001', 'read'], ['1001', 'flow']], $this->sends());
+        $this->assertSame([['1001', 'write'], ['1001', 'flow']], $this->sends());
     }
 
     public function test_s1_5_an_order_on_page_a_only_keeps_the_psid_in_b_and_not_in_a(): void
@@ -333,9 +333,9 @@ class BroadcastTest extends ChatblastTestCase
         $row = BotcakeMessage::findOrFail($t['id']);
         $this->assertTrue($row->is_test);
         $this->assertSame(['sent', 'me-1'], [$row->status, $row->psid]);
-        $this->assertSame(['write', 'read', 'flow'], array_column($row->steps, 'step'));
-        $this->assertSame([200, 200, 200], array_column($row->steps, 'http'));
-        $this->assertSame(['psid' => 'me-1', 'flow_id' => 6601], $row->steps[2]['request']);
+        $this->assertSame(['write', 'flow'], array_column($row->steps, 'step'));
+        $this->assertSame([200, 200], array_column($row->steps, 'http'));
+        $this->assertSame(['psid' => 'me-1', 'flow_id' => 6601], $row->steps[1]['request']);
         $this->assertSame(0, $this->rows($r['id'])->count(), 'nobody else');
         $this->assertSame('draft', ChatblastBroadcast::find($r['id'])->state());
         $progress = $this->getJson('/chatblast/broadcast/' . $r['id'] . '/progress')->assertOk()->json();
@@ -366,7 +366,7 @@ class BroadcastTest extends ChatblastTestCase
 
     // ---- S4 Send, pace, pause, stop, progress ----
 
-    public function test_s4_1_three_psids_are_three_sent_rows_with_the_three_steps(): void
+    public function test_s4_1_three_psids_are_three_sent_rows_that_write_then_send_without_a_read_back(): void
     {
         foreach (['a1', 'a2', 'a3'] as $p) $this->psid('Page A', '1001', $p);
 
@@ -375,7 +375,7 @@ class BroadcastTest extends ChatblastTestCase
         $rows = $this->rows($id)->get();
         $this->assertSame(['sent', 'sent', 'sent'], $rows->pluck('status')->all());
         foreach ($rows as $row) {
-            $this->assertSame(['write', 'read', 'flow'], array_column($row->steps, 'step'));
+            $this->assertSame(['write', 'flow'], array_column($row->steps, 'step'));
             $this->assertSame('broadcast:' . $id . ':1001:' . $row->psid, $row->dedupe_key);
         }
         $this->assertSame('done', ChatblastBroadcast::find($id)->state());
@@ -395,7 +395,7 @@ class BroadcastTest extends ChatblastTestCase
         (new \App\Jobs\QueueBroadcast($r['id']))->handle(app(Broadcast::class)); // a re-run of the queue job
 
         $this->assertSame(3, $this->rows($r['id'])->count());
-        $this->assertCount(9, $this->sends());
+        $this->assertCount(6, $this->sends());
     }
 
     public function test_s4_start_does_not_recount_and_the_queue_job_inserts_what_matches_at_queue_time(): void
@@ -513,7 +513,7 @@ class BroadcastTest extends ChatblastTestCase
         $this->assertSame(1, $this->rows($id)->where('status', 'failed')->count());
         $this->assertSame(2, $this->rows($id)->where('status', 'queued')->count(), 'the rest wait, not sent');
         $this->assertStringContainsString('restricted', (string) ChatblastBroadcast::find($id)->broadcast['pages']['Page A']['paused']);
-        $this->assertCount(3, $this->sends());
+        $this->assertCount(2, $this->sends());
     }
 
     public function test_s4_4_stop_cancels_the_queued_rows_and_a_sent_row_stays_sent(): void
@@ -530,7 +530,7 @@ class BroadcastTest extends ChatblastTestCase
         $this->assertSame(['sent', 'cancelled', 'cancelled'], [BotcakeMessage::find($first)->status, BotcakeMessage::find($second)->status, BotcakeMessage::find($third)->status]);
         app(ChatblastSender::class)->process($second);
         $this->assertSame('cancelled', BotcakeMessage::find($second)->status);
-        $this->assertCount(3, $this->sends());
+        $this->assertCount(2, $this->sends());
         $this->assertSame('stopped', ChatblastBroadcast::find($id)->state());
     }
 
@@ -597,7 +597,7 @@ class BroadcastTest extends ChatblastTestCase
         Artisan::call('chatblast:broadcast-feed');
 
         $this->assertSame('unknown', $this->rows($id)->value('status'));
-        $this->assertCount(3, $this->sends());
+        $this->assertCount(2, $this->sends());
     }
 
     public function test_s4_broadcast_rows_wait_while_the_chatblast_is_paused(): void

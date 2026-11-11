@@ -501,13 +501,17 @@ class ChatblastSender
         if (!$ok($w)) { $this->finish($m, 'failed', 'The custom field was not written (HTTP ' . $w['http'] . ')', $w['http'], $steps); return; }
 
         // 2. Basahin ulit: dapat eksaktong ang text ang laman, kung hindi ay walang padala.
-        $r = yield from $step('read', 'GET', $field, []);
-        if ($authFail($r)) { $this->tokenInvalid($m, $r['http'], $steps); return; }
-        $value = $this->fieldValue($r['body'], $cfg['field.message']);
-        if (!$ok($r) || $value !== (string) $m->text) {
-            $why = !$ok($r) ? 'The custom field could not be read (HTTP ' . $r['http'] . ')' : ($value === null ? 'Field ' . $cfg['field.message'] . ' is missing in the read-back' : 'The field holds a different text in the read-back');
-            $this->finish($m, 'field_mismatch', $why . '; not sent', $r['http'], $steps);
-            return;
+        // A broadcast row skips the read-back: two calls per customer instead of three, so a page sends half again as
+        // many per minute; the write's success:true is its check. In-transit and Delivering chatblast still read back.
+        if ($m->kind !== Broadcast::KIND) {
+            $r = yield from $step('read', 'GET', $field, []);
+            if ($authFail($r)) { $this->tokenInvalid($m, $r['http'], $steps); return; }
+            $value = $this->fieldValue($r['body'], $cfg['field.message']);
+            if (!$ok($r) || $value !== (string) $m->text) {
+                $why = !$ok($r) ? 'The custom field could not be read (HTTP ' . $r['http'] . ')' : ($value === null ? 'Field ' . $cfg['field.message'] . ' is missing in the read-back' : 'The field holds a different text in the read-back');
+                $this->finish($m, 'field_mismatch', $why . '; not sent', $r['http'], $steps);
+                return;
+            }
         }
 
         // 3. I-send ang flow. Hindi ligtas ulitin: ang 429 lang ang inuulit; ang 5xx o walang sagot ay "unknown".
