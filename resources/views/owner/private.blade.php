@@ -289,7 +289,7 @@
 
   <!-- Nav -->
   <div id="nav">
-    <span style="color:#f1f5f9;font-weight:700;font-size:14px;">Daily Summary</span>
+    <a href="{{ route('owner.private') }}" title="Start over with the default dates and filters" style="color:#f1f5f9;font-weight:700;font-size:14px;text-decoration:none;">Daily Summary</a>
 
     <!-- Inline item search + checkbox list (left side, beside title) -->
     <div style="position:relative;margin-left:10px;" @click.away="itemFilterOpen=false"

@@ -70,6 +70,13 @@ class FitToWidthTest extends OwnerPrivateTestCase
         }
     }
 
+    public function test_the_daily_summary_title_starts_over_without_the_query_string(): void
+    {
+        $html = $this->page("/owner/private?start_date=2026-10-12&end_date=2026-11-10", "CEO");
+
+        $this->assertMatchesRegularExpression("#<a href=\"http://[^\"?]+/owner/private\"[^>]*>Daily Summary</a>#", $html);
+    }
+
     public function test_ceo_gets_compact_css_and_one_actions_button(): void
     {
         $html = $this->page('/owner/private', 'CEO');
