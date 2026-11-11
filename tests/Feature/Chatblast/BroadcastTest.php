@@ -474,6 +474,22 @@ class BroadcastTest extends ChatblastTestCase
         $this->assertSame(5, (clone $a)->where('status', Broadcast::WAITING)->count(), 'a paused page is not fed');
     }
 
+    public function test_s4_3_customers_not_reachable_551_do_not_pause_the_page_and_are_counted_on_their_own(): void
+    {
+        for ($i = 1; $i <= 25; $i++) $this->psid('Page A', '1001', 'a' . str_pad((string) $i, 2, '0', STR_PAD_LEFT));
+        $this->answers['1001']['flow'] = [['success' => false, 'message' => "(#551) This person isn't available right now.", 'error_code' => null], 200];
+
+        $id = $this->startNew(['cap' => 1000]);
+        for ($i = 0; $i < 3; $i++) app(Broadcast::class)->feed();
+
+        $this->assertSame(25, $this->rows($id)->where('status', 'failed')->where('reason', Broadcast::UNREACHABLE)->count(), 'all sent on, none held');
+        $row = collect($this->getJson('/chatblast/broadcast/' . $id . '/progress')->assertOk()->json('progress'))->firstWhere('page', 'Page A');
+        $this->assertNull($row['paused'], 'a #551 is the customer, not the page: no pause');
+        $this->assertSame(25, $row['unreachable']);
+        $this->assertSame(0, $row['failed']);
+        $this->assertSame(0, $row['waiting']);
+    }
+
     public function test_s4_3_a_restricted_page_pauses_at_once(): void
     {
         foreach (['a1', 'a2', 'a3'] as $p) $this->psid('Page A', '1001', $p);

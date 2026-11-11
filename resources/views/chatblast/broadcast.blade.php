@@ -225,13 +225,30 @@
             head.append(el('button', { class: 'cb-btn cb-btn-sm text-red-700', onclick: () => confirm('Stop this broadcast? The rows not sent yet are cancelled.') && control(b.id, 'stop') }, 'Stop'));
         }
         if (b.state === 'draft') head.append(el('button', { class: 'cb-btn cb-btn-sm', onclick: () => { fill(b); countAll(b); } }, 'Open draft'));
-        const th = (t, right) => el('th', right ? { class: 'text-right' } : {}, t);
-        const td = (v, cls = 'text-right') => el('td', { class: cls }, v);
-        const rows = p.progress.map(x => el('tr', {}, td(x.page, ''), td(x.error ? '–' : fmt(x.audience)), td(x.error ? '–' : (b.queued_all ? fmt(x.matched) : fmt(x.matched) + '…')), td(fmt(x.queued)), td(fmt(x.sent)), td(fmt(x.failed)), td(fmt(x.unknown)),
-            td(fmt(x.skipped + x.cancelled)), td(x.error ? 'Left out: ' + x.error : (x.paused ? 'Paused: ' + x.paused : (x.flow_name || '')), x.error || x.paused ? 'text-red-700' : 'text-slate-500')));
+        // Numbers right-aligned under right-aligned headings (the layout's table style puts every heading left, so the
+        // alignment is set inline), one line per cell, tabular digits.
+        const num = 'text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums';
+        const th = (t, right, title) => el('th', Object.assign(right ? { style: num } : { style: 'white-space:nowrap' }, title ? { title } : {}), t);
+        const td = (v, cls = '', right = true) => el('td', Object.assign({ class: cls }, right ? { style: num } : {}), v);
+        const done = x => { const total = x.matched || x.audience || 0; const finished = x.sent + x.unreachable + x.failed + x.unknown + x.skipped + x.cancelled; return total ? Math.floor(finished * 100 / total) + '%' : '–'; };
+        const rows = p.progress.map(x => el('tr', {},
+            td(x.page, 'font-medium', false),
+            td(x.error ? '–' : fmt(b.queued_all ? x.matched : x.audience)),
+            td(x.error ? '–' : done(x), 'text-slate-500'),
+            td(fmt(x.sent), 'text-emerald-700'),
+            td(fmt(x.waiting)),
+            td(fmt(x.in_flight), 'text-slate-500'),
+            td(fmt(x.unreachable), 'text-slate-500'),
+            td(fmt(x.failed), x.failed ? 'text-red-700' : ''),
+            td(fmt(x.unknown), x.unknown ? 'text-amber-700' : ''),
+            td(fmt(x.skipped + x.cancelled), 'text-slate-500'),
+            td(x.error ? 'Left out: ' + x.error : (x.paused ? 'Paused: ' + x.paused : (x.flow_name || '')), x.error || x.paused ? 'text-red-700' : 'text-slate-500', false)));
         return el('div', { class: 'space-y-2 border-t border-slate-100 pt-3 first:border-0 first:pt-0' }, head,
             el('p', { class: 'whitespace-pre-wrap rounded bg-slate-50 px-2 py-1 font-mono text-xs' }, b.text),
-            b.state === 'draft' ? el('span') : el('table', { class: 'cb-table' }, el('thead', {}, el('tr', {}, th('Page'), th('Previewed', 1), th('Matched now', 1), th('Queued', 1), th('Sent', 1), th('Failed', 1), th('Unknown', 1), th('Skipped / cancelled', 1), th('Flow / paused'))), el('tbody', {}, ...rows)));
+            b.state === 'draft' ? el('span') : el('div', { class: 'overflow-x-auto' }, el('table', { class: 'cb-table' }, el('thead', {}, el('tr', {},
+                th('Page'), th('Audience', 1, 'The customers matched when the broadcast was queued'), th('Done', 1), th('Sent', 1), th('Waiting', 1, 'Not handed to the sender yet'),
+                th('Sending', 1, 'Handed to the sender now'), th('Not reachable', 1, 'Facebook #551: the customer cannot be messaged any more'), th('Failed', 1), th('Unknown', 1, 'Not sure it was sent; never retried by itself'),
+                th('Skipped', 1, 'Skipped or cancelled'), th('Flow / status'))), el('tbody', {}, ...rows))));
     };
 
     const fill = (b) => {

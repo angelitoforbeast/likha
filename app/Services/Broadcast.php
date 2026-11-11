@@ -54,6 +54,9 @@ class Broadcast
     public const ALL_WARNING = 'No filter: this is every PSID on the chosen pages.';
     public const STREAK_REASON = '20 failures in a row';
     /** A send answer that says the page itself may not message (Meta #2022 / subcode 1893063, "restricted" or "blocked"). */
+    /** The customer cannot be messaged any more (blocked the page, left Messenger): not a page problem. */
+    private const UNREACHABLE_SAID = "/\\(#551\\)|isn't available right now/i";
+    public const UNREACHABLE = 'Customer not reachable (#551)';
     private const RESTRICTED = '/#2022\b|\b1893063\b|restricted from (sending|messaging)|blocked from (sending|messaging)|temporarily blocked/i';
 
     public function __construct(private PageSettings $settings)
@@ -624,20 +627,28 @@ class Broadcast
     {
         $b = ChatblastBroadcast::find($id);
         if (!$b) return null;
-        $counts = $this->rows($id)->selectRaw('page_name, status, COUNT(*) AS n')->groupBy('page_name', 'status')->get();
+        $counts = $this->rows($id)->selectRaw('page_name, status, COUNT(*) AS n, SUM(CASE WHEN reason = ? THEN 1 ELSE 0 END) AS unreachable', [self::UNREACHABLE])
+            ->groupBy('page_name', 'status')->get();
         $by = [];
-        foreach ($counts as $c) $by[mb_strtolower((string) $c->page_name)][$c->status] = (int) $c->n;
+        $unreachable = [];
+        foreach ($counts as $c) {
+            $key = mb_strtolower((string) $c->page_name);
+            $by[$key][$c->status] = (int) $c->n;
+            if ($c->status === 'failed') $unreachable[$key] = (int) $c->unreachable;
+        }
         $sum = fn (array $s, array $keys) => array_sum(array_intersect_key($s, array_flip($keys)));
 
         $pages = [];
         foreach ((array) ($b->broadcast['pages'] ?? []) as $page => $p) {
             $s = $by[mb_strtolower((string) $page)] ?? [];
+            $gone = $unreachable[mb_strtolower((string) $page)] ?? 0;
             $pages[] = [
                 'page' => $page, 'flow_name' => $p['flow_name'], 'error' => $p['error'], 'paused' => $p['paused'] ?? null,
                 // audience: the previewed count; matched: the rows the queue job inserted (what matched at queue time).
                 'audience' => $p['audience'] ?? $p['count'], 'matched' => array_sum($s), 'rows' => array_sum($s),
-                'queued' => $sum($s, [self::WAITING, 'queued', 'sending']), 'sent' => $s['sent'] ?? 0,
-                'failed' => $sum($s, ['failed', 'field_mismatch']), 'unknown' => $s['unknown'] ?? 0,
+                'queued' => $sum($s, [self::WAITING, 'queued', 'sending']), 'waiting' => $s[self::WAITING] ?? 0,
+                'in_flight' => $sum($s, ['queued', 'sending']), 'sent' => $s['sent'] ?? 0, 'unreachable' => $gone,
+                'failed' => $sum($s, ['failed', 'field_mismatch']) - $gone, 'unknown' => $s['unknown'] ?? 0,
                 'skipped' => $sum($s, ['skipped', 'no_config']), 'cancelled' => $s[self::CANCELLED] ?? 0,
             ];
         }
@@ -696,6 +707,11 @@ class Broadcast
         if (!in_array($status, ['failed', 'field_mismatch'], true)) return;
 
         $said = implode("\n", array_map(fn ($s) => is_array($s) ? (string) ($s['response'] ?? '') : '', $steps));
+        if ($status === 'failed' && preg_match(self::UNREACHABLE_SAID, $said)) {
+            // The customer, not the page: counted on its own and never part of the streak that pauses the page.
+            BotcakeMessage::whereKey($m->id)->update(['reason' => self::UNREACHABLE]);
+            return;
+        }
         if (preg_match(self::RESTRICTED, $said)) {
             $this->pausePage((int) $m->campaign_id, (string) $m->page_name, 'The page is restricted or blocked from messaging: ' . mb_substr(trim($said), 0, 150));
             return;
