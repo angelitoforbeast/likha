@@ -282,6 +282,19 @@ class BroadcastTest extends ChatblastTestCase
         $this->assertSame('No flow named "Old"', $r['pages'][0]['error']);
     }
 
+    public function test_s4_the_cap_defaults_to_10000_per_page_per_hour_and_allows_up_to_20000(): void
+    {
+        $this->get("/chatblast/broadcast")->assertOk()->assertSee('value="10000"', false)->assertSee('max="20000"', false);
+
+        $in = $this->input();
+        unset($in["cap"]);
+        $r = $this->postJson("/chatblast/broadcast/preview", $in)->assertOk();
+        $this->assertSame(10000, $r->json("cap"), "no cap given: the default is 10000");
+
+        $this->preview(["cap" => 20000])->assertOk();
+        $this->postJson("/chatblast/broadcast/preview", $this->input(["cap" => 20001]))->assertStatus(422);
+    }
+
     public function test_s2_3_empty_text_cannot_send(): void
     {
         $this->psid('Page A', '1001', 'a1');

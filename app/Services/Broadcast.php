@@ -28,8 +28,8 @@ class Broadcast
     public const KIND = 'broadcast';           // botcake_messages.kind
     public const WAYBILL = 'BROADCAST';        // botcake_messages.waybill (not null; a broadcast has no waybill)
     public const PSID_STATUSES = ['available', 'verified'];
-    public const DEFAULT_CAP = 300;            // sends per page per hour
-    public const MAX_CAP = 5000;
+    public const DEFAULT_CAP = 10000;          // sends per page per hour
+    public const MAX_CAP = 20000;
     public const IN_FLIGHT = 20;               // broadcast rows per page in the chatblast queue or the send pool at once
     public const FAIL_STREAK = 20;             // failures in a row on one page that pause it
     public const BATCH = 1000;                 // rows read and inserted per queueing step
