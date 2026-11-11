@@ -30,7 +30,7 @@ class Broadcast
     public const PSID_STATUSES = ['available', 'verified'];
     public const DEFAULT_CAP = 10000;          // sends per page per hour
     public const MAX_CAP = 20000;
-    public const IN_FLIGHT = 30;               // broadcast rows per page in the chatblast queue or the send pool at once
+    public const IN_FLIGHT = 60;               // default: broadcast rows per page in the chatblast queue or the send pool at once (services.botcake.broadcast_in_flight)
     public const FAIL_STREAK = 20;             // failures in a row on one page that pause it
     public const BATCH = 1000;                 // rows read and inserted per queueing step
     public const CANCEL_BATCH = 5000;
@@ -510,12 +510,20 @@ class Broadcast
         return $n;
     }
 
+    /** Broadcast rows per page in the sender at once: services.botcake.broadcast_in_flight (BROADCAST_IN_FLIGHT), 1 to 200. */
+    public static function inFlight(): int
+    {
+        $v = config('services.botcake.broadcast_in_flight');
+
+        return is_numeric($v) && (int) $v > 0 ? min(200, (int) $v) : self::IN_FLIGHT;
+    }
+
     private function feedPage(int $id, string $page, int $cap, ?int $userId): int
     {
         $q = fn () => $this->rows($id)->where('page_name', $page);
         $inFlight = $q()->whereIn('status', ['queued', 'sending'])->count();
         $handed = $q()->whereIn('status', self::HANDED)->where('queued_at', '>=', now()->subHour())->count();
-        $room = min($cap - $handed, self::IN_FLIGHT - $inFlight);
+        $room = min($cap - $handed, self::inFlight() - $inFlight);
         if ($room <= 0) return 0;
 
         $n = 0;

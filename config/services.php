@@ -149,6 +149,8 @@ return [
         'rate_per_page' => (float) env('BOTCAKE_RATE_PER_PAGE', 2),
         // Habang may sagot ang bot sa page, ang chatblast ay hanggang ganitong bahagi lang ng rate_per_page (0.5 = 1 sa 2 kada segundo).
         'chatblast_share' => (float) env('BOTCAKE_CHATBLAST_SHARE', 0.5),
+        // Broadcast rows per page handed to the sender at once (spec 263): with ~15 s per send, 60 is ~240 a minute at most.
+        'broadcast_in_flight' => (int) env('BROADCAST_IN_FLIGHT', 60),
         // true = ang padala ng chatbot at chatblast ay ipinapasa sa botcake:send-pool (kapag buhay ito); false = naghihintay ang worker (ang dati).
         'async_sends' => (bool) env('BOTCAKE_ASYNC_SENDS', true),
         // Ilang request sa Botcake nang sabay sa botcake:send-pool (lahat ng page), tig-isang ganito ang sagot ng bot at ang chatblast.

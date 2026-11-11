@@ -456,7 +456,7 @@ class BroadcastTest extends ChatblastTestCase
 
     public function test_s4_3_twenty_failures_in_a_row_pause_page_a_and_page_b_goes_on(): void
     {
-        for ($i = 1; $i <= Broadcast::IN_FLIGHT + 5; $i++) $this->psid('Page A', '1001', 'a' . str_pad((string) $i, 2, '0', STR_PAD_LEFT));
+        for ($i = 1; $i <= Broadcast::inFlight() + 5; $i++) $this->psid('Page A', '1001', 'a' . str_pad((string) $i, 2, '0', STR_PAD_LEFT));
         foreach (['b1', 'b2', 'b3'] as $p) $this->psid('Page B', '1002', $p);
         $this->answers['1001']['flow'] = [['success' => false, 'message' => 'flow off'], 200];
 
@@ -625,8 +625,22 @@ class BroadcastTest extends ChatblastTestCase
         $id = $this->startNew();
 
         $this->assertSame(Broadcast::BATCH + 5, $this->rows($id)->count());
-        $this->assertSame(Broadcast::IN_FLIGHT, $this->rows($id)->where('status', 'queued')->count(), 'only the in-flight limit is handed out');
+        $this->assertSame(Broadcast::inFlight(), $this->rows($id)->where('status', 'queued')->count(), 'only the in-flight limit is handed out');
         $this->assertTrue((bool) ChatblastBroadcast::find($id)->broadcast['queued_all']);
+    }
+
+    public function test_the_in_flight_limit_comes_from_the_setting(): void
+    {
+        foreach (range(1, 12) as $i) $this->psid('Page A', '1001', 'f' . $i);
+        config(['services.botcake.broadcast_in_flight' => 7]);
+        Queue::fake([SendChatblastMessage::class]);
+
+        $id = $this->startNew();
+
+        $this->assertSame(7, Broadcast::inFlight());
+        $this->assertSame(7, $this->rows($id)->where('status', 'queued')->count(), 'the setting decides how many are handed out');
+        config(['services.botcake.broadcast_in_flight' => null]);
+        $this->assertSame(Broadcast::IN_FLIGHT, Broadcast::inFlight(), 'no setting: the default (60)');
     }
 
     // ---- Isolation from the sequences ----
