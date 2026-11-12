@@ -981,6 +981,10 @@ Route::get('/ads_manager/campaigns', [AdsManagerCampaignsController::class, 'ind
      Route::get('/ads_manager/campaigns/history/data', [AdsManagerCampaignsController::class, 'historyData'])
         ->name('ads_manager.campaigns.history.data');
 
+     // Ads daily output (spec 266): bagong ads, pinatay, binuhay, budget changes at promo kada araw. Access ayon sa nav-settings.
+     Route::get('/ads_manager/daily-output', [\App\Http\Controllers\AdsDailyOutputController::class, 'index'])
+        ->name('ads_manager.daily_output');
+
      // Manual campaign ownership tagging — used by history page dropdown.
      Route::get ('/ads_manager/campaigns/assignments',         [\App\Http\Controllers\CampaignAssignmentController::class, 'list'])
         ->name('ads_manager.campaigns.assignments.list');
