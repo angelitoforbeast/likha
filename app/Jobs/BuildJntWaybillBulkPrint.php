@@ -21,10 +21,16 @@ class BuildJntWaybillBulkPrint implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public int $timeout = 3600; // 1 hour
+    // 30 min: below the database queue's retry_after (1900 s), so a run is never handed to a second worker
+    // while it builds. A run of 75-400 labels takes seconds to a few minutes (spec 267).
+    public int $timeout = 1800;
     public int $tries = 1;
 
-    public function __construct(public int $runId) {}
+    public function __construct(public int $runId)
+    {
+        // Every bulk print runs on the J&T print queue (spec 267).
+        $this->onQueue(config('jnt.queues.print', 'jnt-print'));
+    }
 
     public function handle(): void
     {

@@ -25,9 +25,48 @@ class CreateJntOrder implements ShouldQueue
     public int $tries = 3;
     public int $timeout = 120;
 
-    public function __construct(public int $shipmentId) {}
+    /**
+     * Seconds the booking lock of one shipment lives: above the job timeout (120 s, so a killed worker's lock
+     * still expires) and far below the queue's retry_after (1900 s, so the next try never meets a stale lock).
+     */
+    public const LOCK_SECONDS = 180;
 
+    public function __construct(public int $shipmentId)
+    {
+        // Every dispatch and every retry of a booking runs on the J&T booking queue (spec 267).
+        $this->onQueue(config('jnt.queues.book', 'jnt-book'));
+    }
+
+    /**
+     * Several jnt-book workers run at once (spec 267): one worker at a time books a shipment. A worker that finds
+     * the shipment locked drops its copy of the job (the holder books it); the holder re-reads the shipment after
+     * taking the lock, so a shipment with a mailno is never sent to J&T again.
+     */
     public function handle(): void
+    {
+        $lock = Cache::lock('jnt-book:shipment:' . $this->shipmentId, self::LOCK_SECONDS);
+        if (! $lock->get()) {
+            return;
+        }
+
+        try {
+            $this->book();
+        } finally {
+            $lock->release();
+        }
+    }
+
+    /** The try that ends the job (the last of $tries, a timeout, or fail()): the shipment counts once in its run. */
+    public function failed(?\Throwable $e): void
+    {
+        $shipment = JntShipment::query()->find($this->shipmentId);
+        if (! $shipment) return;
+
+        $message = $e ? $e->getMessage() : 'failed';
+        $this->markFail($shipment, $message, $e ? ['exception' => get_class($e), 'message' => $message] : []);
+    }
+
+    private function book(): void
 {
     /** @var \App\Models\JntShipment|null $shipment */
     $shipment = JntShipment::query()->find($this->shipmentId);
@@ -185,20 +224,28 @@ class CreateJntOrder implements ShouldQueue
         });
 
     } catch (\Throwable $e) {
+        // A missing sender mapping does not fix itself between tries: the job fails now, once (failed() counts it).
+        if (str_starts_with($e->getMessage(), 'SENDER_NAME_')) {
+            $this->job ? $this->fail($e) : $this->failed($e);
+            return;
+        }
+
+        // Any other error: the reason shows on the shipment now; the run counts it once, on the last try (failed()).
         $this->markFail($shipment, $e->getMessage(), [
             'exception' => get_class($e),
             'message'   => $e->getMessage(),
-        ]);
+        ], false);
         throw $e;
     }
 }
 
 
-    private function markFail(JntShipment $shipment, string $reason, array $extraResponse = []): void
+    private function markFail(JntShipment $shipment, string $reason, array $extraResponse = [], bool $count = true): void
     {
-        DB::transaction(function () use ($shipment, $reason, $extraResponse) {
+        DB::transaction(function () use ($shipment, $reason, $extraResponse, $count) {
             $locked = JntShipment::query()->lockForUpdate()->find($shipment->id);
             if (!$locked) return;
+            if (!empty($locked->mailno)) return; // booked already: never mark it failed or count it again
 
             $locked->update([
                 'success' => 0,
@@ -206,7 +253,7 @@ class CreateJntOrder implements ShouldQueue
                 'response_payload' => $extraResponse ?: ($locked->response_payload ?? null),
             ]);
 
-            if (!empty($locked->jnt_batch_run_id)) {
+            if ($count && !empty($locked->jnt_batch_run_id)) {
                 $run = JntBatchRun::query()->lockForUpdate()->find($locked->jnt_batch_run_id);
                 if ($run) {
                     $run->processed = (int)$run->processed + 1;
