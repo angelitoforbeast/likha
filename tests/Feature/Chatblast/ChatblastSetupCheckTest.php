@@ -94,9 +94,9 @@ class ChatblastSetupCheckTest extends ChatblastTestCase
     {
         return [
             'no flow' => ['flows', [], 'No flow named UPDATE SHIPPING STATUS 2026 in Botcake'],
-            'two flows' => ['flows', [['id' => 1, 'name' => 'UPDATE SHIPPING STATUS 2026', 'is_removed' => false], ['id' => 2, 'name' => 'Update Shipping Status 2026', 'is_removed' => false]], '2 flows named UPDATE SHIPPING STATUS 2026'],
+            'two flows' => ['flows', [['id' => 1, 'name' => 'UPDATE SHIPPING STATUS 2026', 'is_removed' => false], ['id' => 2, 'name' => 'Update Shipping Status 2026', 'is_removed' => false]], '2 flows named UPDATE SHIPPING STATUS 2026 in Botcake — keep only one'],
             'no field' => ['fields', [['id' => 7701, 'name' => 'GPT INPUT']], 'No custom field named message in Botcake'],
-            'two fields' => ['fields', [['id' => 1, 'name' => 'message'], ['id' => 2, 'name' => 'Message']], '2 custom fields named message'],
+            'two fields' => ['fields', [['id' => 1, 'name' => 'message'], ['id' => 2, 'name' => 'Message']], '2 custom fields named message in Botcake — keep only one'],
         ];
     }
 

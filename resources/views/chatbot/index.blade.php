@@ -370,9 +370,14 @@
             <label class="mt-2 flex flex-col text-xs text-slate-600">Botcake token (leave blank if page settings has it)
                 <input name="token" type="password" maxlength="1000" class="mt-1 rounded-md border border-slate-300 px-2 py-1 font-mono text-sm text-gray-900">
             </label>
-            <p class="mt-2 text-xs text-slate-500">Saved to page settings, then the token is tested and the bot is set up and switched On. This replaces the page's Default Reply in Botcake. If Botcake fails, the page is saved and stays Off.</p>
-            <p id="page-error" class="mt-1 min-h-[1rem] text-xs text-red-600"></p>
-            <div class="mt-2 flex gap-2"><button class="cb-btn cb-btn-primary">Add page</button><button type="button" data-close class="cb-btn">Cancel</button></div>
+            <p class="mt-2 text-xs text-slate-500">The token is tested and the shipping status setup is checked in Botcake (the flow, the custom field and the approved template). Only then is the page added, set up and switched On; this replaces the page's Default Reply in Botcake. If the setup is not complete or Botcake does not answer, the page is not added. If only switching On fails, the page is added and stays Off.</p>
+            <p id="page-error" class="mt-1 min-h-[1rem] text-xs text-red-600" role="alert"></p>
+            {{-- Spec 271: bakit hindi naidagdag, isa kada linya; naiiwan hanggang isara ang dialog o pindutin ang Check again. --}}
+            <div id="page-refused" class="mt-1 hidden rounded-md border border-red-300 bg-red-50 p-2 text-xs text-red-800" role="alert">
+                <p id="page-refused-text" class="font-semibold"></p>
+                <ul id="page-missing" class="mt-1 list-disc space-y-0.5 pl-5"></ul>
+            </div>
+            <div class="mt-2 flex gap-2"><button class="cb-btn cb-btn-primary">Add page</button><button id="page-again" type="button" class="cb-btn hidden">Check again</button><button type="button" data-close class="cb-btn">Cancel</button></div>
         </form>
     </div>
     @endif
@@ -440,6 +445,28 @@
         return {warnings, line, link: f.name ? null : fbLink(pageId, page)};
     }
     // facebook-lines:end
+    // Spec 271: ang pulang "No shipping setup" ng page na kulang ang shipping status setup (ang naitalang check; walang tawag sa Botcake).
+    // shipping-badge:start
+    function shippingBadge(missing) {
+        if (!Array.isArray(missing) || !missing.length) return null;
+        const reasons = missing.map(String);
+        return {text: 'No shipping setup', title: 'Shipping status setup not complete in Botcake: ' + reasons.join('; '), reasons};
+    }
+    /** Ang sagot ng "+ Page" na tinanggihan: ang pangungusap at ang bawat dahilan (null kapag walang retry, hal. walang pangalan). */
+    function pageRefusalLines(data) {
+        if (!data || !data.retry) return null;
+        return {error: String(data.error || 'The page was not added.'), missing: Array.isArray(data.missing) ? data.missing.map(String) : []};
+    }
+    // shipping-badge:end
+    // Ang badge ay bumubukas sa tap o click (details), kaya nababasa rin sa phone ang mga dahilan; may title rin.
+    function shippingBadgeEl(r) {
+        const b = shippingBadge(r ? r.no_shipping_setup : null);
+        if (!b) return null;
+        return el('details', {class: 'mt-0.5 text-xs font-normal', 'data-no-shipping': ''}, [
+            el('summary', {class: 'inline-block cursor-pointer rounded bg-red-600 px-1 text-[11px] font-semibold text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400', title: b.title, text: b.text}),
+            el('ul', {class: 'mt-0.5 list-disc pl-4 text-red-700'}, b.reasons.map(t => el('li', {class: 'break-words', text: t}))),
+        ]);
+    }
     function fbAnchor(r) {
         const a = r ? fbLink(r.page_id, r.page) : null;
         if (!a) return '';
@@ -859,7 +886,7 @@
         // lang, ang pag-ayos ay sa Edit (Manage in Edit).
         const subs = subRowsOf(r);
         return [el('tr', {'data-page': r.page}, [
-            el('td', {class: 'stick-1 border-b border-slate-100 px-3 py-2 align-top font-medium break-words'}, [pickBox(r), r.page, fbAnchor(r), el('div', {class: 'font-mono text-xs text-slate-400', text: r.page_id || ''}),
+            el('td', {class: 'stick-1 border-b border-slate-100 px-3 py-2 align-top font-medium break-words'}, [pickBox(r), r.page, fbAnchor(r), shippingBadgeEl(r), el('div', {class: 'font-mono text-xs text-slate-400', text: r.page_id || ''}),
                 el('div', {class: 'flex flex-wrap gap-1'}, [editButton(r), previewButton(r), url.connectionsUrl ? connectionsButton(r) : null]), replyControl(r)]),
             activeCell(r),
             cell(r, columns.find(c => c.key === 'flow'), 'stick-3'),
@@ -1829,22 +1856,41 @@
         await load();
     });
     if ($('add-page')) {
-        $('add-page').addEventListener('click', () => { $('page-error').textContent = ''; $('page-form').reset(); modal('page-box', true); });
+        // Spec 271: ang hindi naidagdag (kulang ang setup, o error ng Botcake) ay may listahan ng kulang at "Check again", na
+        // ipinapadala ulit ang parehong form (hindi na kailangang i-type ulit; ang na-confirm na palit ng Default Reply ay naaalala).
+        let pageConfirmed = false;
+        const pageRefusal = (data = {}) => {
+            const lines = pageRefusalLines(data);
+            $('page-refused-text').textContent = lines ? lines.error : '';
+            $('page-missing').replaceChildren(...(lines ? lines.missing : []).map(t => el('li', {text: t})));
+            $('page-missing').classList.toggle('hidden', !(lines && lines.missing.length));
+            $('page-refused').classList.toggle('hidden', !lines);
+            $('page-again').classList.toggle('hidden', !data.retry);
+        };
+        $('add-page').addEventListener('click', () => { $('page-error').textContent = ''; pageRefusal(); pageConfirmed = false; $('page-form').reset(); modal('page-box', true); });
+        $('page-again').addEventListener('click', () => $('page-form').requestSubmit());
         $('page-form').addEventListener('submit', async ev => {
             ev.preventDefault();
             const f = new FormData(ev.target);
             const btn = ev.target.querySelector('button.cb-btn-primary');
-            btn.disabled = true;
+            btn.disabled = true; $('page-again').disabled = true;
+            $('page-error').textContent = '';
+            pageRefusal();
             try {
                 const body = {page_name: f.get('page_name'), page_id: f.get('page_id'), token: f.get('token')};
+                if (pageConfirmed) body.confirm = true;
                 let {ok, status, data} = await post(url.pagesUrl, body);
-                if (status === 409 && confirm(data.message)) ({ok, status, data} = await post(url.pagesUrl, Object.assign({confirm: true}, body)));
-                if (!ok) { $('page-error').textContent = data.error || data.message || 'Not added.'; return; }
+                if (status === 409 && confirm(data.message)) { pageConfirmed = true; ({ok, status, data} = await post(url.pagesUrl, Object.assign({confirm: true}, body))); }
+                if (!ok) {
+                    // Ang tinanggihan ng setup o ng Botcake (retry): sa pulang kahon lang; ang ibang error (hal. walang pangalan) sa dating linya.
+                    if (data.retry) pageRefusal(data); else $('page-error').textContent = data.error || data.message || 'Not added.';
+                    return;
+                }
                 modal('page-box', false);
                 notice(data.page + ' added · token test: ' + data.token_test + ' · ' + (data.active ? 'On' : 'Off'), data.active ? 'text-green-700' : 'text-amber-700');
                 if (data.error) errors.set(data.page, data.error); // sa row ng page, gaya ng error ng switch
                 await load();
-            } finally { btn.disabled = false; }
+            } finally { btn.disabled = false; $('page-again').disabled = false; }
         });
     }
 

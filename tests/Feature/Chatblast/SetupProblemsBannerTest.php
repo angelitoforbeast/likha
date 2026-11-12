@@ -55,7 +55,7 @@ class SetupProblemsBannerTest extends ChatblastTestCase
         $this->actingAs($this->user());
         foreach (['/chatbot/inbox', '/chatblast/page-settings'] as $url) {
             $html = $this->get($url)->assertOk()->getContent();
-            $this->assertSame('⚠ 1 page with problems (1 urgent) Page Uno 🟠 Setup: 2 flows named UPDATE SHIPPING STATUS 2026 Page settings', $this->banner($html), $url);
+            $this->assertSame('⚠ 1 page with problems (1 urgent) Page Uno 🟠 No shipping status setup: 2 flows named UPDATE SHIPPING STATUS 2026 Page settings', $this->banner($html), $url);
             $this->assertMatchesRegularExpression('#data-alert="problems".*?href="/chatblast/page-settings\?q=Page\+Uno"#s', $html, 'the page opens filtered');
         }
         $this->check('Page Dos', ['ok' => false, 'x' => ['2 flows named <b>X</b>']]);
@@ -123,6 +123,6 @@ class SetupProblemsBannerTest extends ChatblastTestCase
         $html = $this->get('/chatbot/inbox')->assertOk()->getContent();
         // Spec 184: iisang banner; ang pulang page ang nauuna.
         $this->assertSame('⚠ 2 pages with problems (2 urgent) Page Dos 🔴 Page restricted by Facebook: 3 of 10 sends failed since 11:20 Health Inbox '
-            . 'Page Uno 🟠 Setup: 2 flows named UPDATE SHIPPING STATUS 2026 Page settings', $this->banner($html));
+            . 'Page Uno 🟠 No shipping status setup: 2 flows named UPDATE SHIPPING STATUS 2026 Page settings', $this->banner($html));
     }
 }

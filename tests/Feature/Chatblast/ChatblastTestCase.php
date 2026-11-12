@@ -67,6 +67,22 @@ abstract class ChatblastTestCase extends BotcakeApiTestCase
     }
 
     /**
+     * Spec 271: pekeng Botcake na pumapasa sa shipping status setup check ng "+ Page" (ang flow, ang custom field at ang
+     * APPROVED na template na may {{1}}). Ilagay bago ang pangkalahatang 'botcake.io/*' (ang unang tugma ang sagot).
+     */
+    protected static function setupOkFakes(): array
+    {
+        return [
+            'botcake.io/*/custom_fields*' => \Illuminate\Support\Facades\Http::response(['success' => true, 'data' => [['id' => 801, 'name' => 'message']]]),
+            'botcake.io/*/flows/*/statistics*' => \Illuminate\Support\Facades\Http::response(['success' => true, 'data' => ['sent' => 0, 'delivery' => 0]]),
+            'botcake.io/*/flows*' => \Illuminate\Support\Facades\Http::response(['success' => true, 'data' => ['flows' => [
+                ['id' => 502, 'name' => 'UPDATE SHIPPING STATUS 2026', 'is_removed' => false]], 'folders' => []]]),
+            'botcake.io/*/message_templates*' => \Illuminate\Support\Facades\Http::response(['success' => true, 'data' => [
+                ['name' => 'post_order', 'status' => 'APPROVED', 'components' => [['type' => 'BODY', 'text' => "Update po\n{{1}}"]]]]]),
+        ];
+    }
+
+    /**
      * Isang page na kumpleto ang Botcake settings para sa chatblast. $tested: may matagumpay na test send pagkatapos ng
      * settings (botcake.test_ok), kaya Ready ang page; false para sa page na kailangan pa ng test send.
      */

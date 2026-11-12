@@ -133,7 +133,7 @@ class BotcakeChatAdTest extends ChatblastTestCase
 
     public function test_S_072_5_plus_page_needs_the_name_id_and_token_and_switches_the_page_on(): void
     {
-        Http::fake(['botcake.io/*' => Http::response(['success' => true, 'data' => []])]);
+        Http::fake(self::setupOkFakes() + ['botcake.io/*' => Http::response(['success' => true, 'data' => []])]); // spec 271: kumpleto ang shipping status setup
         $this->actingAs($this->user());
 
         foreach ([['page_id' => '4004', 'token' => self::NEW_TOKEN], ['page_name' => ' ', 'page_id' => '4004', 'token' => self::NEW_TOKEN]] as $noName) {
@@ -167,14 +167,14 @@ class BotcakeChatAdTest extends ChatblastTestCase
         return [
             'the block write' => [['botcake.io/*/default_reply/content', ['success' => false, 'message' => 'Something wrong']], 'ok', 'Could not write the block'],
             'the publish' => [['botcake.io/*/pages/4004/default_reply', ['success' => false, 'message' => 'Not allowed']], 'ok', 'Could not publish the Default Reply'],
-            'the token test' => [['botcake.io/*/custom_fields*', ['success' => false]], 'invalid', 'The token test failed'],
+            // Ang pumalyang token test: hindi na naidadagdag ang page (spec 271, ShippingSetupRequiredTest).
         ];
     }
 
     /** @dataProvider addFails */
     public function test_S_072_6_when_botcake_fails_on_add_the_page_is_saved_but_off_with_the_error(array $fail, string $tokenTest, string $error): void
     {
-        Http::fake([$fail[0] => Http::response($fail[1]), 'botcake.io/*' => Http::response(['success' => true, 'data' => []])]);
+        Http::fake([$fail[0] => Http::response($fail[1])] + self::setupOkFakes() + ['botcake.io/*' => Http::response(['success' => true, 'data' => []])]);
         $this->actingAs($this->user());
 
         $res = $this->postJson('/chatbot/pages', ['page_name' => 'Page Cuatro', 'page_id' => '4004', 'token' => self::NEW_TOKEN])

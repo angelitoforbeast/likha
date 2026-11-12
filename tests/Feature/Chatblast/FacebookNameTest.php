@@ -65,7 +65,7 @@ class FacebookNameTest extends ChatblastTestCase
 
     private function botcakeOk(): array
     {
-        return ['botcake.io/*' => Http::response(['success' => true, 'data' => []])];
+        return self::setupOkFakes() + ['botcake.io/*' => Http::response(['success' => true, 'data' => []])];
     }
 
     private function graphCalls(): array
