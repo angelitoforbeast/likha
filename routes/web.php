@@ -833,6 +833,8 @@ Route::get('/encoder/checker_1/settings', [App\Http\Controllers\Encoder\Checker1
 Route::post('/encoder/checker_1/settings', [App\Http\Controllers\Encoder\Checker1SettingsController::class, 'update'])
      ->name('encoder.checker1.settings.update');
 Route::get('/encoder/summary', [App\Http\Controllers\MacroOutputController::class, 'summary'])->name('macro_output.summary');
+// Encoding timetable (spec 265): anong oras natapos ang encoding, J&T upload at waybill kada order date. Access ayon sa nav-settings.
+Route::get('/encoder/timetable', [App\Http\Controllers\Encoder\EncoderTimetableController::class, 'index'])->name('encoder.timetable');
     Route::get('/encoder/checker_1', [MacroOutputController::class, 'index'])->name('macro_output.index');
 Route::post('/encoder/checker_1/update', [MacroOutputController::class, 'bulkUpdate'])->name('macro_output.bulk_update');
 Route::post('/encoder/checker_1/update-field', [MacroOutputController::class, 'updateField'])->name('macro_output.update_field');
