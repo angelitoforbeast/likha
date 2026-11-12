@@ -807,9 +807,10 @@ class ChecklistController extends Controller
             $this->refuse('CEO o OIC lang ang puwedeng gumawa ng task.');
         }
 
+        $this->normalizeDescriptionLines($request);
         $validated = $request->validate([
             'title'           => 'required|string|max:255',
-            'description'     => 'nullable|string|max:1000',
+            'description'     => 'nullable|string|max:3000',
             'type'            => 'required|in:photo,note,any,both',
             'scheduled_time'  => 'nullable|string|max:20',
             'deadline_time'   => self::DEADLINE_RULE,
@@ -859,9 +860,10 @@ class ChecklistController extends Controller
             $this->refuse('Hindi mo puwedeng baguhin ang task na ito.');
         }
 
+        $this->normalizeDescriptionLines($request);
         $validated = $request->validate([
             'title'           => 'required|string|max:255',
-            'description'     => 'nullable|string|max:1000',
+            'description'     => 'nullable|string|max:3000',
             'type'            => 'required|in:photo,note,any,both',
             'is_active'       => 'boolean',
             'scheduled_time'  => 'nullable|string|max:20',
@@ -1560,6 +1562,17 @@ class ChecklistController extends Controller
             'extract_fields.*.type'  => ['required', \Illuminate\Validation\Rule::in(ChecklistSubmissionValue::TYPES)],
             'extract_fields.*.hint'  => 'nullable|string|max:300',
         ];
+    }
+
+    /**
+     * Ang textarea ay nagpapadala ng CRLF; isang "\n" bawat linya ang ise-save, para ang 3000 na
+     * limit ng form (maxlength) at ng server ay iisang bilang.
+     */
+    private function normalizeDescriptionLines(Request $request): void
+    {
+        if (is_string($request->input('description'))) {
+            $request->merge(['description' => str_replace(["\r\n", "\r"], "\n", $request->input('description'))]);
+        }
     }
 
     /** Pare-parehong hugis ng bawat field ({key, label, type, hint}); walang field = null. */
