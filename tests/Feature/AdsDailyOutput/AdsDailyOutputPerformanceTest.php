@@ -12,7 +12,7 @@ use Illuminate\Support\Facades\DB;
  */
 class AdsDailyOutputPerformanceTest extends AdsDailyOutputTestCase
 {
-    private const TABLES = ['ads_manager_reports', 'ad_catalog', 'page_item_settings'];
+    private const TABLES = ['ads_manager_reports', 'ad_catalog', 'page_item_settings', 'daily_page_primary_item', 'page_settings'];
 
     /** @return array<int, array{sql: string, bindings: array}> the request's queries that touch the page's tables */
     private function pageQueries(string $url): array
@@ -44,6 +44,8 @@ class AdsDailyOutputPerformanceTest extends AdsDailyOutputTestCase
         $this->report('2026-11-09', 'Page A', $c, $s, 'a3', 0);
         $this->catalog('a2', '2026-11-12', 'Page A', $c, $s);
         $this->item('Page A', '1 x SIDE MIRROR', '199', '2026-11-01');
+        $this->primary('2026-11-12', 'Page A', '1 x SIDE MIRROR');
+        $this->picture('Page A', 'https://botcake.pro/i/a.jpg', '2026-11-01 09:00:00');
     }
 
     public function test_S3_1_every_query_is_a_plain_select_and_reports_are_read_by_a_day_range(): void
@@ -58,12 +60,29 @@ class AdsDailyOutputPerformanceTest extends AdsDailyOutputTestCase
             $this->assertDoesNotMatchRegularExpression('/\b(create|insert|update|delete|drop|alter|replace|temporary)\b/i', $q['sql']);
         }
 
-        // Data: the day's ads, the 14-day spend moves, the 14-day budget moves, ad_catalog, page_item_settings. Plus
-        // the table checks. The same number for another day.
+        // Data: the day's ads, the 14-day spend moves, the 14-day budget moves, ad_catalog, page_item_settings, and
+        // (spec 268) daily_page_primary_item and page_settings. Plus the table checks. The same number for another day.
         $isSchema = fn ($q) => str_contains($q['sql'], 'sqlite_master') || str_contains($q['sql'], 'pragma') || str_contains($q['sql'], 'information_schema');
         $data = array_values(array_filter($queries, fn ($q) => ! $isSchema($q)));
-        $this->assertCount(5, $data, implode("\n", array_column($data, 'sql')));
+        $this->assertCount(7, $data, implode("\n", array_column($data, 'sql')));
         $this->assertCount(count($queries), $other);
+
+        // Spec 268: the main items are read for the listed pages by page_key and a bounded ts_date range (D-14..D,
+        // the lookback when a day has no row yet); the pictures by provider, key, page and time.
+        $primary = array_values(array_filter($data, fn ($q) => str_contains($q['sql'], '"daily_page_primary_item"')));
+        $this->assertCount(1, $primary);
+        $this->assertStringContainsString('"page_key" in (?)', $primary[0]['sql']);
+        $this->assertStringContainsString('"ts_date" between ? and ?', $primary[0]['sql']);
+        $this->assertSame(['page a', '2026-10-29', '2026-11-12'], $primary[0]['bindings']);
+        $pictures = array_values(array_filter($data, fn ($q) => str_contains($q['sql'], '"page_settings"')));
+        $this->assertCount(1, $pictures);
+        $this->assertSame(['chatbot', 'picture', false, 'page a', '2026-11-12 19:00:00', '2026-11-11 23:59:59'], $pictures[0]['bindings']);
+        foreach ([[$primary[0], 'daily_page_primary_item'], [$pictures[0], 'page_settings']] as [$q, $table]) {
+            $plan = collect(DB::select('EXPLAIN QUERY PLAN '.$q['sql'], $q['bindings']))->pluck('detail')->implode("\n");
+            $this->assertStringContainsString('SEARCH '.$table.' USING INDEX', $plan);
+            $this->assertStringNotContainsString('SCAN '.$table, $plan);
+            fwrite(STDERR, "\n[268 S3] EXPLAIN QUERY PLAN (sqlite):\n".$plan."\n");
+        }
 
         // Every read of ads_manager_reports is bounded by day: D-1..D, and D-13..D with D-14..D-1 for the table.
         $reports = array_values(array_filter($data, fn ($q) => str_contains($q['sql'], '"ads_manager_reports"')));
@@ -137,13 +156,29 @@ class AdsDailyOutputPerformanceTest extends AdsDailyOutputTestCase
         for ($p = 0; $p < 66; $p++) {
             for ($i = 0; $i < 5; $i++) {
                 for ($e = 0; $e < 6; $e++) {
-                    $items[] = ['page_name' => 'Page '.$p, 'item_name' => ($e % 2 + 1).' x ITEM'.$i, 'promo' => 'PROMO '.$i, 'rts_pct' => 20,
+                    $items[] = ['page_name' => 'Page '.$p, 'item_name' => '1 x ITEM'.$i, 'promo' => 'PROMO '.$i, 'rts_pct' => 20,
                         'effective_date' => Carbon::parse('2026-06-01')->addDays($e * 30)->toDateString()];
                 }
             }
         }
         foreach (array_chunk($items, 500) as $c) {
             DB::table('page_item_settings')->insert($c);
+        }
+        // Spec 268: a main item per page and day (66 x 30) and three main flow pictures per page (two replaced).
+        $primary = [];
+        for ($day = 0; $day < 30; $day++) {
+            for ($p = 0; $p < 66; $p++) {
+                $primary[] = ['ts_date' => Carbon::parse('2026-10-14')->addDays($day)->toDateString(), 'page_label' => 'Page '.$p, 'page_key' => 'page '.$p,
+                    'primary_item' => '1 x ITEM'.($p % 5), 'primary_item_key' => 'item'.($p % 5), 'primary_orders' => 10, 'total_orders_all' => 12];
+            }
+        }
+        foreach (array_chunk($primary, 500) as $c) {
+            DB::table('daily_page_primary_item')->insert($c);
+        }
+        for ($p = 0; $p < 66; $p++) {
+            $this->picture('Page '.$p, 'https://botcake.pro/i/'.$p.'-1.jpg', '2026-09-01 10:00:00', '2026-10-01 10:00:00');
+            $this->picture('Page '.$p, 'https://botcake.pro/i/'.$p.'-2.jpg', '2026-10-01 10:00:00', '2026-11-12 11:05:57');
+            $this->picture('Page '.$p, 'https://botcake.pro/i/'.$p.'-3.jpg', '2026-11-12 11:05:57');
         }
         DB::commit();
         $this->assertSame(22200, DB::table('ads_manager_reports')->count());
@@ -165,6 +200,7 @@ class AdsDailyOutputPerformanceTest extends AdsDailyOutputTestCase
                 foreach ($byCampaign as $name => $c) {
                     $campaigns++;
                     $this->assertSame('PROMO '.preg_replace('/^.*\| ITEM(\d) \|.*$/', '$1', $name), $c['promo']);
+                    $this->assertMatchesRegularExpression('#^https://botcake\.pro/i/\d+-[23]\.jpg$#', (string) $c['picture']);
                 }
             }
         }

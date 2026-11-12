@@ -1,4 +1,4 @@
-{{-- resources/views/ads_manager/daily_output.blade.php (spec 266): ano ang ginawa sa ads sa isang araw --}}
+{{-- resources/views/ads_manager/daily_output.blade.php (spec 266, 268): ano ang ginawa sa ads sa isang araw, may item, promo at larawan --}}
 @php
   use App\Http\Controllers\AdsDailyOutputController as Output;
   $peso = fn ($v) => '₱' . number_format((float) $v, 2);
@@ -94,7 +94,9 @@
               <thead class="bg-gray-100">
                 <tr>
                   <th class="border px-2 py-1 text-left">Page</th>
+                  <th class="border px-2 py-1 text-left">Picture</th>
                   <th class="border px-2 py-1 text-left">Campaign</th>
+                  <th class="border px-2 py-1 text-left">Item</th>
                   <th class="border px-2 py-1 text-left">Promo</th>
                   <th class="border px-2 py-1 text-left">Ad set</th>
                   <th class="border px-2 py-1 text-right">Ads</th>
@@ -106,11 +108,46 @@
               <tbody>
                 @foreach ($lists[$kind] as $page => $campaigns)
                   @foreach ($campaigns as $campaign => $c)
+                    @php
+                      // Ang main item ng page ay mula sa benta; kung wala pang row ang araw, ang naunang araw (may tanda).
+                      $itemNote = null;
+                      if ($c['item'] !== null && $c['item_from'] === 'main') {
+                        $itemNote = 'main item';
+                        if ($c['item_day'] !== $c['item_target']) {
+                          $itemNote .= $c['item_day'] === \Carbon\Carbon::parse($c['item_target'])->subDay()->toDateString()
+                            ? ', kahapon' : ', ' . \Carbon\Carbon::parse($c['item_day'])->format('M j');
+                        }
+                      }
+                    @endphp
                     @foreach ($c['rows'] as $i => $r)
                       <tr data-page="{{ $page }}" data-campaign="{{ $campaign }}" class="align-top">
                         <td class="border px-2 py-1 whitespace-nowrap">{{ $page }}</td>
+                        <td class="border px-1 py-1" data-col="picture">
+                          @if ($c['picture'] !== null)
+                            <a href="{{ $c['picture'] }}" target="_blank" rel="noopener noreferrer" title="Buksan ang buong larawan">
+                              <img src="{{ $c['picture'] }}" alt="Main flow picture ng {{ $page }}" width="56" height="56" loading="lazy" referrerpolicy="no-referrer" style="width:56px;height:56px;object-fit:cover;border-radius:6px" class="border" data-test="picture" />
+                            </a>
+                          @else
+                            <div style="width:56px;height:56px;border-radius:6px" class="bg-gray-200" title="Walang main flow picture" data-test="no-picture"></div>
+                          @endif
+                        </td>
                         <td class="border px-2 py-1">{{ $campaign }}</td>
-                        <td class="border px-2 py-1 whitespace-nowrap" data-col="promo">{{ $c['promo'] ?? '—' }}</td>
+                        <td class="border px-2 py-1" data-col="item">
+                          @if ($c['item'] !== null)
+                            {{ $c['item'] }}@if ($itemNote)<div class="text-xs text-gray-500" data-test="item-note">({{ $itemNote }})</div>@endif
+                          @else
+                            —
+                          @endif
+                        </td>
+                        <td class="border px-2 py-1 whitespace-nowrap" data-col="promo">
+                          @if ($c['promo'] !== null)
+                            {{ $c['promo'] }}
+                          @elseif ($c['item'] !== null)
+                            <span class="text-xs text-gray-500 italic">walang promo na naka-set</span>
+                          @else
+                            —
+                          @endif
+                        </td>
                         <td class="border px-2 py-1">{{ $r['ad_set'] }}</td>
                         <td class="border px-2 py-1 text-right" data-col="ads">{{ $r['ads'] }}</td>
                         @if ($isBudget)

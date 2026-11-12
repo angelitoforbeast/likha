@@ -74,8 +74,11 @@ class AdsDailyOutputPageTest extends AdsDailyOutputTestCase
         $this->item('Page Mirror', '2 x SIDE MIRROR', '99+100(SF)= 199', '2026-11-01');
         $this->item('Page Mirror', '2 x SIDE MIRROR', '1 PESO', '2026-11-13');
         $this->item('Page Mirror', '1 x SIDE MIRROR', '99+100(SF)= 199', '2026-11-05');
+        // Spec 268: SIDEMIRROR matches two items, so the item is the page's main item of the day.
+        $this->primary('2026-11-12', 'Page Mirror', '2 x SIDE MIRROR');
+        $this->primary('2026-10-15', 'Page Mirror', '2 x SIDE MIRROR');
         $this->item('Page Lotion', '1 x BODY LOTION', '149 FREE SF', '2026-11-01');
-        // Two different promos match the Tumbler campaigns: shown as "—".
+        // Two different promos match the Tumbler campaigns and the page has no main item: shown as "—".
         $this->item('Page Tumbler', '1 x TUMBLER', '199', '2026-11-01');
         $this->item('Page Tumbler', '2 x TUMBLER', '299', '2026-11-01');
     }
@@ -178,11 +181,14 @@ class AdsDailyOutputPageTest extends AdsDailyOutputTestCase
 
         $response = $this->open();
 
-        // SIDEMIRROR → "2 x SIDE MIRROR" and "1 x SIDE MIRROR", both "99+100(SF)= 199" on 11-12 (not the 11-13 one).
+        // SIDEMIRROR → "2 x SIDE MIRROR" and "1 x SIDE MIRROR"; the main item "2 x SIDE MIRROR" has "99+100(SF)= 199"
+        // on 11-12 (not the 11-13 one).
+        $this->assertSame('2 x SIDE MIRROR', $this->list($response, 'new')['Page Mirror'][self::MIRROR[1]]['item']);
         $this->assertSame('99+100(SF)= 199', $this->list($response, 'new')['Page Mirror'][self::MIRROR[1]]['promo']);
         // "1000-Body Lotion - F" → "1 x BODY LOTION".
         $this->assertSame('149 FREE SF', $this->list($response, 'new')['Page Lotion'][self::LOTION[1]]['promo']);
-        // TUMBLER matches two items with different promos: never guessed.
+        // TUMBLER matches two items with different promos and the page has no main item: never guessed.
+        $this->assertNull($this->list($response, 'off')['Page Tumbler'][self::TUMBLER1[1]]['item']);
         $this->assertNull($this->list($response, 'off')['Page Tumbler'][self::TUMBLER1[1]]['promo']);
         // No item for the page: none.
         $this->assertNull($this->list($response, 'on')['Page Egg'][self::EGG[1]]['promo']);

@@ -23,6 +23,10 @@ use Illuminate\Support\Facades\Schema;
  *   Back on      spend(D-1) <= 0 o walang row, spend(D) > 0, at first_started < D
  *   Budget up/dn per ad_set_id, MAX(ad_set_budget) sa D kumpara sa D-1 (parehong may halaga)
  *   Running      spend(D) > 0
+ *
+ * Spec 268: bawat campaign ay may Item (tugma sa pangalan, o ang main item ng page sa daily_page_primary_item), ang
+ * promo ng item na iyon, at ang main flow picture ng page (page_settings chatbot/picture na may bisa noon). Ang araw
+ * na ginagamit: D, maliban sa Turned off: D-1 (ang huling araw na gumastos ang ad).
  */
 class AdsDailyOutputController extends Controller
 {
@@ -120,13 +124,30 @@ class AdsDailyOutputController extends Controller
             $budgetSets[$s['budget'] > $s['prev_budget'] ? 'budget_up' : 'budget_down'][] = $s;
         }
 
-        $promoItems = $this->promoItems($d, array_merge(...array_values($items), ...array_values($budgetSets)));
+        // Item, promo at larawan (spec 268): isang query bawat isa para sa lahat ng page na nasa listahan.
+        $pages = [];
+        foreach (array_merge(...array_values($items), ...array_values($budgetSets)) as $e) {
+            if ($e['page'] !== '') {
+                $pages[mb_strtolower($e['page'])] = true;
+            }
+        }
+        $pages = array_map('strval', array_keys($pages));
+        $now = now()->toDateTimeString();
+        $atD = min($day->copy()->endOfDay()->toDateTimeString(), $now);
+        $atPrev = min(Carbon::createFromFormat('!Y-m-d', $prev)->endOfDay()->toDateTimeString(), $now);
+        $ctx = [
+            'settings' => $this->itemSettings($d, $pages),
+            'primary' => $this->primaryItems($day->copy()->subDays(self::MINI_DAYS)->toDateString(), $d, $pages),
+            'pictures' => $this->pictures($pages, $atPrev, $atD),
+        ];
 
+        // Turned off: ang huling araw na gumastos ang ad (D-1); ang iba: D (o ngayon, para sa larawan ng araw na ito).
         $lists = [];
         foreach (array_keys(self::KINDS) as $kind) {
+            [$on, $at] = $kind === 'off' ? [$prev, $atPrev] : [$d, $atD];
             $lists[$kind] = isset($budgetSets[$kind])
-                ? $this->group($budgetSets[$kind], $promoItems, true)
-                : $this->group($items[$kind], $promoItems, false);
+                ? $this->group($budgetSets[$kind], $ctx, true, $on, $at)
+                : $this->group($items[$kind], $ctx, false, $on, $at);
         }
 
         $offCampaigns = count(array_unique(array_map(fn ($a) => $a['page'].'|'.$a['campaign_id'].'|'.$a['campaign'], $items['off'])));
@@ -328,43 +349,169 @@ class AdsDailyOutputController extends Controller
     }
 
     /**
-     * Ang mga item ng bawat page na nasa listahan, at ang promo nila sa D (pinakabagong effective_date <= D).
+     * Ang mga item ng bawat page na nasa listahan at ang kasaysayan ng promo nila hanggang D (effective_date <= D),
+     * luma muna: ang promo sa isang araw ay ang huling row na effective_date <= araw na iyon.
      *
-     * @return array<string, array<string, string>> lowercase page => item_name => promo
+     * @param  string[]  $pages  lowercase
+     * @return array<string, array<string, array<int, array{0: string, 1: string}>>> page => item_name => [[effective, promo], ...]
      */
-    private function promoItems(string $d, array $entries): array
+    private function itemSettings(string $d, array $pages): array
     {
-        $pages = [];
-        foreach ($entries as $e) {
-            if ($e['page'] !== '') {
-                $pages[mb_strtolower($e['page'])] = true;
-            }
-        }
         if (! $pages || ! Schema::hasTable('page_item_settings') || ! Schema::hasColumn('page_item_settings', 'promo')) {
             return [];
         }
 
         $rows = DB::table('page_item_settings')
-            ->select('page_name', 'item_name', 'promo')
+            ->select('page_name', 'item_name', 'promo', 'effective_date')
             ->where('effective_date', '<=', $d)
-            ->whereRaw('LOWER(TRIM(page_name)) IN ('.implode(', ', array_fill(0, count($pages), '?')).')', array_keys($pages))
+            ->whereRaw('LOWER(TRIM(page_name)) IN ('.implode(', ', array_fill(0, count($pages), '?')).')', $pages)
             ->orderBy('effective_date')
             ->orderBy('id')
             ->get();
 
         $out = [];
         foreach ($rows as $r) {
-            $out[mb_strtolower(trim((string) $r->page_name))][(string) $r->item_name] = (string) $r->promo;
+            $out[mb_strtolower(trim((string) $r->page_name))][(string) $r->item_name][] = [substr((string) $r->effective_date, 0, 10), (string) $r->promo];
         }
 
         return $out;
     }
 
     /**
-     * Mga item → page → campaign → mga row per ad set (bilang ng ads, spend kahapon/ngayon, budget), may promo per
-     * campaign. Naka-ayos ayon sa page, campaign at ad set.
+     * daily_page_primary_item: ang item na pinakamaraming benta ng page bawat araw, mula $from hanggang D, pinakabago
+     * muna. Pinupuno ito ng bawat encode (LiveOrder, imports) at ng 03:50 refresh, kaya maaga sa araw ay maaaring wala
+     * pang row ang araw: ang pinakahuling naunang row ang gagamitin (may tanda).
+     *
+     * @param  string[]  $pages  lowercase (= page_key)
+     * @return array<string, array<string, string>> page_key => ts_date => primary_item
      */
-    private function group(array $entries, array $promoItems, bool $isBudget): array
+    private function primaryItems(string $from, string $d, array $pages): array
+    {
+        if (! $pages || ! Schema::hasTable('daily_page_primary_item')) {
+            return [];
+        }
+
+        $rows = DB::table('daily_page_primary_item')
+            ->select('ts_date', 'page_key', 'primary_item')
+            ->whereIn('page_key', $pages)
+            ->whereBetween('ts_date', [$from, $d])
+            ->orderByDesc('ts_date')
+            ->get();
+
+        $out = [];
+        foreach ($rows as $r) {
+            $item = trim((string) $r->primary_item);
+            if ($item !== '') {
+                $out[(string) $r->page_key][substr((string) $r->ts_date, 0, 10)] = $item;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * page_settings (chatbot, picture): ang main flow picture ng bawat page na may bisa sa pagitan ng $from at $to
+     * (created_at <= $to at hindi pa napalitan bago $from), luma muna.
+     *
+     * @param  string[]  $pages  lowercase
+     * @return array<string, array<int, array{0: string, 1: ?string, 2: string}>> page => [[created_at, replaced_at, value], ...]
+     */
+    private function pictures(array $pages, string $from, string $to): array
+    {
+        if (! $pages || ! Schema::hasTable('page_settings')) {
+            return [];
+        }
+
+        $rows = DB::table('page_settings')
+            ->select('page_name', 'value', 'created_at', 'replaced_at')
+            ->where('provider', 'chatbot')
+            ->where('key', 'picture')
+            ->where('is_secret', false)
+            ->whereRaw('LOWER(TRIM(page_name)) IN ('.implode(', ', array_fill(0, count($pages), '?')).')', $pages)
+            ->where('created_at', '<=', $to)
+            ->where(fn ($w) => $w->whereNull('replaced_at')->orWhere('replaced_at', '>', $from))
+            ->orderBy('created_at')
+            ->orderBy('id')
+            ->get();
+
+        $out = [];
+        foreach ($rows as $r) {
+            $out[mb_strtolower(trim((string) $r->page_name))][] = [
+                (string) $r->created_at, $r->replaced_at === null ? null : (string) $r->replaced_at, trim((string) $r->value),
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * Ang item, promo at larawan ng isang campaign sa araw na $on (larawan: ang may bisa sa oras na $at).
+     *   Item: ang nag-iisang item ng page na tugma sa pangalan ng campaign (ang matcher ng 266); kung wala o higit sa
+     *         isa, ang main item ng page sa $on (o ang pinakahuling naunang araw, may tanda).
+     *   Promo: ang promo ng item na iyon (pinakabagong effective_date <= $on); 'NONE' o wala → null.
+     *
+     * @return array{item: ?string, item_from: ?string, item_day: ?string, item_target: string, promo: ?string, picture: ?string}
+     */
+    private function describe(string $page, string $campaign, string $on, string $at, array $ctx): array
+    {
+        $pk = mb_strtolower(trim($page));
+
+        $promos = []; // item_name => promo sa $on
+        foreach ($ctx['settings'][$pk] ?? [] as $name => $history) {
+            foreach ($history as [$effective, $promo]) {
+                if ($effective <= $on) {
+                    $promos[(string) $name] = $promo;
+                }
+            }
+        }
+
+        $item = $from = $itemDay = null;
+        $matches = self::matchedItems($campaign, array_map('strval', array_keys($promos)));
+        if (count($matches) === 1) {
+            [$item, $from] = [$matches[0], 'campaign'];
+        } else {
+            foreach ($ctx['primary'][$pk] ?? [] as $tsDate => $primary) {
+                if ((string) $tsDate <= $on) {
+                    [$item, $from, $itemDay] = [$primary, 'main', (string) $tsDate];
+                    break;
+                }
+            }
+        }
+
+        $promo = null;
+        if ($item !== null) {
+            foreach ($promos as $name => $p) {
+                if (self::itemKey((string) $name) === self::itemKey($item)) {
+                    $p = trim($p);
+                    $promo = ($p === '' || strtoupper($p) === 'NONE') ? null : $p;
+                }
+            }
+        }
+
+        $picture = null;
+        foreach ($ctx['pictures'][$pk] ?? [] as [$created, $replaced, $value]) {
+            if ($created <= $at && ($replaced === null || $replaced > $at)) {
+                $picture = $value;
+            }
+        }
+        if ($picture !== null && (! preg_match('#^https?://#i', $picture) || filter_var($picture, FILTER_VALIDATE_URL) === false)) {
+            $picture = null;
+        }
+
+        return ['item' => $item, 'item_from' => $from, 'item_day' => $itemDay, 'item_target' => $on, 'promo' => $promo, 'picture' => $picture];
+    }
+
+    /** Para itapat ang main item sa item ng page_item_settings: trim, isang espasyo, uppercase. */
+    private static function itemKey(string $item): string
+    {
+        return mb_strtoupper(preg_replace('/\s+/u', ' ', trim($item)));
+    }
+
+    /**
+     * Mga item → page → campaign → mga row per ad set (bilang ng ads, spend kahapon/ngayon, budget), may item, promo
+     * at larawan per campaign. Naka-ayos ayon sa page, campaign at ad set.
+     */
+    private function group(array $entries, array $ctx, bool $isBudget, string $on, string $at): array
     {
         $out = [];
         foreach ($entries as $e) {
@@ -373,10 +520,7 @@ class AdsDailyOutputController extends Controller
             $setKey = $e['ad_set_id'].'|'.$e['ad_set'];
 
             if (! isset($out[$page][$campaign])) {
-                $out[$page][$campaign] = [
-                    'promo' => self::promoFor($e['campaign'], $promoItems[mb_strtolower($e['page'])] ?? []),
-                    'rows' => [],
-                ];
+                $out[$page][$campaign] = $this->describe($e['page'], $e['campaign'], $on, $at, $ctx) + ['rows' => []];
             }
             $row = $out[$page][$campaign]['rows'][$setKey] ?? [
                 'ad_set' => $e['ad_set'] !== '' ? $e['ad_set'] : ($e['ad_set_id'] !== '' ? 'Ad set '.$e['ad_set_id'] : '—'),
@@ -465,26 +609,9 @@ class AdsDailyOutputController extends Controller
      */
     public static function promoFor(string $campaignName, array $items): ?string
     {
-        $tokens = [];
-        foreach (explode('|', $campaignName) as $part) {
-            $t = self::normalize($part);
-            if (self::matchable($t)) {
-                $tokens[] = $t;
-            }
-        }
-
         $promos = [];
-        foreach ($items as $item => $promo) {
-            $i = self::normalize((string) $item);
-            if (! self::matchable($i)) {
-                continue;
-            }
-            foreach ($tokens as $t) {
-                if ($t === $i || str_contains($t, $i) || str_contains($i, $t)) {
-                    $promos[trim((string) $promo)] = true;
-                    break;
-                }
-            }
+        foreach (self::matchedItems($campaignName, array_map('strval', array_keys($items))) as $item) {
+            $promos[trim((string) $items[$item])] = true;
         }
 
         if (count($promos) !== 1) {
@@ -493,6 +620,40 @@ class AdsDailyOutputController extends Controller
         $promo = (string) array_key_first($promos);
 
         return $promo === '' ? null : $promo;
+    }
+
+    /**
+     * Ang mga item na tugma sa pangalan ng campaign: bawat bahagi (hinati sa "|") ay pareho ng item, o ang isa ay nasa
+     * loob ng isa, matapos i-normalize.
+     *
+     * @param  string[]  $itemNames
+     * @return string[]
+     */
+    public static function matchedItems(string $campaignName, array $itemNames): array
+    {
+        $tokens = [];
+        foreach (explode('|', $campaignName) as $part) {
+            $t = self::normalize($part);
+            if (self::matchable($t)) {
+                $tokens[] = $t;
+            }
+        }
+
+        $out = [];
+        foreach ($itemNames as $item) {
+            $i = self::normalize((string) $item);
+            if (! self::matchable($i)) {
+                continue;
+            }
+            foreach ($tokens as $t) {
+                if ($t === $i || str_contains($t, $i) || str_contains($i, $t)) {
+                    $out[] = (string) $item;
+                    break;
+                }
+            }
+        }
+
+        return $out;
     }
 
     private static function matchable(string $normalized): bool

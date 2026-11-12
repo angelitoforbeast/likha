@@ -93,9 +93,33 @@ abstract class AdsDailyOutputTestCase extends TestCase
 
         Artisan::call('migrate', ['--path' => [
             'database/migrations/2026_05_22_140000_create_ad_catalog_table.php',
+            // Spec 268: the page's main item per day and the chatbot page settings (main flow picture).
+            'database/migrations/2026_04_24_000009_create_daily_page_primary_item_table.php',
+            'database/migrations/2026_10_17_100000_create_page_settings_table.php',
+            'database/migrations/2026_11_03_100000_add_replaced_by_to_page_settings.php',
+            'database/migrations/2026_11_12_100000_add_source_to_page_settings.php',
             self::NAV_MIGRATION,
             self::LINK_MIGRATION,
         ], '--force' => true]);
+    }
+
+    /** One daily_page_primary_item row (page_key = the page name in lowercase), as DailyPrimaryItemService writes it. */
+    protected function primary(string $day, string $page, string $item): void
+    {
+        DB::table('daily_page_primary_item')->insert([
+            'ts_date' => $day, 'page_label' => $page, 'page_key' => mb_strtolower(trim($page)),
+            'primary_item' => $item, 'primary_item_key' => mb_strtolower(str_replace(' ', '', preg_replace('/^\d+\s*x\s+/i', '', $item))),
+            'primary_orders' => 10, 'total_orders_all' => 12, 'computed_at' => $day.' 12:00:00',
+        ]);
+    }
+
+    /** One page_settings chatbot/picture row: active while $replacedAt is null, else history. */
+    protected function picture(string $page, string $url, string $createdAt, ?string $replacedAt = null): void
+    {
+        DB::table('page_settings')->insert([
+            'page_name' => $page, 'provider' => 'chatbot', 'key' => 'picture', 'value' => $url, 'is_secret' => false,
+            'active' => $replacedAt === null, 'replaced_at' => $replacedAt, 'created_at' => $createdAt, 'updated_at' => $createdAt,
+        ]);
     }
 
     protected function tearDown(): void
