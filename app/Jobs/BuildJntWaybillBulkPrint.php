@@ -28,8 +28,8 @@ class BuildJntWaybillBulkPrint implements ShouldQueue
 
     public function __construct(public int $runId)
     {
-        // Every bulk print runs on the J&T print queue (spec 267).
-        $this->onQueue(config('jnt.queues.print', 'jnt-print'));
+        // Incepxion: bulk print is unused and stays on `default` (config jnt.queues.print, spec 267).
+        $this->onQueue(config('jnt.queues.print', 'default'));
     }
 
     public function handle(): void

@@ -17,10 +17,10 @@ use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
 
 /**
- * Spec 267: J&T booking (CreateJntOrder) runs on `jnt-book` and bulk waybill printing (BuildJntWaybillBulkPrint) on
- * `jnt-print`, from every dispatch site. Several booking workers never call J&T twice for one shipment, a failing
- * order counts once in its run, and a missing SENDER_NAME fails at once. Sqlite in memory, a fake J&T; the retries
- * run through the real database queue worker.
+ * Spec 267 (Incepxion): J&T booking (CreateJntOrder) runs on `jnt-book` from every dispatch site; bulk waybill
+ * printing (BuildJntWaybillBulkPrint, unused here) stays on `default`. Several booking workers never call J&T twice
+ * for one shipment, a failing order counts once in its run, and a missing SENDER_NAME fails at once. Sqlite in
+ * memory, a fake J&T; the retries run through the real database queue worker.
  */
 class JntQueuesTest extends TestCase
 {
@@ -210,7 +210,7 @@ class JntQueuesTest extends TestCase
         $this->assertJobsOn(CreateJntOrder::class, 'jnt-book', 2);
     }
 
-    public function test_bulk_print_queues_on_jnt_print(): void
+    public function test_bulk_print_stays_on_default_on_incepxion(): void
     {
         Queue::fake();
 
@@ -219,7 +219,7 @@ class JntQueuesTest extends TestCase
         $this->post('/jnt/waybills/print-bulk', ['mode' => 'all', 'date' => '2026-11-12', 'filter_by' => 'page', 'filter_value' => self::PAGE])
             ->assertRedirect();
 
-        $this->assertJobsOn(BuildJntWaybillBulkPrint::class, 'jnt-print', 2);
+        $this->assertJobsOn(BuildJntWaybillBulkPrint::class, 'default', 2);
     }
 
     public function test_the_queue_names_come_from_config_and_survive_a_retry_from_failed_jobs(): void

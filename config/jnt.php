@@ -14,11 +14,12 @@ return [
 
     'timeout' => env('JNT_TIMEOUT', 30),
 
-    // Queues of the J&T jobs (spec 267): booking (CreateJntOrder) and bulk waybill print (BuildJntWaybillBulkPrint)
-    // each have their own workers (deploy/supervisor/likha-queue-jnt.conf), apart from `default`.
+    // Queues of the J&T jobs (spec 267). Incepxion: booking (CreateJntOrder) has its own workers
+    // (deploy/supervisor/incepxion-queue-jnt.conf); bulk waybill print (BuildJntWaybillBulkPrint) is unused here
+    // and stays on `default`, which has a worker.
     'queues' => [
         'book'  => env('JNT_BOOK_QUEUE', 'jnt-book'),
-        'print' => env('JNT_PRINT_QUEUE', 'jnt-print'),
+        'print' => env('JNT_PRINT_QUEUE', 'default'),
     ],
 
     'signing' => [
