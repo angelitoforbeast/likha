@@ -52,6 +52,15 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
 
     private const CHUNK_SIZE = 2000;
 
+    /** ads_manager_reports.headline is varchar(1000) (spec 264): a longer headline is cut, never fails the upload. */
+    private const HEADLINE_MAX = 1000;
+
+    /** ad_catalog.ad_name (the headline as the ad's label) is varchar(500). */
+    private const AD_NAME_MAX = 500;
+
+    /** upload_logs.error_message is text: 65,535 bytes. */
+    private const ERROR_MESSAGE_MAX_BYTES = 65535;
+
     public function __construct(
         public string $storedPath,  // storage-relative path (disk can be local OR s3)
         public ?int   $userId = null,
@@ -184,6 +193,7 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
             if ($log) {
                 $log->update([
                     'status'            => 'failed',
+                    'error_message'     => self::failureMessage($e),
                     'processed_rows'    => $this->processed,
                     'inserted'          => $this->inserted,
                     'updated'           => $this->updated,
@@ -209,6 +219,21 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
                 }
             }
         }
+    }
+
+    /**
+     * The failed upload's reason in one short line for the Upload Logs (spec 264): the message is cut before
+     * " (Connection:" so the SQL and the ad text are not stored, and capped to the column. failed_jobs keeps the trace.
+     */
+    private static function failureMessage(\Throwable $e): string
+    {
+        $msg = $e->getMessage();
+        $cut = strpos($msg, ' (Connection:');
+        if ($cut !== false) $msg = substr($msg, 0, $cut);
+        $msg = trim((string) preg_replace('/\s+/u', ' ', $msg));
+        if ($msg === '') $msg = class_basename($e);
+
+        return mb_strcut('Import failed: ' . $msg, 0, self::ERROR_MESSAGE_MAX_BYTES, 'UTF-8');
     }
 
     /**
@@ -630,6 +655,12 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
 
     private function upsertChunk(array $rows): void
     {
+        // A headline longer than the column is cut (mb-safe), for the upload and the sync alike (spec 264).
+        foreach ($rows as &$r) {
+            if (isset($r['headline']) && is_string($r['headline'])) $r['headline'] = mb_substr($r['headline'], 0, self::HEADLINE_MAX);
+        }
+        unset($r);
+
         DB::beginTransaction();
         try {
             $now = now()->toDateTimeString();
@@ -1020,6 +1051,11 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
         }
 
         if (empty($byAdId)) return;
+
+        foreach ($byAdId as &$b) {
+            if (is_string($b['ad_name'])) $b['ad_name'] = mb_substr($b['ad_name'], 0, self::AD_NAME_MAX);
+        }
+        unset($b);
 
         $driver = DB::getDriverName();
 
