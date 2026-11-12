@@ -191,7 +191,7 @@
 
                     {{-- Description --}}
                     <td class="px-3 py-3 text-gray-400 text-sm align-top">
-                      {{ $task->description ?: '—' }}
+                      {{ $task->description ? \App\Support\ChecklistText::render($task->description) : '—' }}
                     </td>
 
                     {{-- Images --}}
