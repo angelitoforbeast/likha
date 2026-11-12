@@ -161,10 +161,14 @@ class JntQueuesTest extends TestCase
         return DB::table('jnt_batch_runs')->first();
     }
 
-    /** The live worker: queue:work database --queue=jnt-book until the queue is empty (retries included). */
+    /**
+     * The live worker: queue:work database --queue=jnt-book until the queue is empty (retries included). --memory is
+     * high because the whole suite runs in one process: past the default 128 MB the worker stops after one job.
+     */
     private function work(string $queue = 'jnt-book'): void
     {
-        Artisan::call('queue:work', ['connection' => 'database', '--queue' => $queue, '--stop-when-empty' => true, '--sleep' => 0]);
+        Artisan::call('queue:work', ['connection' => 'database', '--queue' => $queue, '--stop-when-empty' => true, '--sleep' => 0,
+            '--memory' => 4096]);
     }
 
     private function pushBooking(int $shipmentId): void
