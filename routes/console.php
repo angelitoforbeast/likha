@@ -144,6 +144,12 @@ Schedule::command('botcake:setup-delivered')
     ->hourlyAt(45)
     ->withoutOverlapping(30);
 
+// J&T waybill labels kept after booking (spec 269): 14 days only. 04:30 Manila, after the 04:20 and 04:25 prunes.
+Schedule::command('jnt:prune-labels')
+    ->timezone('Asia/Manila')
+    ->dailyAt('04:30')
+    ->withoutOverlapping(30);
+
 // Mga chat ng customer mula sa Botcake (/api/botcake/chat): 90 araw lang ang itinatago.
 Schedule::command('botcake:prune-chats')
     ->timezone('Asia/Manila')

@@ -16,6 +16,9 @@ use Carbon\Carbon;
 
 class JntOrderUiController extends Controller
 {
+    /** The page dropdown's "All ready pages" choice (spec 269). */
+    public const ALL_PAGES = '__all_ready__';
+
     public function index(Request $request)
 {
     $runId = $request->input('run_id');
@@ -26,6 +29,10 @@ class JntOrderUiController extends Controller
     // ✅ Base date/page from request
     $date = $request->input('date') ?: now('Asia/Manila')->toDateString();
     $page = trim((string) $request->input('page', ''));
+
+    // Spec 269: "All ready pages" shows the date as with no page picked; only Create Batch differs.
+    $allPages = $page === self::ALL_PAGES;
+    if ($allPages) $page = '';
 
     // ✅ If opened via ?run_id=123 only, use run->filters for date/page
     if ($run && !$request->filled('date') && !$request->filled('page')) {
@@ -373,6 +380,8 @@ class JntOrderUiController extends Controller
         sort($senderNamesForRows);
     }
 
+    if ($allPages) $page = self::ALL_PAGES;
+
     return view('jnt.orders.index', compact(
         'date','page','pages','run','rows','runStats','senderPreview','statusGate','accountCheck','retryFailCount',
         'useItemMappingForPage','senderNameMap','senderNamesForRows'
@@ -385,18 +394,90 @@ class JntOrderUiController extends Controller
     $date = $request->input('date') ?: now('Asia/Manila')->toDateString();
     $page = trim((string) $request->input('page', ''));
 
+    if ($page === self::ALL_PAGES) {
+        return $this->createBatchAllPages($date);
+    }
+
     if ($page === '') {
         return redirect()->to(url('/jnt/orders') . '?date=' . urlencode($date))
             ->with('error', 'Please select a Page first.');
     }
 
+    $result = $this->batchPage($date, $page);
+    $back = redirect()->to(url('/jnt/orders') . '?date=' . urlencode($date) . '&page=' . urlencode($page));
+
+    if (isset($result['error'])) {
+        return $back->with('error', $result['error']);
+    }
+
+    return $back->with('success', "Batch created. Run #{$result['run']->id} with {$result['total']} shipments queued.");
+}
+
+    /**
+     * Spec 269: "All ready pages" — every page with rows on the date goes through the same gates as a single page;
+     * each ready page gets its own run, the others are listed with the reason.
+     */
+    private function createBatchAllPages(string $date)
+    {
+        $dayStart = Carbon::parse($date, 'Asia/Manila')->startOfDay();
+        $dayEnd   = Carbon::parse($date, 'Asia/Manila')->endOfDay();
+
+        $pages = DB::table('macro_output')
+            ->whereBetween('ts_date', [$dayStart, $dayEnd])
+            ->whereNotNull('PAGE')->where('PAGE', '!=', '')
+            ->select('PAGE')->distinct()
+            ->orderBy('PAGE')
+            ->pluck('PAGE')
+            ->all();
+
+        $queued = [];
+        $skipped = [];
+        foreach ($pages as $page) {
+            try {
+                $result = $this->batchPage($date, (string) $page);
+            } catch (\Throwable $e) {
+                report($e);
+                $result = ['error' => 'Error: ' . $e->getMessage()];
+            }
+
+            if (isset($result['error'])) {
+                $skipped[] = ['page' => (string) $page, 'reason' => $result['error']];
+            } else {
+                $queued[] = ['page' => (string) $page, 'run_id' => $result['run']->id, 'total' => $result['total']];
+            }
+        }
+
+        $orders = array_sum(array_column($queued, 'total'));
+        $headline = $queued
+            ? 'All ready pages: ' . count($queued) . ' page(s) queued, ' . $orders . ' order(s). ' . count($skipped) . ' page(s) skipped.'
+            : 'All ready pages: no page was ready. ' . count($skipped) . ' page(s) skipped.';
+
+        return redirect()->to(url('/jnt/orders') . '?date=' . urlencode($date) . '&page=' . urlencode(self::ALL_PAGES))
+            ->with($queued ? 'success' : 'error', $headline)
+            ->with('batch_summary', ['queued' => $queued, 'skipped' => $skipped]);
+    }
+
+    /**
+     * The Create Batch of one page: the account mapping, STATUS and PROCEED gates, the already-shipped skip, then one
+     * run and one booking job per new order. One request at a time per date+page, so two clicks never queue the same
+     * orders twice.
+     *
+     * @return array{run?: JntBatchRun, total?: int, error?: string}
+     */
+    private function batchPage(string $date, string $page): array
+    {
     // ✅ JNT Account mapping check — hard block if no account mapped
     $mapping = PageJntMapping::with('account')->where('page', $page)->first();
     if (!$mapping || !$mapping->account) {
-        return redirect()->to(url('/jnt/orders') . '?date=' . urlencode($date) . '&page=' . urlencode($page))
-            ->with('error', 'No JNT Account mapped for "' . $page . '". Go to JNT Accounts → Page Mapping to assign one before creating a batch.');
+        return ['error' => 'No JNT Account mapped for "' . $page . '". Go to JNT Accounts → Page Mapping to assign one before creating a batch.'];
     }
 
+    $lock = Cache::lock('jnt-batch:' . md5($date . '|' . $page), 120);
+    if (!$lock->get()) {
+        return ['error' => 'A batch for "' . $page . '" on ' . $date . ' is being created right now. Refresh in a moment.'];
+    }
+
+    try {
     $dayStart = Carbon::parse($date, 'Asia/Manila')->startOfDay();
     $dayEnd   = Carbon::parse($date, 'Asia/Manila')->endOfDay();
 
@@ -415,8 +496,7 @@ class JntOrderUiController extends Controller
         ->count();
 
     if ($missingStatus > 0) {
-        return redirect()->to(url('/jnt/orders') . '?date=' . urlencode($date) . '&page=' . urlencode($page))
-            ->with('error', "STATUS INCOMPLETE: {$missingStatus} missing STATUS out of {$totalAll} rows. Fill STATUS for ALL rows first.");
+        return ['error' => "STATUS INCOMPLETE: {$missingStatus} missing STATUS out of {$totalAll} rows. Fill STATUS for ALL rows first."];
     }
 
     // 2) PROCEED validation gate (PROCEED rows must have validate_1/2/item_checker = 1)
@@ -432,8 +512,7 @@ class JntOrderUiController extends Controller
         ->count();
 
     if ($invalidProceed > 0) {
-        return redirect()->to(url('/jnt/orders') . '?date=' . urlencode($date) . '&page=' . urlencode($page))
-            ->with('error', "VALIDATION INCOMPLETE: {$invalidProceed} invalid PROCEED rows out of {$proceedTotal}. Required: validate_1=1, validate_2=1, item_checker=1 for ALL PROCEED rows.");
+        return ['error' => "VALIDATION INCOMPLETE: {$invalidProceed} invalid PROCEED rows out of {$proceedTotal}. Required: validate_1=1, validate_2=1, item_checker=1 for ALL PROCEED rows."];
     }
 
     // ✅ Only PROCEED + validated rows are eligible
@@ -470,8 +549,7 @@ class JntOrderUiController extends Controller
     $total = count($macroIds);
 
     if ($total <= 0) {
-        return redirect()->to(url('/jnt/orders') . '?date=' . urlencode($date) . '&page=' . urlencode($page))
-            ->with('error', 'No new orders to batch. All PROCEED rows already have shipment records. Use "Retry Failed" for failed ones.');
+        return ['error' => 'No new orders to batch. All PROCEED rows already have shipment records. Use "Retry Failed" for failed ones.'];
     }
 
     $run = JntBatchRun::query()->create([
@@ -512,11 +590,11 @@ class JntOrderUiController extends Controller
         }
     }
 
-    return redirect()
-        ->to(url('/jnt/orders') . '?date=' . urlencode($date) . '&page=' . urlencode($page))
-        ->with('success', "Batch created. Run #{$run->id} with {$total} shipments queued.");
-}
-
+    return ['run' => $run, 'total' => $total];
+    } finally {
+        $lock->release();
+    }
+    }
 
     public function showRun(int $runId)
     {

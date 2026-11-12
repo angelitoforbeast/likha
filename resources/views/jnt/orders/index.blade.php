@@ -7,6 +7,8 @@
     $selectedDate = $date ?? request('date') ?? now('Asia/Manila')->toDateString();
     $selectedPage = $page ?? request('page') ?? '';
     $runId        = request('run_id');
+    $allPagesValue = \App\Http\Controllers\JntOrderUiController::ALL_PAGES;
+    $isAllPages    = $selectedPage === $allPagesValue;
 
     $pages = $pages ?? [];
     $rows  = $rows ?? [];
@@ -87,6 +89,30 @@
       {{ session('error') }}
     </div>
   @endif
+  @if(is_array(session('batch_summary')))
+    @php $batchSummary = session('batch_summary'); @endphp
+    <div class="mb-4 card p-3 text-sm">
+      @if(!empty($batchSummary['queued']))
+        <div class="font-semibold text-green-800">Queued</div>
+        <ul class="mt-1 mb-2">
+          @foreach($batchSummary['queued'] as $q)
+            <li>
+              <a href="{{ url('jnt/orders') }}?run_id={{ $q['run_id'] }}" class="underline">{{ $q['page'] }}</a>
+              — Run #{{ $q['run_id'] }}, {{ $q['total'] }} order(s)
+            </li>
+          @endforeach
+        </ul>
+      @endif
+      @if(!empty($batchSummary['skipped']))
+        <div class="font-semibold text-red-800">Skipped</div>
+        <ul class="mt-1">
+          @foreach($batchSummary['skipped'] as $s)
+            <li><span class="font-medium">{{ $s['page'] }}</span> — {{ $s['reason'] }}</li>
+          @endforeach
+        </ul>
+      @endif
+    </div>
+  @endif
 
   {{-- ✅ Gate banner (preview only) --}}
   @if($gateBlocked)
@@ -127,6 +153,7 @@
           <label class="block text-sm font-medium mb-1">Page</label>
           <select id="jsPage" name="page" class="border rounded-lg px-3 py-2 text-sm w-64">
             <option value="">-- Select Page --</option>
+            <option value="{{ $allPagesValue }}" @selected($isAllPages)>— All ready pages —</option>
             @foreach(($pages ?? []) as $pVal)
               @if($pVal !== '')
                 <option value="{{ $pVal }}" @selected($selectedPage === $pVal)>{{ $pVal }}</option>
@@ -229,7 +256,7 @@
           @php $snVal = data_get($senderPreview,'sender_name',''); @endphp
           @if($snVal !== '')
             <div class="font-medium">{{ $snVal }}</div>
-          @elseif(empty($selectedPage))
+          @elseif(empty($selectedPage) || $isAllPages)
             <div class="text-xs text-gray-400 mt-1">Select a Page para makita yung mapped SENDER_NAME.</div>
           @else
             <div class="font-semibold text-red-600">⚠ No mapping found</div>
@@ -256,7 +283,7 @@
       </div>
 
       {{-- JNT Account indicator --}}
-      @if($selectedPage !== '' && !$isRunView)
+      @if($selectedPage !== '' && !$isRunView && !$isAllPages)
         <div class="p-3 border rounded-lg
           {{ $accountOk ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50' }}">
           <div class="text-xs mb-1 {{ $accountOk ? 'text-green-700' : 'text-red-700' }} font-medium">

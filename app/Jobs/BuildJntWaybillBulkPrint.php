@@ -4,7 +4,8 @@ namespace App\Jobs;
 
 use App\Models\JntWaybillPrintRun;
 use App\Models\JntWaybillPrintRunItem;
-use App\Services\Jnt\JntClient;
+use App\Services\Jnt\JntLabelFetcher;
+use App\Services\Jnt\JntLabelStore;
 use Carbon\Carbon;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -25,6 +26,12 @@ class BuildJntWaybillBulkPrint implements ShouldQueue
     // while it builds. A run of 75-400 labels takes seconds to a few minutes (spec 267).
     public int $timeout = 1800;
     public int $tries = 1;
+
+    /** How long a batch of missing labels waits for free J&T label slots (shared with the other workers). */
+    public const SLOT_WAIT_SECONDS = 300;
+
+    /** Items looked up and fetched together before they are stitched (progress still moves every few seconds). */
+    public const FETCH_SLICE = 100;
 
     public function __construct(public int $runId)
     {
@@ -77,20 +84,11 @@ class BuildJntWaybillBulkPrint implements ShouldQueue
             'started_at' => optional($run->started_at)->toDateTimeString(),
         ]);
 
-        // Per-page J&T client cache. Each waybill picks its account via
-        // JntClient::fromPageOrConfig($page). Items with no resolvable page
-        // (mailno not sa jnt_shipments) fall back to env credentials.
-        // Keyed by string page name; '' key = env-config fallback.
-        $clientsByPage = [];
-        $getClient = function (?string $page) use (&$clientsByPage): JntClient {
-            $key = trim((string) $page);
-            if (!isset($clientsByPage[$key])) {
-                $clientsByPage[$key] = $key !== ''
-                    ? JntClient::fromPageOrConfig($key)
-                    : JntClient::fromConfig();
-            }
-            return $clientsByPage[$key];
-        };
+        // Spec 269: labels kept after booking are stitched as they are; only the missing ones are fetched, in
+        // parallel batches with each waybill's own J&T account (JntLabelFetcher picks it per page; no page → the
+        // .env account), and kept too.
+        $store   = app(JntLabelStore::class);
+        $fetcher = app(JntLabelFetcher::class);
 
         // Resolve page-per-mailno via JOIN through jnt_shipments → macro_output.
         // ONE batch query at start of run; cached in $pageByMailno for the
@@ -152,62 +150,83 @@ class BuildJntWaybillBulkPrint implements ShouldQueue
 
             $okInThisPart = 0;
 
-            foreach ($items as $it) {
-                $mailno = (string) $it->mailno;
-
-                try {
-                    // Pick the right J&T account based on this waybill's source
-                    // page (resolved via pre-built $pageByMailno map). No
-                    // match → fallback to env credentials.
-                    $page   = $pageByMailno[$mailno] ?? null;
-                    $client = $getClient($page);
-                    $res = $client->printWaybill($mailno);
-
-                    $b64 = data_get($res, 'responseitems.base64Url')
-                        ?? data_get($res, 'responseitems.0.base64Url');
-
-                    if (!$b64) {
-                        $this->markFail($run, $it, "{$mailno} | no base64Url");
-                        continue;
+            // A slice at a time (kept labels, then the missing ones fetched together), so progress moves as before.
+            foreach ($items->chunk(self::FETCH_SLICE) as $slice) {
+                // This slice's labels: kept ones first, then the missing ones fetched together.
+                $labelPaths = [];
+                $missing = [];
+                foreach ($slice as $it) {
+                    $mailno = (string) $it->mailno;
+                    $kept = $store->path($mailno);
+                    if ($kept !== null) {
+                        $labelPaths[$mailno] = ['path' => $kept, 'kept' => true];
+                    } else {
+                        $missing[$mailno] = $pageByMailno[$mailno] ?? null;
                     }
-
-                    $bytes = base64_decode(preg_replace('/\s+/', '', (string) $b64), true);
-                    if ($bytes === false) {
-                        $this->markFail($run, $it, "{$mailno} | invalid base64");
-                        continue;
-                    }
-
-                    // FPDI needs a temp file
-                    $tmp = tempnam(sys_get_temp_dir(), 'wb_');
-                    file_put_contents($tmp, $bytes);
-
-                    $pageCount = $pdf->setSourceFile($tmp);
-                    for ($p = 1; $p <= $pageCount; $p++) {
-                        $tpl = $pdf->importPage($p);
-                        $size = $pdf->getTemplateSize($tpl);
-                        $pdf->AddPage($size['orientation'], [$size['width'], $size['height']]);
-                        $pdf->useTemplate($tpl);
-                    }
-
-                    @unlink($tmp);
-
-                    // mark ok
-                    $it->status = 'ok';
-                    $it->error = null;
-                    $it->save();
-
-                    $run->processed++;
-                    $run->ok_count++;
-                    $run->pages += (int) $pageCount;  // total PDF pages (for pages/min)
-                    $okInThisPart++;
-
-                } catch (\Throwable $e) {
-                    $this->markFail($run, $it, "{$mailno} | " . $e->getMessage());
+                }
+                if ($missing !== []) {
+                    $labelPaths += $fetcher->fetchMany($missing, self::SLOT_WAIT_SECONDS);
                 }
 
-                // light progress saves (every 10)
-                if (($run->processed % 10) === 0) {
-                    $run->save();
+                foreach ($slice as $it) {
+                    $mailno = (string) $it->mailno;
+                    $label  = $labelPaths[$mailno] ?? ['error' => 'no label'];
+
+                    try {
+                        if (isset($label['error'])) {
+                            $this->markFail($run, $it, "{$mailno} | {$label['error']}");
+                            continue;
+                        }
+
+                        try {
+                            $pageCount = $this->stitch($pdf, $label['path']);
+                        } catch (\Throwable $e) {
+                            if (empty($label['kept'])) {
+                                throw $e;
+                            }
+                            // A kept file that does not parse: deleted, fetched again once.
+                            $store->forget($mailno);
+                            $label = $fetcher->fetchMany([$mailno => $pageByMailno[$mailno] ?? null], self::SLOT_WAIT_SECONDS)[$mailno]
+                                ?? ['error' => 'no label'];
+                            if (isset($label['error'])) {
+                                $this->markFail($run, $it, "{$mailno} | {$label['error']}");
+                                continue;
+                            }
+                            // FPDI remembers a source by its path: the new label is stitched from its own copy.
+                            $copy = tempnam(sys_get_temp_dir(), 'wb_');
+                            copy($label['path'], $copy);
+                            if (!empty($label['temp'])) {
+                                @unlink($label['path']);
+                            }
+                            $labelPaths[$mailno] = ['path' => $copy, 'temp' => true];
+                            $pageCount = $this->stitch($pdf, $copy);
+                        }
+
+                        // mark ok
+                        $it->status = 'ok';
+                        $it->error = null;
+                        $it->save();
+
+                        $run->processed++;
+                        $run->ok_count++;
+                        $run->pages += (int) $pageCount;  // total PDF pages (for pages/min)
+                        $okInThisPart++;
+
+                    } catch (\Throwable $e) {
+                        $this->markFail($run, $it, "{$mailno} | " . $e->getMessage());
+                    }
+
+                    // light progress saves (every 10)
+                    if (($run->processed % 10) === 0) {
+                        $run->save();
+                    }
+                }
+
+                // labels that could not be kept were handed over as temp files
+                foreach ($labelPaths as $label) {
+                    if (!empty($label['temp'])) {
+                        @unlink($label['path']);
+                    }
                 }
             }
 
@@ -339,6 +358,20 @@ class BuildJntWaybillBulkPrint implements ShouldQueue
             'started_at'    => optional($run->started_at)->toDateTimeString(),
             'finished_at'   => optional($run->finished_at)->toDateTimeString(),
         ]);
+    }
+
+    /** Adds every page of one label PDF to the output; returns its page count. */
+    private function stitch(Fpdi $pdf, string $path): int
+    {
+        $pageCount = $pdf->setSourceFile($path);
+        for ($p = 1; $p <= $pageCount; $p++) {
+            $tpl = $pdf->importPage($p);
+            $size = $pdf->getTemplateSize($tpl);
+            $pdf->AddPage($size['orientation'], [$size['width'], $size['height']]);
+            $pdf->useTemplate($tpl);
+        }
+
+        return (int) $pageCount;
     }
 
     private function markFail(JntWaybillPrintRun $run, JntWaybillPrintRunItem $it, string $msg): void
