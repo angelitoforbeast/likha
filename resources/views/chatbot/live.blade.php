@@ -98,7 +98,9 @@
         <svg class="logo" viewBox="0 0 46 36" aria-hidden="true"><path d="M2 4h34M2 16h42M2 28h26"/></svg>
         <h1>{{ strtoupper($site) }} LIVE</h1>
         <span class="lv-status" data-live-status="live"><i class="dot" data-beat role="img" aria-label="Live"></i><span data-live-state>LIVE</span></span>
+        <button class="chip-snd" type="button" data-live-sound-chip hidden>Click to enable sound</button>
         <span class="sp"></span>
+        <button class="btn snd ctl" type="button" data-live-sound data-on="true" data-live-sound-src="{{ $v('sounds/new-message.wav') }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4z"/><path class="w" d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/><path class="x" d="M16 9l6 6M22 9l-6 6"/></svg><span data-live-sound-label>Sound on</span></button>
         <button class="btn ctl" type="button" data-live-filter aria-label="Filters" aria-expanded="false" aria-controls="lv-filters"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18l-7 8v6l-4-2v-4z"/></svg></button>
         <span class="clk" tabindex="0" aria-label="Time" aria-describedby="lv-card-clock"><b data-live-clock>{{ $feed['now'] }}</b></span>
         <button class="btn ctl" type="button" aria-pressed="false" aria-label="3D view" data-live-3d>3D</button>
@@ -275,6 +277,12 @@
     [data-live-status="live"] [data-live-state] { display: none; }
     [data-live-status="error"] .dot, [data-live-status="off"] .dot, [data-live-status="hidden"] .dot { background: var(--gold); }
     .hd .sp { flex: 1; }
+    /* Spec 275: ang tunog. Ang chip ay nakikita rin sa TV mode (walang .ctl), dahil doon pinakakailangan ang tunog. */
+    .snd[data-on="true"] .x, .snd[data-on="false"] .w { display: none; }
+    .snd[data-on="false"] { color: var(--ink); opacity: .7; }
+    .chip-snd { height: 36px; padding: 0 14px; background: var(--gold); color: #3a2400; border: 0; border-radius: 18px; font: 700 18px var(--cond); letter-spacing: .06em; cursor: pointer; }
+    .chip-snd[hidden] { display: none; }
+    .chip-snd:focus-visible { outline: 3px solid var(--ice); outline-offset: 2px; }
     .clk { font: 700 36px/1 var(--cond); letter-spacing: .05em; margin: 0 6px; outline: none; }
     .btn { height: 44px; min-width: 50px; padding: 0 14px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; background: rgba(40,150,200,.1);
         border: 1.5px solid rgba(111,216,255,.5); color: var(--ice); font: 700 21px var(--cond); letter-spacing: .14em; cursor: pointer; border-radius: 6px; text-decoration: none; }
@@ -324,6 +332,7 @@
 
 @push('scripts')
 <script src="{{ $v('js/chatbot-live-rules.js') }}"></script>
+<script src="{{ $v('js/chatbot-live-sound.js') }}"></script>
 <script>
 // /chatbot/live bilang hologram wall: ang feed ay pino-poll kada 5 segundo (tumitigil kapag nakatago ang tab). Ang mga graphic ay
 // canvas na iginuguhit nang 30 beses kada segundo (walang blur: ang liwanag ay mga sprite na idinadagdag); ang mga numero ay DOM
@@ -1058,13 +1067,51 @@
         el.addEventListener('click', () => cardOn && cardOn.id === 'lv-card-' + id && document.activeElement !== el ? hideCard() : showCard(id, el));
     });
 
+    // -- ang tunog (spec 275): isang chime kapag may bagong mensahe ng customer sa poll (LiveSound.arrive: event na "message"
+    // lang, hanggang isa kada 3 segundo). Naka-on ang default, naaalala ng browser na ito. Kapag hinarang ng browser ang tunog
+    // (wala pang click sa page), lumalabas ang chip; ang isang click doon ay nagpapatunog ng test. Habang naka-on, tuloy ang poll
+    // kahit nakatago ang tab (walang animation doon), at ang title ay may bilang ng hindi pa nakikita hanggang makita ulit.
+    const SND = self.LiveSound;
+    const sndBtn = root.querySelector('[data-live-sound]'), sndChip = root.querySelector('[data-live-sound-chip]');
+    const baseTitle = document.title;
+    let soundOn = true, ding = null, heard0 = {last: null, unread: 0};
+    function chime() {
+        if (!ding) return;
+        try { ding.currentTime = 0; } catch (e) { /* hindi pa handa ang file: tutunog mula sa simula pa rin */ }
+        const p = ding.play();
+        if (p && p.then) p.then(() => { sndChip.hidden = true; }, e => { if (soundOn && (!e || e.name === 'NotAllowedError')) sndChip.hidden = false; });
+    }
+    function setSound(on, save) {
+        soundOn = on;
+        sndBtn.dataset.on = on ? 'true' : 'false';
+        sndBtn.querySelector('[data-live-sound-label]').textContent = on ? 'Sound on' : 'Sound off';
+        if (save) SND.saveOn(store, on);
+        if (!on) { sndChip.hidden = true; heard0.unread = 0; document.title = baseTitle; }
+    }
+    function heard(events) {
+        const r = SND.arrive(heard0, events, Date.now(), soundOn, document.hidden);
+        heard0 = {last: r.last, unread: r.unread};
+        if (r.ring) chime();
+        document.title = SND.title(baseTitle, heard0.unread);
+    }
+    step('sound', () => {
+        ding = new Audio(sndBtn.dataset.liveSoundSrc);
+        ding.preload = 'auto'; ding.volume = .6;
+        setSound(SND.readOn(store), false);
+        // Ang pag-on ay click (pinapayagan ng browser): isang test na tunog. Ang chip: isang click, test na tunog, nawawala.
+        sndBtn.addEventListener('click', () => { setSound(!soundOn, true); if (soundOn) chime(); });
+        sndChip.addEventListener('click', chime);
+        // Wala pang click sa page na ito: siguradong haharangin ang unang tunog, kaya ang chip ay lumalabas na agad.
+        if (soundOn && navigator.userActivation && !navigator.userActivation.hasBeenActive) sndChip.hidden = false;
+    });
+
     const statusEl = root.querySelector('[data-live-status]');
     function setStatus(state, label) { statusEl.dataset.liveStatus = state; statusEl.querySelector('[data-live-state]').textContent = label; }
     // Ang tuldok ng status ay pumipintig isang beses kada matagumpay na poll (hindi walang-tigil), kaya totoo ang "buhay".
     function beat() { if (!live.reduced) for (const e of all('[data-beat]')) again(e, 'beat'); fire('avg', -1, '#e9fbff'); }
     async function poll() {
         clearTimeout(live.timer);
-        if (document.hidden || live.inflight) return;
+        if ((document.hidden && !soundOn) || live.inflight) return;
         live.inflight = true;
         const q = new URLSearchParams();
         if (boot.page) q.set('page_id', boot.page);
@@ -1083,7 +1130,8 @@
             const plan = step('plan', () => schedule(events)) || {actions: []};
             step('counts', () => setCounts(data.counts, data.now));
             for (const e of all('[data-live-updated]')) e.textContent = data.now;
-            step('play', () => play(plan));
+            step('sound', () => heard(events));
+            if (!document.hidden) step('play', () => play(plan));
             setStatus('live', data.more > 0 ? 'LIVE' + DOT + '+' + (R.num ? R.num(data.more) : data.more) : 'LIVE');
             step('beat', beat);
         } catch (e) {
@@ -1092,11 +1140,12 @@
         } finally {
             live.inflight = false;
         }
-        if (!document.hidden && statusEl.dataset.liveStatus !== 'off') live.timer = setTimeout(poll, live.fail ? Math.min(30000, boot.interval * 2 ** live.fail) : boot.interval);
+        if ((!document.hidden || soundOn) && statusEl.dataset.liveStatus !== 'off') live.timer = setTimeout(poll, live.fail ? Math.min(30000, boot.interval * 2 ** live.fail) : boot.interval);
     }
     document.addEventListener('visibilitychange', () => {
         if (statusEl.dataset.liveStatus === 'off') return;
-        if (document.hidden) { clearTimeout(live.timer); setStatus('hidden', 'PAUSED'); } else { setStatus('live', 'LIVE'); poll(); kick(); }
+        if (document.hidden) { if (!soundOn) { clearTimeout(live.timer); setStatus('hidden', 'PAUSED'); } }
+        else { heard0.unread = 0; document.title = baseTitle; setStatus('live', 'LIVE'); poll(); kick(); }
     });
 
     // -- ang header: filter sa likod ng funnel, 3D (naaalala ng browser na ito; 2D ang default), TV mode --
