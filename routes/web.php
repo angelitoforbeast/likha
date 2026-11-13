@@ -398,6 +398,13 @@ Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('chatbot')->name('chatb
     Route::post('/ai-keys/{id}/enabled', [\App\Http\Controllers\ChatbotAiKeyController::class, 'enabled'])->middleware('throttle:30,1,chatbot-ai-keys-save')->name('ai-keys.enabled');
     Route::post('/ai-keys/{id}/label', [\App\Http\Controllers\ChatbotAiKeyController::class, 'label'])->middleware('throttle:30,1,chatbot-ai-keys-save')->name('ai-keys.label');
     Route::delete('/ai-keys/{id}', [\App\Http\Controllers\ChatbotAiKeyController::class, 'destroy'])->middleware('throttle:30,1,chatbot-ai-keys-save')->name('ai-keys.destroy');
+    // Botcake Accounts (spec 272): access by the page's own nav link (NavAccess, checked in the controller). Every action
+    // that calls Botcake is limited to 10 a minute per user; Remove to 30.
+    Route::get('/botcake-accounts', [\App\Http\Controllers\BotcakeAccountController::class, 'index'])->name('botcake-accounts.index');
+    Route::post('/botcake-accounts', [\App\Http\Controllers\BotcakeAccountController::class, 'store'])->middleware('throttle:10,1,chatbot-botcake-accounts')->name('botcake-accounts.store');
+    Route::get('/botcake-accounts/{id}/pages', [\App\Http\Controllers\BotcakeAccountController::class, 'pages'])->middleware('throttle:10,1,chatbot-botcake-accounts')->name('botcake-accounts.pages');
+    Route::post('/botcake-accounts/{id}/update-tokens', [\App\Http\Controllers\BotcakeAccountController::class, 'updateTokens'])->middleware('throttle:10,1,chatbot-botcake-accounts')->name('botcake-accounts.update-tokens');
+    Route::post('/botcake-accounts/{id}/remove', [\App\Http\Controllers\BotcakeAccountController::class, 'destroy'])->middleware('throttle:30,1,chatbot-botcake-accounts-remove')->name('botcake-accounts.remove');
     Route::get('/ai/compare', [\App\Http\Controllers\ChatbotAiController::class, 'compare'])->middleware('throttle:60,1,chatbot-ai-compare')->name('ai.compare');
     Route::post('/forbeast-token', [\App\Http\Controllers\ChatbotController::class, 'forbeastToken'])->middleware('throttle:30,1,chatbot-forbeast-token')->name('forbeast-token');
     Route::get('/connections', [\App\Http\Controllers\ChatbotController::class, 'connections'])->middleware('throttle:120,1,chatbot-connections')->name('connections');

@@ -143,6 +143,12 @@ Schedule::command('chatbot:connections-check')
 Schedule::command('botcake:setup-delivered')
     ->hourlyAt(45)
     ->withoutOverlapping(30);
+// Botcake Accounts (spec 272): each saved account token is checked once a day, early morning Manila, before the day's
+// work; only the check status changes (page tokens stay the button on /chatbot/botcake-accounts).
+Schedule::command('botcake:accounts-check')
+    ->timezone('Asia/Manila')
+    ->dailyAt('05:10')
+    ->withoutOverlapping(30);
 
 // J&T waybill labels kept after booking (spec 269): 14 days only. 04:30 Manila, after the 04:20 and 04:25 prunes.
 Schedule::command('jnt:prune-labels')
