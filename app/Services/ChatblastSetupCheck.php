@@ -167,7 +167,8 @@ class ChatblastSetupCheck
     {
         $label = $what === 'flow' ? 'flow' : 'custom field';
         if (count($hits) === 1) return ['id' => (string) array_key_first($hits), 'current' => $current, 'ok' => true, 'reason' => null, 'name' => reset($hits)];
-        $reason = !$hits ? 'No ' . $label . ' named ' . $name . ' in Botcake' : count($hits) . ' ' . $label . 's named ' . $name;
+        // Spec 271 amendment 2: ang doble ay malinaw kung ano ang gagawin.
+        $reason = !$hits ? 'No ' . $label . ' named ' . $name . ' in Botcake' : count($hits) . ' ' . $label . 's named ' . $name . ' in Botcake — keep only one';
 
         return ['id' => null, 'current' => $current, 'ok' => false, 'reason' => $reason, 'name' => null];
     }
@@ -230,14 +231,15 @@ class ChatblastSetupCheck
 
     /**
      * Lahat ng page na may X, "token invalid" o walang na-deliver (naka-cache BANNER_SECONDS), para sa banner ng mga problema.
-     * @return array<int, array{page: string, reason: string}> ayon sa pangalan ng page
+     * setup = true kapag ang setup mismo ang kulang (walang flow, field o template), hindi ang token o ang delivery.
+     * @return array<int, array{page: string, reason: string, setup: bool}> ayon sa pangalan ng page
      */
     public function pages(): array
     {
         return Cache::remember('chatblast:setup-banner', self::BANNER_SECONDS, fn () => $this->problems());
     }
 
-    /** @return array<int, array{page: string, reason: string}> ayon sa pangalan ng page */
+    /** @return array<int, array{page: string, reason: string, setup: bool}> ayon sa pangalan ng page */
     private function problems(): array
     {
         $pages = [];
@@ -255,12 +257,13 @@ class ChatblastSetupCheck
             if (!is_array($c)) continue;
             $d = json_decode($p[self::DELIVERY_KEY] ?? '', true);
             $reason = null;
-            if (($c['ok'] ?? null) === false) $reason = implode(', ', (array) ($c['x'] ?? [])) ?: 'the setup check failed';
+            $setup = ($c['ok'] ?? null) === false; // kulang ang setup mismo (flow, field o template), hindi ang token o ang delivery
+            if ($setup) $reason = implode(', ', (array) ($c['x'] ?? [])) ?: 'the setup check failed';
             elseif (($c['error'] ?? null) === 'token invalid') $reason = 'token invalid';
             elseif (is_array($d) && ($d['status'] ?? '') === 'not_delivered' && (string) ($d['flow_id'] ?? '') === trim($p['flow.shipping'] ?? '')) {
                 $reason = 'Sent ' . (int) ($d['sent'] ?? 0) . ', none delivered (Botcake)';
             }
-            if ($reason !== null) $out[] = ['page' => $p['name'], 'reason' => $reason];
+            if ($reason !== null) $out[] = ['page' => $p['name'], 'reason' => $reason, 'setup' => $setup];
         }
         usort($out, fn ($a, $b) => mb_strtolower($a['page']) <=> mb_strtolower($b['page']));
 

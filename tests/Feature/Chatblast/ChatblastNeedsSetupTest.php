@@ -186,11 +186,40 @@ class ChatblastNeedsSetupTest extends ChatblastTestCase
         $this->row('Karla Chavez', 'no_config', 'Page not ready: needs a test send');
         $this->travel(61)->seconds();
 
+        // Spec 271 amendment 1: pareho na sa /chatblast (nakatago muna, may bilang).
+        foreach (['/chatblast/page-settings', '/chatblast'] as $url) {
+            $this->get($url)->assertOk()
+                ->assertSee('<button id="needs-setup-toggle" type="button" aria-expanded="false" aria-controls="needs-setup-body"', false)
+                ->assertSeeInOrder(['id="needs-setup-toggle"', 'Needs setup (1 page)', '</button>', '<div id="needs-setup-body" hidden', 'Karla Chavez'], false);
+        }
+    }
+
+    public function test_S_271_A1_needs_setup_always_starts_folded_and_does_not_reopen_by_itself(): void
+    {
+        $this->actingAs($this->user());
+        $this->row('Karla Chavez', 'no_config', 'Page not ready: needs a test send');
+        $this->travel(61)->seconds();
+
+        foreach (['/chatblast/page-settings', '/chatblast'] as $url) {
+            $html = $this->get($url)->assertOk()->getContent();
+            $this->assertSame(1, preg_match('~<section id="needs-setup"(.*?)</section>~s', $html, $m), $url);
+            $this->assertStringNotContainsString(' open', $m[1], 'no open attribute: ' . $url);
+            $this->assertStringContainsString('<div id="needs-setup-body" hidden', $m[1]);
+            $this->assertStringContainsString('Needs setup (1 page)</button>', $m[1]);
+            // Walang naaalalang bukas at walang kusang pagbukas kapag dumami ang page.
+            $this->assertStringNotContainsString('chatblast.needsSetup', $html);
+            $this->assertStringNotContainsString('data-pages=', $html);
+        }
+    }
+
+    public function test_S_271_A1_the_long_help_text_is_gone_from_page_settings(): void
+    {
+        $this->actingAs($this->user());
+
         $this->get('/chatblast/page-settings')->assertOk()
-            ->assertSee('<button id="needs-setup-toggle" type="button" aria-expanded="false" aria-controls="needs-setup-body"', false)
-            ->assertSeeInOrder(['id="needs-setup-toggle"', 'Needs setup (1 page)', '</button>', '<div id="needs-setup-body" hidden', 'Karla Chavez'], false)
-            ->assertSee('data-pages="1"', false);
-        // Sa /chatblast, walang pagbabago: bukas pa rin ang listahan, walang toggle.
-        $this->get('/chatblast')->assertOk()->assertSee('Karla Chavez')->assertDontSee('needs-setup-toggle', false);
+            ->assertDontSee('Click a value and type: it saves by itself', false)
+            ->assertDontSee('Token / secret: blank = no change', false)
+            ->assertDontSee('the sync details, the other keys and the history.', false)
+            ->assertSee('id="summary-bar"', false);
     }
 }

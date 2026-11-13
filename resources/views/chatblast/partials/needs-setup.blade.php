@@ -2,14 +2,9 @@
 @if(!empty($needsSetup))
     @php($pages = \App\Services\ChatblastNeedsSetup::pageCount($needsSetup))
     <section id="needs-setup" class="mb-3 rounded-md border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-900" role="alert" aria-labelledby="needs-setup-title">
-        @if(!empty($collapsible))
-        {{-- Mahaba ang listahan: nakatago muna; tanda ng browser ang pinili. Bubukas ulit nang isang beses kapag dumami ang page mula sa huling nakita. --}}
-        <h2 id="needs-setup-title" class="font-semibold"><button id="needs-setup-toggle" type="button" aria-expanded="false" aria-controls="needs-setup-body" data-pages="{{ $pages }}" class="flex w-full items-center gap-1 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400 rounded"><span id="needs-setup-chevron" aria-hidden="true" class="inline-block transition-transform">&#9656;</span>Needs setup ({{ $pages }} {{ $pages === 1 ? 'page' : 'pages' }})</button></h2>
+        {{-- Spec 271 amendment 1: laging nakatago muna (isang linya na may bilang), sa /chatblast at sa page settings; bumubukas sa click. --}}
+        <h2 id="needs-setup-title" class="font-semibold"><button id="needs-setup-toggle" type="button" aria-expanded="false" aria-controls="needs-setup-body" class="flex w-full items-center gap-1 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400 rounded"><span id="needs-setup-chevron" aria-hidden="true" class="inline-block transition-transform">&#9656;</span>Needs setup ({{ $pages }} {{ $pages === 1 ? 'page' : 'pages' }})</button></h2>
         <div id="needs-setup-body" hidden class="mt-1">
-        @else
-        <h2 id="needs-setup-title" class="mb-1 font-semibold">Needs setup ({{ $pages }} {{ $pages === 1 ? 'page' : 'pages' }})</h2>
-        <div>
-        @endif
         <p class="mb-2 text-xs text-red-800">Chatblast messages of the last {{ \App\Services\ChatblastNeedsSetup::DAYS }} days that were not sent because of the page's setup. A line goes away by itself once the page sends again.</p>
         <ul class="space-y-1">
             @foreach($needsSetup as $row)
@@ -23,23 +18,17 @@
         </ul>
         </div>
     </section>
-    @if(!empty($collapsible))
     <script>
         (() => {
             const btn = document.getElementById('needs-setup-toggle'), body = document.getElementById('needs-setup-body'), chev = document.getElementById('needs-setup-chevron');
-            const KEY = 'chatblast.needsSetup', pages = Number(btn.dataset.pages);
-            let saved = null;
-            try { saved = JSON.parse(localStorage.getItem(KEY) || 'null'); } catch (e) {}
-            const choice = !!(saved && saved.open);
-            const save = (open) => { try { localStorage.setItem(KEY, JSON.stringify({open, seen: pages})); } catch (e) {} };
-            const show = (open) => { body.hidden = !open; btn.setAttribute('aria-expanded', open ? 'true' : 'false'); chev.style.transform = open ? 'rotate(90deg)' : ''; };
-            // Dumami ang page mula sa huling nakita: buksan ngayong beses lang; nananatili ang dating pinili.
-            show(choice || (saved !== null && pages > Number(saved.seen || 0)));
-            save(choice);
-            btn.addEventListener('click', () => { const open = body.hidden; show(open); save(open); });
+            btn.addEventListener('click', () => {
+                const open = body.hidden;
+                body.hidden = !open;
+                btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+                chev.style.transform = open ? 'rotate(90deg)' : '';
+            });
         })();
     </script>
-    @endif
 @endif
 {{-- Hindi maabot ang customer (Facebook #551/#100: na-block, deactivated): impormasyon lang, hindi setup, kaya walang Fix. --}}
 @if(!empty($unreachable))

@@ -70,7 +70,7 @@ class QuietSetupTest extends ChatblastTestCase
         $this->actingAs($this->user());
         $b = $this->banner();
         $this->assertSame('⚠ 1 page with problems (1 urgent)', $b['line']);
-        $this->assertSame([['level' => 'orange', 'text' => '🟠 Setup: ' . self::X . ' Page settings']], $b['pages']['Page Uno']['lines']);
+        $this->assertSame([['level' => 'orange', 'text' => '🟠 No shipping status setup: ' . self::X . ' Page settings']], $b['pages']['Page Uno']['lines']);
     }
 
     public function test_S_221_1_2_a_sending_page_with_no_order_in_14_days_is_white_and_not_urgent(): void
@@ -98,7 +98,7 @@ class QuietSetupTest extends ChatblastTestCase
         $b = $this->banner();
         $this->assertSame('⚠ 1 page with problems (1 urgent)', $b['line']);
         $this->assertSame('orange', $b['pages']['Page Uno']['level']);
-        $this->assertStringStartsWith('🟠 Setup: ', $b['pages']['Page Uno']['lines'][0]['text']);
+        $this->assertStringStartsWith('🟠 No shipping status setup: ', $b['pages']['Page Uno']['lines'][0]['text']);
     }
 
     public function test_S_221_1_4_page_names_that_differ_in_case_or_spacing_are_matched_like_page_key(): void

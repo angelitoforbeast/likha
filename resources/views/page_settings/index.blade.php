@@ -26,7 +26,7 @@
 
 @section('content')
 <div class="cb-page">
-    @include('chatblast.partials.needs-setup', ['needsSetup' => $needsSetup ?? [], 'unreachable' => $unreachable ?? [], 'collapsible' => true])
+    @include('chatblast.partials.needs-setup', ['needsSetup' => $needsSetup ?? [], 'unreachable' => $unreachable ?? []])
 
     @if(session('success'))
         <div class="mb-3 px-4 py-2 rounded bg-green-100 text-green-800 text-sm">{{ session('success') }}</div>
@@ -115,14 +115,6 @@
     <div id="sync-lock" class="mb-3 px-4 py-2 rounded bg-amber-100 text-amber-900 text-sm {{ $grid['sync_lock'] ? '' : 'hidden' }}">
         A Botcake sync has been running since <span id="sync-lock-since">{{ $grid['sync_lock'] }}</span>. Another sync of the same page skips it until it ends (or for up to 2 hours if it was cut off); other pages still sync.
     </div>
-
-    <p class="mb-2 text-xs text-gray-500">
-        Click a value and type: it saves by itself (Enter, leaving the field, or a few seconds without typing). Blank = delete the setting.
-        Token / secret: blank = no change; the value is never shown (last 4 only). Every few seconds, changes made by others are loaded.
-        Botcake, flow and field IDs: digits only.
-        The Chatblast flow (the one every sequence sends through) shows its ID, its name in Botcake and the template content, where [message for the customer] is each customer's message. The flow ID, the message field ID and the template are set by the check from the names in "Setup for every page". "+ set": no value yet, click to set it.
-        ▸ next to a page: the full flow names, the full template, the sync details, the other keys and the history.
-    </p>
 
     {{-- Buod ng grid: bilang mula sa grid na nasa browser na (walang bagong query); bawat chip ay filter. --}}
     <div id="summary-bar" class="flex flex-wrap items-center gap-2 mb-2 text-xs"></div>

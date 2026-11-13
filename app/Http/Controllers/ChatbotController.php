@@ -97,7 +97,7 @@ class ChatbotController extends Controller
         $pages = $this->pages();
 
         $byPage = PageSetting::where('active', true)->whereIn('provider', ['botcake', ChatbotFields::PROVIDER])
-            ->whereIn('key', array_merge(['page_id', 'active', 'flow_id', 'provider', Gateways::KEY, ForbeastWatch::KEY], array_column($columns, 'key')))->orderBy('id')->get()
+            ->whereIn('key', array_merge(['page_id', \App\Services\ChatblastSetupCheck::CHECK_KEY, 'active', 'flow_id', 'provider', Gateways::KEY, ForbeastWatch::KEY], array_column($columns, 'key')))->orderBy('id')->get()
             ->groupBy(fn ($s) => $this->settings->pageKey($s->page_name));
         $stats = $this->chatStats();
         $flowNames = Schema::hasTable('chatbot_flows') ? \App\Models\ChatbotFlow::pluck('name', 'id') : collect();
@@ -130,9 +130,14 @@ class ChatbotController extends Controller
             $provider = ChatbotProvider::BOTCAKE;
             $providerRow = $autoSwitch = $gatewayRow = null;
             $forbeastBy = []; // botfield key => sino sa Forbeast ang huling sumulat ng kasalukuyang value
+            $noShipping = null; // spec 271: ang kulang sa shipping status setup ayon sa huling check (naitala; walang tawag sa Botcake)
             foreach ($byPage[$this->settings->pageKey($page)] ?? [] as $s) {
                 if ($s->provider === 'botcake') {
                     if ($s->key === 'page_id') $pageId = (string) $s->plainValue();
+                    elseif ($s->key === \App\Services\ChatblastSetupCheck::CHECK_KEY) {
+                        $c = json_decode((string) $s->plainValue(), true);
+                        $noShipping = is_array($c) && ($c['ok'] ?? null) === false ? (array_values(array_map('strval', (array) ($c['x'] ?? []))) ?: ['The setup check failed']) : null;
+                    }
                     continue;
                 }
                 if ($s->key === 'active') $active = $s->plainValue() !== '0';
@@ -156,6 +161,8 @@ class ChatbotController extends Controller
             $cells[ShopDetails::KEY] = ShopDetails::build($page, $cells); // binubuo, ang naka-save ay hindi na binabasa
             $rows[] = [
                 'page' => $page, 'page_id' => $pageId, 'active' => $active, 'provider' => $provider, 'cells' => (object) $cells,
+                // Spec 271: ang mga dahilan kapag ok = false ang huling setup check (ang pulang "No shipping setup"); null kung hindi.
+                'no_shipping_setup' => $noShipping,
                 // Kusang lumipat sa Botcake, held o ibinalik sa Forbeast (ForbeastWatch), hanggang may magpalit nang mano-mano.
                 'auto_switched' => ForbeastWatch::note($autoSwitch, $providerRow, $provider, $gatewayRow),
                 // Aling gateway ang sumasagot kapag gateway ang provider, at ang mapipili (naka-set up at gumagana ang token ng page).
@@ -546,7 +553,9 @@ class ChatbotController extends Controller
     /**
      * "+ Page": bago (pangalan, Botcake ID at token) o mula sa page na nasa page settings na (ang kulang lang ang
      * kailangan). Isinusulat gaya ng page settings (PageSettings::set; ang token ay secret), saka ang Test token nito, at
-     * kapag pumasa, ang On (BotcakeChatBlock::turnOn). Pumalya ang test o ang On: naka-save ang page pero Off.
+     * kapag pumasa, ang On (BotcakeChatBlock::turnOn). Spec 271: kailangang pumasa rin ang shipping status setup check
+     * (ChatblastSetupCheck); pumalya ang token test, ang check o ang Botcake: hindi naidagdag at walang naiiwang bago (422,
+     * may "missing" at "retry"). Pumalya lang ang On: naka-save ang page pero Off.
      */
     public function addPage(Request $request)
     {
@@ -576,6 +585,9 @@ class ChatbotController extends Controller
             (string) $this->settings->get($page, 'botcake', 'chat.key'));
         if ($ask !== null) return response()->json($ask['body'], $ask['http']);
 
+        // Spec 271: ang hindi naidagdag ay ibinabalik sa dati (undoAdd), kaya tinatandaan muna ang huling id at ang active na row ng page.
+        $lastId = (int) PageSetting::max('id');
+        $activeBefore = $this->settings->pageQuery($page)->where('active', true)->pluck('id')->all();
         $this->settings->set($page, 'botcake', 'page_id', $pageId, false, Auth::id());
         if ($token !== '') $this->settings->set($page, 'botcake', 'token', $token, true, Auth::id());
         BotcakeChat::forgetPageMap();
@@ -587,21 +599,63 @@ class ChatbotController extends Controller
             $check = ['status' => 'error', 'error' => 'Botcake: no answer'];
         }
 
-        // Pumasa ang token: ise-setup agad gaya ng On (key, block, publish). Pumalya: naka-save pa rin pero Off.
-        $listed = $this->listedPage($page) ?? $page;
-        $error = $check['error'] ?? null;
-        $on = false;
-        if ($check['status'] === 'ok') {
-            $r = $connections->chatBlock($listed, Auth::id());
-            $on = $r['ok'];
-            if (!$on) $error = $r['error'] . ' The bot stays Off.';
-        } else {
-            $error = 'The token test failed' . ($error ? ' (' . $error . ')' : '') . ', so the bot was not set up and stays Off.';
+        // Spec 271: idinadagdag lang kapag pumasa ang token at kumpleto ang shipping status setup (flow, custom field, template).
+        $refused = $this->setupRefusal($check);
+        if ($refused !== null) {
+            $this->undoAdd($page, $lastId, $activeBefore);
+            return response()->json($refused + ['token_test' => $check['status'], 'retry' => true], 422);
         }
+
+        // Pumasa ang token at ang setup: ise-setup agad gaya ng On (key, block, publish). Pumalya ang On: naka-save pero Off.
+        $listed = $this->listedPage($page) ?? $page;
+        $r = $connections->chatBlock($listed, Auth::id());
+        $on = $r['ok'];
+        $error = $on ? null : $r['error'] . ' The bot stays Off.';
         if (!$on) $this->settings->set($listed, ChatbotFields::PROVIDER, 'active', '0', false, Auth::id(), true);
         if ($idGiven) $this->facebookName($listed);
 
         return response()->json(['page' => $listed, 'token_test' => $check['status'], 'active' => $on, 'error' => $error]);
+    }
+
+    /**
+     * Bakit hindi maidadagdag ang page (null = maidadagdag): ang error ng Botcake, ang pumalyang token test, o ang kulang
+     * sa shipping status setup (ang mga dahilan ng ChatblastSetupCheck, isa kada linya sa "missing").
+     * @return array{error: string, missing?: array<int, string>}|null
+     */
+    private function setupRefusal(array $check): ?array
+    {
+        $setup = $check['check'] ?? null;
+        if ($check['status'] === 'invalid') {
+            return ['error' => 'The token test failed (token invalid), so the page was not added. Check the Botcake ID and token, then Check again.'];
+        }
+        if ($check['status'] !== 'ok' || !is_array($setup) || ($setup['status'] ?? null) !== 'checked') {
+            $why = (string) ($setup['error'] ?? $check['error'] ?? '') ?: 'Botcake: no answer';
+            return ['error' => 'Botcake did not answer (' . $why . '), so the page was not added. Try Check again in a minute.'];
+        }
+        if (empty($setup['ok'])) {
+            return ['error' => 'The shipping status setup is not complete in Botcake, so the page was not added. Fix these in Botcake, then Check again:',
+                'missing' => array_values(array_map('strval', (array) ($setup['x'] ?? []))) ?: ['The setup check failed']];
+        }
+
+        return null;
+    }
+
+    /**
+     * Ang "+ Page" na hindi naidagdag ay walang naiiwan: ang mga row ng page na isinulat nito (id > $lastId: ang ID, ang
+     * token, ang token status at ang resulta ng check) ay inaalis, at ang dating active na napalitan nito ay ibinabalik.
+     * @param array<int, int> $activeBefore
+     */
+    private function undoAdd(string $page, int $lastId, array $activeBefore): void
+    {
+        foreach ($this->settings->pageQuery($page)->where('active', true)->where('id', '>', $lastId)->get() as $s) $this->settings->deactivate($s, Auth::id());
+        if ($activeBefore) {
+            foreach ($this->settings->pageQuery($page)->whereIn('id', $activeBefore)->where('active', false)->get() as $s) {
+                $s->update(['active' => true, 'replaced_at' => null]);
+            }
+        }
+        PageSettings::forget($page);
+        BotcakeChat::forgetPageMap();
+        \App\Services\ChatblastReady::forget($this->settings->pageKey($page));
     }
 
     /**

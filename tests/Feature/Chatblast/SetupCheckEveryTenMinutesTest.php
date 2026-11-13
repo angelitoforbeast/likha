@@ -141,7 +141,7 @@ class SetupCheckEveryTenMinutesTest extends ChatblastTestCase
         $this->travel(10)->minutes();
         $run();
         $this->assertSame($rows, PageSetting::count(), 'the same X is written once');
-        $this->assertSame('Page not ready: 2 flows named UPDATE SHIPPING STATUS 2026', $this->ready());
+        $this->assertSame('Page not ready: 2 flows named UPDATE SHIPPING STATUS 2026 in Botcake — keep only one', $this->ready());
 
         // Inalis ang kopya: OK ulit, Ready (ang check ang sumulat ng flow at field).
         array_pop($this->flows);

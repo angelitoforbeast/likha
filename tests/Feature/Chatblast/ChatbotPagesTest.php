@@ -93,7 +93,7 @@ class ChatbotPagesTest extends ChatblastTestCase
 
     public function test_S_068_2_the_ceo_adds_a_page_manually_or_from_an_existing_page(): void
     {
-        Http::fake(['botcake.io/*' => Http::response(['success' => true, 'data' => []])]);
+        Http::fake(self::setupOkFakes() + ['botcake.io/*' => Http::response(['success' => true, 'data' => []])]); // spec 271: kumpleto ang setup
         $this->actingAs($this->user());
 
         $this->postJson('/chatbot/pages', ['page_name' => ' Page Cuatro ', 'page_id' => '4004', 'token' => self::NEW_TOKEN])->assertOk();

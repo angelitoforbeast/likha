@@ -32,6 +32,8 @@ class ProblemsPanel
     public const EVENT_HOURS = 6;
     /** Ang page na "nagbebenta": may order (macro_output, ayon sa ts_date) sa huling ORDER_DAYS araw ng Manila, ngayon kasama. */
     public const ORDER_DAYS = 14;
+    /** Ang page na "nag-a-ads": may amount_spent_php > 0 sa ads_manager_reports sa huling AD_DAYS araw (day), ngayon kasama. */
+    public const AD_DAYS = 2;
     /** Ang mga kulay, pinakamabigat muna; ang puti ay hindi urgent. */
     public const LEVELS = ['red' => '🔴', 'orange' => '🟠', 'white' => '⚪'];
     /** Ang "page" ng linyang para sa buong site (hal. pumapalya ang AI sa karamihan ng page): may sariling Acknowledge/Done. */
@@ -65,6 +67,8 @@ class ProblemsPanel
             'same_ids' => $this->safely(fn () => $this->sameIds(), []),
             // Ang mga page na may order sa huling ORDER_DAYS araw (isang naka-group na query); null kapag hindi nabasa.
             'selling' => $this->safely(fn () => $this->selling(), null),
+            // Ang mga page na may ad spend sa huling AD_DAYS araw (isang naka-group na query); null kapag hindi nabasa.
+            'advertising' => $this->safely(fn () => $this->advertising(), null),
             'ai' => $this->safely(fn () => $this->ai(), []),
         ]);
         $echoes = $this->safely(fn () => $this->echoes(), []);
@@ -73,7 +77,7 @@ class ProblemsPanel
             $this->safely(fn () => $this->metaCodes(), []),
             $echoes,
             $own['events'], $own['slow'], $own['quiet'], $own['ai'] ?? [],
-            $this->safely(fn () => $this->setup($own['sending'], $own['selling'] ?? null), []),
+            $this->safely(fn () => $this->setup($own['sending'], $own['selling'] ?? null, $own['advertising'] ?? null), []),
             $own['same_ids'] ?? [],
         );
         if (!$lines) return null;
@@ -526,13 +530,22 @@ class ProblemsPanel
      * puti (hindi urgent) ang tahimik na page (lumang page na halos walang mapapadalhan) at ang hindi pinapadalhan. Kapag
      * hindi nabasa ang mga order ($selling null), orange pa rin gaya ng dati: mas mabuting maingay kaysa matago ang page
      * na nagbebenta.
+     * Spec 271: kulang ang setup mismo (walang flow, field o template) at may ad spend (huling AD_DAYS araw) o order (huling
+     * ORDER_DAYS araw): orange na "No shipping status setup", pinapadalhan man o hindi, dahil walang shipping update ang mga
+     * customer nito. Ang walang ad at walang order ay ang dating puting linya.
      * @param array<string, true>|null $selling page key => true
+     * @param array<string, true>|null $advertising page key => true
      */
-    private function setup(array $sending, ?array $selling): array
+    private function setup(array $sending, ?array $selling, ?array $advertising = null): array
     {
         $out = [];
         foreach (app(ChatblastSetupCheck::class)->pages() as $p) {
             $key = $this->settings->pageKey($p['page']);
+            if (($p['setup'] ?? false) && (isset($selling[$key]) || isset($advertising[$key]))) {
+                $out[] = self::line($p['page'], 'orange', 'No shipping status setup: ' . $p['reason'],
+                    [['Page settings', '/chatblast/page-settings?q=' . urlencode($p['page'])]]);
+                continue;
+            }
             $on = in_array($key, $sending, true);
             $quiet = $on && $selling !== null && !isset($selling[$key]);
             $out[] = self::line($p['page'], $on && !$quiet ? 'orange' : 'white',
@@ -559,6 +572,23 @@ class ProblemsPanel
         $out = [];
         foreach (DB::table('macro_output')->where('ts_date', '>=', now('Asia/Manila')->subDays(self::ORDER_DAYS - 1)->toDateString())
             ->whereNotNull('PAGE')->selectRaw("$page AS page")->groupBy('PAGE')->pluck('page') as $name) {
+            $out[$this->settings->pageKey((string) $name)] = true;
+        }
+
+        return $out;
+    }
+
+    /**
+     * Ang mga page na may ad spend (ads_manager_reports.amount_spent_php > 0) sa huling AD_DAYS araw (day, Manila, ngayon
+     * kasama): isang naka-group na query (ang index ay day), at ang pangalan ay tinutugma sa PHP (pageKey), gaya ng selling().
+     * @return array<string, true>|null page key => true; null kapag walang ads_manager_reports
+     */
+    private function advertising(): ?array
+    {
+        if (!Schema::hasTable('ads_manager_reports')) return null;
+        $out = [];
+        foreach (DB::table('ads_manager_reports')->where('day', '>=', now('Asia/Manila')->subDays(self::AD_DAYS - 1)->toDateString())
+            ->whereNotNull('page_name')->groupBy('page_name')->havingRaw('SUM(amount_spent_php) > 0')->pluck('page_name') as $name) {
             $out[$this->settings->pageKey((string) $name)] = true;
         }
 
