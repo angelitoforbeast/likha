@@ -17,6 +17,7 @@ use App\Jobs\RunChatblastSetupCheck;
 use App\Services\ChatblastSender;
 use App\Services\BotcakeSyncAll;
 use App\Services\Chatbot\ForbeastPageSetup;
+use App\Services\Chatbot\ImageFlow;
 use App\Services\PageSettings;
 use App\Services\PageSettingsGrid;
 use Illuminate\Http\Request;
@@ -260,6 +261,18 @@ class PageSettingController extends Controller
         if ($cells) $out['cells'] = array_merge($out['cells'] ?? [], $cells);
 
         return $out;
+    }
+
+    /** Spec 274: "Check again" of one page's SEND IMAGE setup (a few Botcake calls on the page's setup lane). */
+    public function imageCheck(Request $request, PageSettingsGrid $grid)
+    {
+        $this->checkAccess();
+
+        $page = $this->settings->normPage((string) $request->input('page_name', ''));
+        if ($page === '') return response()->json(['status' => 'skipped', 'error' => 'No page', 'cell' => null], 422);
+        $r = app(ImageFlow::class)->run($page);
+
+        return response()->json(['status' => $r['status'], 'error' => $r['error'] ?? null, 'cell' => isset($r['row']) ? $grid->cell($r['row']) : null]);
     }
 
     /** @param array<string, ?PageSetting> $written */

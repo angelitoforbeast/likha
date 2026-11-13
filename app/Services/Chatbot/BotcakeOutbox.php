@@ -41,7 +41,7 @@ class BotcakeOutbox implements Outbox
             if (!is_array($m)) return $m;
             $buttons = is_array($m['buttons'] ?? null) ? $m['buttons'] : [];
             $quick = is_array($m['quick_replies'] ?? null) ? $m['quick_replies'] : [];
-            $m = array_diff_key($m, ['ai' => 1, 'ai_text' => 1, 'text_cut' => 1, 'left_out' => 1, 'buttons' => 1, 'quick_replies' => 1]);
+            $m = array_diff_key($m, ['ai' => 1, 'ai_text' => 1, 'text_cut' => 1, 'left_out' => 1, 'buttons' => 1, 'quick_replies' => 1, ImageFlow::VIA => 1, ImageFlow::FALLBACK => 1]);
             if (!$on) return $m;
             if ($buttons && ($m['type'] ?? '') === 'text') return ['type' => 'buttons', 'text' => (string) ($m['text'] ?? ''), 'buttons' => $plain($buttons)];
 
@@ -79,7 +79,8 @@ class BotcakeOutbox implements Outbox
             }
         }
 
-        return $this->log($run, $nodeId, 'send', $messages, $o['status'], $o['error'], $o['http'], $o['raw'] ?? null, ChatbotProvider::viaOf($provider), $ref, ChatbotProvider::routeOf($provider));
+        // An image sent through the SEND IMAGE flow comes back marked (ImageFlow::VIA), so the record tells how it went.
+        return $this->log($run, $nodeId, 'send', (array) ($o['messages'] ?? $messages), $o['status'], $o['error'], $o['http'], $o['raw'] ?? null, ChatbotProvider::viaOf($provider), $ref, ChatbotProvider::routeOf($provider));
     }
 
     /**

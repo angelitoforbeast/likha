@@ -125,6 +125,7 @@
          data-cell-url="{{ route('page-settings.cell') }}"
          data-history-url="{{ route('page-settings.history') }}"
          data-page-check-url="{{ route('page-settings.page-check') }}"
+         data-image-check-url="{{ route('page-settings.image-check') }}"
          data-test-token-url="{{ route('page-settings.test-token') }}"
          data-test-token-one-url="{{ route('page-settings.test-token-one') }}"
          data-connections-url="{{ route('chatbot.pages.index') }}"
@@ -391,7 +392,7 @@
         const body = sortedRows().flatMap(r => {
             const tr = el('tr', {class: 'hover:bg-blue-50/40' + (r.info.orders ? '' : ' text-gray-400'), 'data-pk': r.key}, [
                 pageTd(r),
-                el('td', {class: 'px-2 py-1 border-b border-r align-top text-xs', 'data-info': 'check'}, checkCell(r)),
+                el('td', {class: 'px-2 py-1 border-b border-r align-top text-xs', 'data-info': 'check'}, [...checkCell(r), ...imageCell(r)]),
                 ...GROUPS.map(([group]) => el('td', {class: 'px-2 py-1 border-b border-r align-top'},
                     group === 'flows' ? inGroup(group).filter(c => c.key === SHIPPING_KEY).map(c => flowBlock(r, c))
                         : [...inGroup(group).filter(c => !c.key.startsWith('forbeast.')).map(c => line(r, c)), group === 'botcake' ? connectionsLink() : null])),
@@ -434,6 +435,41 @@
         }
         if (c.error) out.push(el('div', {class: 'break-words text-gray-500', text: 'Check failed: ' + c.error}));
         if (cell) out.push(el('div', {class: 'text-gray-400', text: 'Checked ' + cell.at}));
+        return out;
+    }
+
+    // Spec 274: how the bot sends images on the page (the stored SEND IMAGE check), with its own "Check again" (a few
+    // Botcake calls on the page's setup lane; nothing is called when the page loads).
+    const IMAGE_KEY = 'botcake.image_flow.check';
+    function imageCell(r) {
+        if (!r.info.botcake) return [];
+        const c = json(r.cells[IMAGE_KEY]), out = [];
+        if (!c) out.push(el('div', {class: 'mt-1 text-gray-400', text: 'Image: not checked yet'}));
+        else {
+            const ok = c.ok === true && !!c.flow_id && !!c.field_id;
+            out.push(el('div', {class: 'mt-1 font-medium ' + (ok ? 'text-green-700' : 'text-gray-600'), 'data-image-flow': ok ? 'flow' : 'send_content',
+                title: ok ? 'Bot images go through the SEND IMAGE flow' : 'Bot images go by send_content', text: ok ? 'Image: via flow' : 'Image: send_content'}));
+            if (!ok) for (const t of (c.reasons || [])) out.push(el('div', {class: 'break-words text-gray-600', text: String(t)}));
+            if (c.error) out.push(el('div', {class: 'break-words text-gray-500', text: 'Image check failed: ' + c.error}));
+            if (c.at) out.push(el('div', {class: 'text-gray-400', text: 'Image checked ' + (c.error_at || c.at)}));
+        }
+        const again = el('button', {type: 'button', class: 'mt-0.5 text-xs text-blue-700 underline', 'data-image-check': '', text: 'Check again'});
+        again.addEventListener('click', async () => {
+            again.disabled = true;
+            again.textContent = 'Checking…';
+            try {
+                const res = await fetch(url.imageCheckUrl, {method: 'POST', headers: {'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrf}, body: JSON.stringify({page_name: r.name})});
+                const data = await res.json().catch(() => ({}));
+                if (data.cell) r.cells[IMAGE_KEY] = data.cell;
+                const td = again.closest('td');
+                if (td) td.replaceChildren(...checkCell(r), ...imageCell(r));
+                if (!res.ok || !data.cell) { again.disabled = false; again.textContent = 'Check again (failed)'; }
+            } catch (e) {
+                again.disabled = false;
+                again.textContent = 'Check again (failed)';
+            }
+        });
+        out.push(again);
         return out;
     }
 

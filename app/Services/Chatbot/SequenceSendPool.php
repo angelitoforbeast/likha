@@ -227,9 +227,11 @@ class SequenceSendPool extends TicketPool
                 BotcakeSendQueue::finishSequence($row, $this->owner, ['status' => 'failed', 'error' => BotcakeOutbox::NO_TOKEN, 'http' => null, 'via' => ChatbotProvider::BOTCAKE, 'ref' => $ref]);
                 return;
             }
-            $req = ['method' => 'POST', 'path' => '/pages/' . rawurlencode((string) $row->page_id) . '/flows/send_content',
+            // Images on a page whose SEND IMAGE check is OK go by ImageFlow's steps (as in botcake:send-pool); else one send_content.
+            $gen = ($cfg = ImageFlow::forSend($page, $messages)) !== null ? ImageFlow::steps((string) $row->page_id, (string) $row->psid, $messages, $cfg, $token) : null;
+            $req = $gen?->current() ?? ['method' => 'POST', 'path' => '/pages/' . rawurlencode((string) $row->page_id) . '/flows/send_content',
                 'data' => ['psid' => (string) $row->psid, 'data' => ['version' => 'v2', 'content' => ['messages' => BotcakeOutbox::wire($messages)]]]];
-            $this->queue($id, ['row' => $row, 'provider' => ChatbotProvider::BOTCAKE, 'req' => $req, 'attempt' => 0, 'lane' => sha1($token), 'secret' => $token,
+            $this->queue($id, ['row' => $row, 'provider' => ChatbotProvider::BOTCAKE, 'req' => $req, 'gen' => $gen, 'attempt' => 0, 'lane' => sha1($token), 'secret' => $token,
                 'gateway' => null, 'ref' => $ref, 'notBefore' => 0.0], true);
         } catch (Throwable $e) {
             $this->failed($row, $e);
@@ -311,7 +313,18 @@ class SequenceSendPool extends TicketPool
             return null;
         }
         try {
-            if ($job['attempt'] === 0) {
+            // ImageFlow's field write takes the page+PSID lock first (held until its send_flow answered): a bot reply cannot
+            // overwrite image_url in between. Not free: back in the lane a moment later, nothing called.
+            if (($job['req']['step'] ?? '') === 'image_write' && !isset($job['lock'])) {
+                $lock = Cache::lock(ImageFlow::lockKey($row->page_id, $row->psid), ImageFlow::LOCK_SECONDS);
+                if (!$lock->get()) {
+                    $this->jobs[$id]['notBefore'] = $this->clock->now() + 0.5;
+                    array_unshift($this->lanes[$job['lane']]['queue'], $id);
+                    return null;
+                }
+                $this->jobs[$id]['lock'] = $lock->owner();
+            }
+            if ($job['attempt'] === 0 && empty($job['steps'])) {
                 $page = (string) $row->page_name;
                 // Lumipat ang daan ng page habang naghihintay: balik sa pila, kukunin ulit sa bagong daan (isang beses lang).
                 if (ChatbotProvider::name($page) !== $job['provider']) {
@@ -393,7 +406,22 @@ class SequenceSendPool extends TicketPool
                     array_unshift($this->lanes[$job['lane']]['queue'], $id);
                     return;
                 }
-                $o = BotcakeOutbox::outcome(['http' => $status, 'body' => $body, 'attempts' => $job['attempt'] + 1], $job['secret']) + ['via' => ChatbotProvider::BOTCAKE];
+                $r = ['http' => $status, 'body' => $body, 'attempts' => $job['attempt'] + 1];
+                if (($job['gen'] ?? null) !== null) {
+                    // ImageFlow steps: the lock goes once the image's send_flow answered (or its write failed).
+                    if (isset($this->jobs[$id]['lock']) && !ImageFlow::holds($job['req'], $r)) $this->unlock($id);
+                    $job['gen']->send($r);
+                    if ($job['gen']->valid()) {
+                        $this->jobs[$id]['req'] = $job['gen']->current();
+                        $this->jobs[$id]['attempt'] = 0;
+                        $this->jobs[$id]['notBefore'] = 0.0;
+                        $this->jobs[$id]['steps'] = ($job['steps'] ?? 0) + 1;
+                        array_unshift($this->lanes[$job['lane']]['queue'], $id);
+                        return;
+                    }
+                }
+                $o = ($job['gen'] ?? null) !== null ? ImageFlow::after((string) $row->page_name, $job['gen']->getReturn()) + ['via' => ChatbotProvider::BOTCAKE]
+                    : BotcakeOutbox::outcome($r, $job['secret']) + ['via' => ChatbotProvider::BOTCAKE];
             } else {
                 $r = ['http' => $status, 'body' => $body];
                 // Walang sagot: ang cURL error at mga oras, sa failure at sa log (gaya ng GatewayProvider::send).
@@ -433,6 +461,20 @@ class SequenceSendPool extends TicketPool
 
     private function forget(string $id): void
     {
+        $this->unlock($id);
         unset($this->jobs[$id], $this->inflight[$id]);
+    }
+
+    /** Let go of the ImageFlow page+PSID lock the job holds, if any. */
+    private function unlock(string $id): void
+    {
+        $job = $this->jobs[$id] ?? null;
+        if (!isset($job['lock'])) return;
+        unset($this->jobs[$id]['lock']);
+        try {
+            Cache::restoreLock(ImageFlow::lockKey($job['row']->page_id, $job['row']->psid), $job['lock'])->release();
+        } catch (Throwable $e) {
+            report($e); // the lock ends by itself after ImageFlow::LOCK_SECONDS
+        }
     }
 }

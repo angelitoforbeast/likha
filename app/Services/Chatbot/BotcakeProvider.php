@@ -19,6 +19,11 @@ class BotcakeProvider implements MessagingProvider
 
         $client = app(BotcakeClient::class)->shared(sha1($token), self::timeout());
         if ($this->once) $client = $client->once(15);
+        // The bot's images go by the page's SEND IMAGE flow when its check is OK (spec 274). The Inbox ($once) is a person's
+        // single-try send inside a web request: it stays send_content.
+        if (!$this->once && ($cfg = ImageFlow::forSend($pageName, $messages)) !== null) {
+            return ImageFlow::sendNow($client, $token, $pageName, $pageId, $psid, $messages, $cfg);
+        }
 
         return BotcakeOutbox::outcome($client->sendContent($pageId, $psid, BotcakeOutbox::wire($messages), $token), $token);
     }
