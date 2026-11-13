@@ -27,7 +27,10 @@ return [
     // Waybill labels kept on the local disk (spec 269): printing stitches them instead of fetching each one again.
     // J&T label calls run `batch` at a time per worker, and never more than `max_concurrent` at once across all
     // workers (a shared cache limiter). Stored labels older than `keep_days` are pruned daily (jnt:prune-labels).
+    // Incepxion does not print in-app and has no `jnt-label` worker: no label job after booking unless turned on
+    // (JNT_LABEL_AFTER_BOOKING=true, with a jnt-label worker). A print run still fetches its missing labels itself.
     'labels' => [
+        'after_booking'  => (bool) env('JNT_LABEL_AFTER_BOOKING', false),
         'batch'          => (int) env('JNT_LABEL_BATCH', 10),
         'max_concurrent' => (int) env('JNT_LABEL_MAX_CONCURRENT', 20),
         'keep_days'      => (int) env('JNT_LABEL_KEEP_DAYS', 14),

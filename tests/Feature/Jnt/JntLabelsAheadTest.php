@@ -248,6 +248,7 @@ class JntLabelsAheadTest extends TestCase
     public function test_a_booking_with_a_mailno_queues_the_label_job_on_jnt_label(): void
     {
         Queue::fake();
+        config(['jnt.labels.after_booking' => true]);
         $id = $this->shipment();
 
         (new CreateJntOrder($id))->handle();
@@ -256,6 +257,19 @@ class JntLabelsAheadTest extends TestCase
         $this->assertNotSame('', $mailno);
         Queue::assertPushedOn('jnt-label', FetchJntLabel::class, fn (FetchJntLabel $job) => $job->mailno === $mailno
             && $job->page === self::PAGE && $job->shipmentId === $id);
+        $this->assertCount(1, $this->creates);
+    }
+
+    public function test_incepxion_books_without_queueing_a_label_job_by_default(): void
+    {
+        Queue::fake();
+        $id = $this->shipment();
+
+        (new CreateJntOrder($id))->handle();
+
+        $this->assertFalse((bool) config('jnt.labels.after_booking'));
+        $this->assertNotSame('', (string) DB::table('jnt_shipments')->where('id', $id)->value('mailno'));
+        Queue::assertNotPushed(FetchJntLabel::class);
         $this->assertCount(1, $this->creates);
     }
 

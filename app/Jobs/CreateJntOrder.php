@@ -227,7 +227,8 @@ class CreateJntOrder implements ShouldQueue
         });
 
         // Spec 269: the label is fetched and kept now, so printing only stitches it.
-        if ($booked) {
+        // Incepxion: off by default (config jnt.labels.after_booking), as there is no jnt-label worker here.
+        if ($booked && config('jnt.labels.after_booking', false)) {
             $this->queueLabel((string) $mailno, $page);
         }
 
