@@ -111,6 +111,9 @@ class JntQueuesTest extends TestCase
             'jnt_sender_city' => 'TAGUIG', 'jnt_sender_area' => 'BAGUMBAYAN', 'jnt_sender_address' => '#20 1st Ave']);
 
         Http::fake(['jnt.test/*' => function (Request $req) {
+            if (($req->data()['msg_type'] ?? '') === 'BILLQUERY') {
+                return Http::response(['responseitems' => []]); // the label fetch after booking (spec 269): no label yet
+            }
             $tx = (string) (json_decode($req->data()['logistics_interface'] ?? '{}', true)['txlogisticid'] ?? '');
             $this->creates[] = $tx;
             if ($this->duringCall) {

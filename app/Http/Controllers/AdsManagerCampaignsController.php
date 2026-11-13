@@ -336,19 +336,29 @@ class AdsManagerCampaignsController extends Controller
         $campaignIds = array_values(array_unique($campaignIds));
         $adSetIds    = array_values(array_unique($adSetIds));
 
-        // Fetch creatives by campaign_id (representative row per campaign —
-        // pick MAX(id) to grab the latest insert/update order).
+        // Fetch creatives by campaign_id: the row that stands for the campaign (spec 254: a campaign has one row per
+        // ad; the campaign-only row when there is one, else the oldest, as AdCampaignCreative::campaignFallback).
         $creativeByCampaign = [];
         if (!empty($campaignIds)) {
             $rows = DB::table('ad_campaign_creatives')
                 ->whereIn('campaign_id', $campaignIds)
                 ->whereNotNull('campaign_id')
-                ->orderBy('campaign_id')->orderByDesc('id')
+                ->orderBy('campaign_id')->orderByRaw('CASE WHEN ad_id IS NULL THEN 0 ELSE 1 END')->orderBy('id')
                 ->get(['id','campaign_id','ad_id','body_ad_settings','headline','welcome_message','quick_reply_1','quick_reply_2','quick_reply_3','ad_link','feedback']);
             foreach ($rows as $r) {
                 if (!isset($creativeByCampaign[$r->campaign_id])) {
                     $creativeByCampaign[$r->campaign_id] = $r;
                 }
+            }
+        }
+
+        // Ad events: the ad's own row (spec 254), the campaign's row only when the ad has none.
+        $creativeByAd = [];
+        $adEventIds = array_values(array_unique(array_map(fn ($e) => $e['entity_id'], array_filter($events, fn ($e) => $e['level'] === 'ad' && !empty($e['entity_id'])))));
+        foreach (array_chunk($adEventIds, 1000) as $chunk) {
+            foreach (DB::table('ad_campaign_creatives')->whereIn('ad_id', $chunk)
+                ->get(['id','ad_id','body_ad_settings','headline','welcome_message','quick_reply_1','quick_reply_2','quick_reply_3','ad_link','feedback']) as $r) {
+                $creativeByAd[(string) $r->ad_id] = $r;
             }
         }
 
@@ -382,7 +392,7 @@ class AdsManagerCampaignsController extends Controller
             $cre = null;
             if ($e['level'] === 'campaign')      $cre = $creativeByCampaign[$e['entity_id']]   ?? null;
             elseif ($e['level'] === 'adset')     $cre = $creativeByAdSet[$e['entity_id']]      ?? null;
-            elseif ($e['level'] === 'ad')        $cre = $creativeByCampaign[$e['campaign_id']] ?? null;
+            elseif ($e['level'] === 'ad')        $cre = $creativeByAd[$e['entity_id']] ?? ($creativeByCampaign[$e['campaign_id']] ?? null);
 
             $e['creative_id']      = $cre ? (int) $cre->id : null;
             $e['body']             = $cre->body_ad_settings ?? '';
@@ -579,11 +589,13 @@ class AdsManagerCampaignsController extends Controller
      *   - level: 'campaign' | 'adset' | 'ad'
      *   - id:    campaign_id | ad_set_id | ad_id (string)
      *
-     * Lookup strategy:
-     *   - level=ad:       try ad_campaign_creatives.ad_id first; fallback campaign_id
-     *   - level=adset:    join ads_manager_reports.ad_set_id → first matching ad_id
-     *                     → look up via ad_campaign_creatives (or campaign_id if walang ad-level row)
-     *   - level=campaign: ad_campaign_creatives.campaign_id (first match)
+     * Lookup strategy (spec 254: one ad_campaign_creatives row per ad):
+     *   - level=ad:       the ad's own row; fallback the campaign's row (AdCampaignCreative::campaignFallback)
+     *   - level=adset:    every distinct creative of the ads in the ad set (ads_manager_reports.ad_set_id)
+     *   - level=campaign: every distinct creative of the ads in the campaign
+     *     Identical content is shown once (ad_ids lists the ads that share it), highest spend first. When none of the
+     *     ads has a row of its own, the campaign's row as before.
+     * Response: `creatives` (list, each with ad_id, ad_ids, ad_name, spend) and `creative` (= the first one).
      */
     public function creativePreview(Request $request)
     {
@@ -595,25 +607,27 @@ class AdsManagerCampaignsController extends Controller
         }
 
         // Short cache — creative blobs rarely change; bumps along with owner cache.
-        $cacheKey = "ads_mgr_creative_preview:{$level}:{$id}";
+        $cacheKey = "ads_mgr_creative_preview:v2:{$level}:{$id}"; // v2: per-ad creatives list (spec 254)
         $cached = \Illuminate\Support\Facades\Cache::get($cacheKey);
         if (is_array($cached)) {
             return response()->json($cached + ['_cache' => 'hit']);
         }
 
         $cre = null;
+        $creatives = [];
         $entityName = null;
         $pageName = null;
         $campaignName = null;
         $adSetName = null;
+        $creCols = ['campaign_id', 'ad_id', 'page_name', 'campaign_name',
+                    'body_ad_settings', 'headline', 'welcome_message',
+                    'quick_reply_1', 'quick_reply_2', 'quick_reply_3', 'ad_link'];
 
         if ($level === 'ad') {
             // Try by ad_id first
             $cre = DB::table('ad_campaign_creatives')
                 ->where('ad_id', $id)
-                ->first(['campaign_id', 'ad_id', 'page_name', 'campaign_name',
-                         'body_ad_settings', 'headline', 'welcome_message',
-                         'quick_reply_1', 'quick_reply_2', 'quick_reply_3', 'ad_link']);
+                ->first($creCols);
             // Fallback: lookup via reports for headline + campaign info
             $report = DB::table('ads_manager_reports')
                 ->where('ad_id', $id)
@@ -627,53 +641,33 @@ class AdsManagerCampaignsController extends Controller
             }
             // If walang ad-level creative, try campaign-level fallback
             if (!$cre && $report && $report->campaign_id) {
-                $cre = DB::table('ad_campaign_creatives')
-                    ->where('campaign_id', $report->campaign_id)
-                    ->first(['campaign_id', 'ad_id', 'page_name', 'campaign_name',
-                             'body_ad_settings', 'headline', 'welcome_message',
-                             'quick_reply_1', 'quick_reply_2', 'quick_reply_3', 'ad_link']);
+                $cre = \App\Models\AdCampaignCreative::campaignFallback((string) $report->campaign_id, $creCols);
             }
-        } elseif ($level === 'adset') {
-            // Fetch ad_set context from reports
+            if ($cre) {
+                // The ad's own row carries the ad; the campaign fallback row is labelled as the campaign's.
+                $own = (string) ($cre->ad_id ?? '') === $id;
+                $creatives = [$own ? $this->creativeItem($cre, $id, [$id], $this->adNames([$id])[$id] ?? null, null)
+                                   : $this->creativeItem($cre, null, [], null, null)];
+            }
+        } else {
+            $idCol = $level === 'adset' ? 'ad_set_id' : 'campaign_id';
             $report = DB::table('ads_manager_reports')
-                ->where('ad_set_id', $id)
+                ->where($idCol, $id)
                 ->orderByDesc('day')
-                ->first(['ad_set_name', 'campaign_id', 'campaign_name', 'page_name', 'ad_id']);
+                ->first(['ad_set_name', 'campaign_id', 'campaign_name', 'page_name']);
             if ($report) {
-                $entityName   = $report->ad_set_name ?: ('Ad Set ' . $id);
+                $entityName   = $level === 'adset' ? ($report->ad_set_name ?: ('Ad Set ' . $id)) : ($report->campaign_name ?: ('Campaign ' . $id));
                 $pageName     = $report->page_name;
                 $campaignName = $report->campaign_name;
             }
-            // Try to find the creative — adsets don't directly map sa
-            // ad_campaign_creatives, so go via any matching ad_id, fallback campaign_id.
-            if ($report && $report->ad_id) {
-                $cre = DB::table('ad_campaign_creatives')
-                    ->where('ad_id', $report->ad_id)
-                    ->first(['campaign_id', 'ad_id', 'page_name', 'campaign_name',
-                             'body_ad_settings', 'headline', 'welcome_message',
-                             'quick_reply_1', 'quick_reply_2', 'quick_reply_3', 'ad_link']);
-            }
-            if (!$cre && $report && $report->campaign_id) {
-                $cre = DB::table('ad_campaign_creatives')
-                    ->where('campaign_id', $report->campaign_id)
-                    ->first(['campaign_id', 'ad_id', 'page_name', 'campaign_name',
-                             'body_ad_settings', 'headline', 'welcome_message',
-                             'quick_reply_1', 'quick_reply_2', 'quick_reply_3', 'ad_link']);
-            }
-        } else {
-            // level=campaign
-            $cre = DB::table('ad_campaign_creatives')
-                ->where('campaign_id', $id)
-                ->first(['campaign_id', 'ad_id', 'page_name', 'campaign_name',
-                         'body_ad_settings', 'headline', 'welcome_message',
-                         'quick_reply_1', 'quick_reply_2', 'quick_reply_3', 'ad_link']);
-            $report = DB::table('ads_manager_reports')
-                ->where('campaign_id', $id)
-                ->orderByDesc('day')
-                ->first(['campaign_name', 'page_name']);
-            if ($report) {
-                $entityName = $report->campaign_name ?: ('Campaign ' . $id);
-                $pageName   = $report->page_name;
+
+            $creatives = $this->creativesOfAds($idCol, $id, $creCols);
+            if ($creatives) {
+                $cre = DB::table('ad_campaign_creatives')->where('ad_id', $creatives[0]['ad_id'])->first($creCols);
+            } else {
+                // None of the ads has a row of its own: the campaign's row, as before.
+                $cre = \App\Models\AdCampaignCreative::campaignFallback($level === 'adset' ? ($report->campaign_id ?? null) : $id, $creCols);
+                if ($cre) $creatives = [$this->creativeItem($cre, null, [], null, null)];
             }
         }
 
@@ -691,19 +685,80 @@ class AdsManagerCampaignsController extends Controller
             'page_name'  => $pageName ?: '',
             'campaign_name' => $campaignName ?: ($cre->campaign_name ?? ''),
             'ad_set_name'   => $adSetName ?: '',
-            'creative'   => [
-                'body'            => $cre->body_ad_settings ?? '',
-                'headline'        => $cre->headline         ?? '',
-                'welcome_message' => $cre->welcome_message  ?? '',
-                'quick_reply_1'   => $cre->quick_reply_1    ?? '',
-                'quick_reply_2'   => $cre->quick_reply_2    ?? '',
-                'quick_reply_3'   => $cre->quick_reply_3    ?? '',
-                'ad_link'         => $cre->ad_link          ?? '',
-            ],
+            'creative'   => $creatives[0] ?? $this->creativeItem(null, null, [], null, null),
+            // Spec 254: every distinct creative (one per ad content), highest spend first. One item = as before.
+            'creatives'  => $creatives,
         ];
 
         \Illuminate\Support\Facades\Cache::put($cacheKey, $payload, 300); // 5 min
         return response()->json($payload + ['_cache' => 'miss']);
+    }
+
+    /** One creative of the preview, in the shape the modal reads (body, headline, …) plus the ads it belongs to. */
+    private function creativeItem(?object $cre, ?string $adId, array $adIds, ?string $adName, ?float $spend): array
+    {
+        return [
+            'ad_id'           => $adId,
+            'ad_ids'          => $adIds,
+            'ad_name'         => $adId ? ($adName ?: 'Ad ' . $adId) : null,
+            'spend'           => $spend,
+            'body'            => $cre->body_ad_settings ?? '',
+            'headline'        => $cre->headline         ?? '',
+            'welcome_message' => $cre->welcome_message  ?? '',
+            'quick_reply_1'   => $cre->quick_reply_1    ?? '',
+            'quick_reply_2'   => $cre->quick_reply_2    ?? '',
+            'quick_reply_3'   => $cre->quick_reply_3    ?? '',
+            'ad_link'         => $cre->ad_link          ?? '',
+        ];
+    }
+
+    /**
+     * Spec 254: the distinct creatives of the ads of one ad set or campaign, from each ad's own row. Ads ordered by
+     * spend (all days), then latest day; identical content is kept once, under the first (highest-spend) ad, with
+     * every ad that shares it in ad_ids. For a campaign, ad rows stored under it without report rows come last.
+     */
+    private function creativesOfAds(string $idCol, string $id, array $creCols): array
+    {
+        $ads = DB::table('ads_manager_reports')
+            ->where($idCol, $id)->whereNotNull('ad_id')->where('ad_id', '!=', '')
+            ->selectRaw('ad_id, COALESCE(SUM(amount_spent_php), 0) AS spend, MAX(day) AS last_day')
+            ->groupBy('ad_id')
+            ->orderByDesc('spend')->orderByDesc('last_day')->orderBy('ad_id')
+            ->get()
+            ->mapWithKeys(fn ($r) => [(string) $r->ad_id => (float) $r->spend])
+            ->all();
+
+        $rows = $ads ? DB::table('ad_campaign_creatives')->whereIn('ad_id', array_keys($ads))->get($creCols)->keyBy(fn ($r) => (string) $r->ad_id)->all() : [];
+        if ($idCol === 'campaign_id') {
+            foreach (DB::table('ad_campaign_creatives')->where('campaign_id', $id)->whereNotNull('ad_id')->orderBy('id')->get($creCols) as $r) {
+                if (!isset($rows[(string) $r->ad_id])) { $rows[(string) $r->ad_id] = $r; $ads[(string) $r->ad_id] = 0.0; }
+            }
+        }
+
+        $names = $this->adNames(array_keys($rows));
+        $items = [];
+        foreach ($ads as $adId => $spend) {
+            $r = $rows[(string) $adId] ?? null;
+            if (!$r) continue; // no row of its own: never shown with another ad's content
+            $key = md5(json_encode(array_map(fn ($f) => trim((string) ($r->{$f} ?? '')),
+                ['body_ad_settings', 'headline', 'welcome_message', 'quick_reply_1', 'quick_reply_2', 'quick_reply_3', 'ad_link'])));
+            if (isset($items[$key])) {
+                $items[$key]['ad_ids'][] = (string) $adId;
+                continue;
+            }
+            $items[$key] = $this->creativeItem($r, (string) $adId, [(string) $adId], $names[(string) $adId] ?? null, $spend);
+        }
+
+        return array_values($items);
+    }
+
+    /** Ad names from ad_catalog (when the table is there), by ad id. */
+    private function adNames(array $adIds): array
+    {
+        if (!$adIds || !Schema::hasTable('ad_catalog') || !Schema::hasColumn('ad_catalog', 'ad_name')) return [];
+
+        return DB::table('ad_catalog')->whereIn('ad_id', $adIds)->whereNotNull('ad_name')->where('ad_name', '!=', '')
+            ->pluck('ad_name', 'ad_id')->map(fn ($v) => (string) $v)->all();
     }
 
     /**
@@ -769,13 +824,46 @@ class AdsManagerCampaignsController extends Controller
             ? 'COALESCE(day, DATE(reporting_starts))'
             : 'COALESCE(`day`, DATE(`reporting_starts`))';
 
-        // Subqueries (GLOBAL, hindi nakaka-depende sa page filter — reused
-        // sa main data() endpoint. Mas mabuti i-run sila once per batch.)
-        $latestCampaignDay = DB::table('ads_manager_reports')
+        // Spec 261: page filter = page_name IN (stored names), hindi LOWER(TRIM(page_name)) = LOWER(TRIM(?)).
+        // Ang stored names ay hinahanap muna (isang maliit na query, isang row kada page name), tapos
+        // tinutugma sa PHP sa parehong trim + lower na tuntunin. Kaya nagagamit ang ads_report_page_day_idx
+        // (page_name, day) at pareho pa rin ang tumatama, kasama ang iba ang case o may space.
+        // Ang windows query (end-6 .. end) ay gumagamit din ng mga pangalang ito, kaya kasama ang end-6.
+        $nameDates = array_column($pageList, 'start');
+        if ($includeWindows) $nameDates[] = (new \DateTime($endDate))->modify('-6 days')->format('Y-m-d');
+        $resolved = $this->storedPageNames(array_column($pageList, 'name'), self::earliestDay($nameDates));
+
+        // Isang grupo kada page na may tumama: (page_name IN (...) AND day BETWEEN start AND end).
+        $groups = [];
+        foreach ($pageList as $i => $p) {
+            if (!empty($resolved[$i])) $groups[] = ['names' => $resolved[$i], 'start' => $p['start']];
+        }
+        $pageFilter = function ($q) use ($groups, $endDate) {
+            $q->where(function ($w) use ($groups, $endDate) {
+                foreach ($groups as $g) {
+                    $w->orWhere(function ($qq) use ($g, $endDate) {
+                        $qq->whereIn('page_name', $g['names'])
+                           ->whereBetween('day', [$g['start'], $endDate]);
+                    });
+                }
+            });
+        };
+
+        // Latest on/off status: para lang sa mga campaign at ad set na nasa resulta (hindi GROUP BY sa
+        // buong table). Pareho ang tuntunin: ang pinakahuling COALESCE(day, reporting_starts) ng entity
+        // sa BUONG table, active kung may row na active sa araw na iyon. Bawat entity sa resulta ay may
+        // row na day >= sa pinakamaagang start, kaya ang mga row na mas maaga (day < start) ay hindi
+        // kailanman ang pinakahuling araw: ligtas silang laktawan.
+        $ids = empty($groups)
+            ? ['campaign_id' => [], 'ad_set_id' => []]
+            : self::idsIn(DB::table('ads_manager_reports')->where($pageFilter), ['campaign_id', 'ad_set_id']);
+        $statusSince = self::earliestDay(array_column($groups, 'start'));
+
+        $latestCampaignDay = self::onlyLatestCandidates(DB::table('ads_manager_reports'), 'campaign_id', $ids['campaign_id'], $statusSince)
             ->selectRaw("campaign_id, MAX($dayExpr) AS latest_day")
             ->groupBy('campaign_id');
 
-        $campaignLatestStatus = DB::table('ads_manager_reports as a')
+        $campaignLatestStatus = self::onlyLatestCandidates(DB::table('ads_manager_reports as a'), 'campaign_id', $ids['campaign_id'], $statusSince, 'a')
             ->joinSub($latestCampaignDay, 'lcd', function ($j) use ($dayExpr) {
                 $j->on('a.campaign_id', '=', 'lcd.campaign_id')
                   ->whereRaw("COALESCE(a.day, DATE(a.reporting_starts)) = lcd.latest_day");
@@ -783,11 +871,11 @@ class AdsManagerCampaignsController extends Controller
             ->selectRaw("a.campaign_id, MAX(CASE WHEN LOWER(COALESCE(a.campaign_delivery,'')) LIKE 'active%' THEN 1 ELSE 0 END) AS is_on_latest")
             ->groupBy('a.campaign_id');
 
-        $latestAdSetDay = DB::table('ads_manager_reports')
+        $latestAdSetDay = self::onlyLatestCandidates(DB::table('ads_manager_reports'), 'ad_set_id', $ids['ad_set_id'], $statusSince)
             ->selectRaw("ad_set_id, MAX($dayExpr) AS latest_day")
             ->groupBy('ad_set_id');
 
-        $adSetLatestStatus = DB::table('ads_manager_reports as a')
+        $adSetLatestStatus = self::onlyLatestCandidates(DB::table('ads_manager_reports as a'), 'ad_set_id', $ids['ad_set_id'], $statusSince, 'a')
             ->joinSub($latestAdSetDay, 'lad', function ($j) {
                 $j->on('a.ad_set_id', '=', 'lad.ad_set_id')
                   ->whereRaw("COALESCE(a.day, DATE(a.reporting_starts)) = lad.latest_day");
@@ -816,9 +904,8 @@ class AdsManagerCampaignsController extends Controller
             ->whereRaw('1=0');
 
         // ── Main aggregation: per (page, campaign) for all requested pages ──
-        // Using orWhere groups for per-page date filtering. MySQL handles this
-        // with index_merge if (page_name, day) index exists; otherwise still
-        // faster than 40+ separate roundtrips.
+        // Using orWhere groups for per-page date filtering: page_name IN + day
+        // range per page, a range on ads_report_page_day_idx (spec 261).
         $query = DB::table('ads_manager_reports')
             ->leftJoinSub($campaignLatestStatus, 'ls', function ($j) {
                 $j->on('ads_manager_reports.campaign_id', '=', 'ls.campaign_id');
@@ -832,14 +919,7 @@ class AdsManagerCampaignsController extends Controller
             ->leftJoinSub($adSetLatestStatus, 'asls', function ($j) {
                 $j->on('ads_manager_reports.ad_set_id', '=', 'asls.ad_set_id');
             })
-            ->where(function ($q) use ($pageList, $endDate) {
-                foreach ($pageList as $p) {
-                    $q->orWhere(function ($qq) use ($p, $endDate) {
-                        $qq->whereRaw('LOWER(TRIM(page_name)) = LOWER(TRIM(?))', [$p['name']])
-                           ->whereBetween('day', [$p['start'], $endDate]);
-                    });
-                }
-            })
+            ->where($pageFilter)
             ->selectRaw('
                 ads_manager_reports.page_name,
                 ads_manager_reports.campaign_id,
@@ -871,27 +951,27 @@ class AdsManagerCampaignsController extends Controller
         if ($onlyWithSpend) $query->havingRaw('COALESCE(SUM(amount_spent_php),0) > 0');
 
         // Default sort: active first, then by spend desc.
-        $rawRows = $query->orderByDesc('is_on')
+        // Walang page na tumama: walang row (ang walang laman na OR ay tatama sa lahat).
+        $rawRows = empty($groups) ? collect() : $query->orderByDesc('is_on')
                          ->orderBy('campaign_name', 'asc')
                          ->orderByDesc('spend')
                          ->get();
 
         // ── Windowed CPPs (today / 3d / 7d) — batched query ──
-        // Reuses the same per-page WHERE pattern. Trailing 7-day window ending
-        // sa end_date. Skipped if !$includeWindows.
+        // Same page names (all requested pages, resolved to stored names).
+        // Trailing 7-day window ending sa end_date. Skipped if !$includeWindows.
         $windowMap = []; // [page_name][campaign_id] => [cpp_today, cpp_3d, cpp_7d]
-        if ($includeWindows) {
+        $windowNames = array_values(array_unique(array_merge([], ...array_values($resolved))));
+        if ($includeWindows && !empty($windowNames)) {
             $endObj    = new \DateTime($endDate);
             $endStr    = $endObj->format('Y-m-d');
             $endMinus2 = (clone $endObj)->modify('-2 days')->format('Y-m-d');
             $endMinus6 = (clone $endObj)->modify('-6 days')->format('Y-m-d');
 
             $winQuery = DB::table('ads_manager_reports')
-                ->where(function ($q) use ($pageList, $endMinus6, $endStr) {
+                ->where(function ($q) use ($windowNames, $endMinus6, $endStr) {
                     // For windowed, all pages share same 7-day window (end-6 .. end).
-                    // Page filter still per-page (via OR).
-                    $pageNames = array_column($pageList, 'name');
-                    $q->whereRaw('LOWER(TRIM(page_name)) IN (' . implode(',', array_fill(0, count($pageNames), 'LOWER(TRIM(?))')) . ')', $pageNames)
+                    $q->whereIn('page_name', $windowNames)
                       ->whereBetween('day', [$endMinus6, $endStr]);
                 })
                 ->selectRaw("
@@ -1096,6 +1176,10 @@ class AdsManagerCampaignsController extends Controller
         $campaignIds    = $campaignIdsCsv ? array_values(array_filter(array_map('trim', explode(',', $campaignIdsCsv)))) : [];
         $adSetIds       = $adSetIdsCsv    ? array_values(array_filter(array_map('trim', explode(',', $adSetIdsCsv))))    : [];
 
+        // Video views per ad (spec 244), only on the ads level. Checked so the page keeps working in the window
+        // between a deploy and its migration.
+        $hasVideo = $level === 'ads' && Schema::hasColumn('ads_manager_reports', 'video_plays_3s');
+
         // Date expression (portable)
         $driver = DB::getDriverName(); // "pgsql" or "mysql"
         $dayExpr = $driver === 'pgsql'
@@ -1112,14 +1196,19 @@ class AdsManagerCampaignsController extends Controller
         // Rule: on the latest day per entity, Active if ANY row is "active%".
         // --------------------------------------------------------------------
 
+        // Spec 261: the status subqueries cover only the campaigns / ad sets in the
+        // filtered rows ($ids), and skip rows dated before the start date (never
+        // anyone's latest day, since every filtered row is on or after it).
+        $statusSince = self::earliestDay($start ? [$start] : []);
+
         // Latest day per campaign
-        $latestCampaignDay = DB::table('ads_manager_reports')
+        $latestCampaignDay = fn (array $ids) => self::onlyLatestCandidates(DB::table('ads_manager_reports'), 'campaign_id', $ids, $statusSince)
             ->selectRaw("campaign_id, MAX($dayExpr) AS latest_day")
             ->groupBy('campaign_id');
 
         // Campaign status on latest day (1 row per campaign_id)
-        $campaignLatestStatus = DB::table(DB::raw('ads_manager_reports a'))
-            ->joinSub($latestCampaignDay, 't', function ($j) use ($dayExprA) {
+        $campaignLatestStatus = fn (array $ids) => self::onlyLatestCandidates(DB::table(DB::raw('ads_manager_reports a')), 'campaign_id', $ids, $statusSince, 'a')
+            ->joinSub($latestCampaignDay($ids), 't', function ($j) use ($dayExprA) {
                 $j->on('a.campaign_id', '=', 't.campaign_id')
                   ->whereRaw("$dayExprA = t.latest_day");
             })
@@ -1248,13 +1337,13 @@ class AdsManagerCampaignsController extends Controller
         $adFreshStart       = $buildFreshStart('ad_id',       'ad_set_delivery');
 
         // Latest day per ad set
-        $latestAdSetDay = DB::table('ads_manager_reports')
+        $latestAdSetDay = fn (array $ids) => self::onlyLatestCandidates(DB::table('ads_manager_reports'), 'ad_set_id', $ids, $statusSince)
             ->selectRaw("ad_set_id, MAX($dayExpr) AS latest_day")
             ->groupBy('ad_set_id');
 
         // Ad set status on latest day (1 row per ad_set_id)
-        $adSetLatestStatus = DB::table(DB::raw('ads_manager_reports a'))
-            ->joinSub($latestAdSetDay, 't', function ($j) use ($dayExprA) {
+        $adSetLatestStatus = fn (array $ids) => self::onlyLatestCandidates(DB::table(DB::raw('ads_manager_reports a')), 'ad_set_id', $ids, $statusSince, 'a')
+            ->joinSub($latestAdSetDay($ids), 't', function ($j) use ($dayExprA) {
                 $j->on('a.ad_set_id', '=', 't.ad_set_id')
                   ->whereRaw("$dayExprA = t.latest_day");
             })
@@ -1271,9 +1360,13 @@ class AdsManagerCampaignsController extends Controller
         if ($start) $base->whereRaw("$dayExpr >= ?", [$start]);
         if ($end)   $base->whereRaw("$dayExpr <= ?", [$end]);
 
-        // Page filter (trim + case-insensitive)
+        // Page filter (trim + case-insensitive). Spec 261: resolved to the stored
+        // names first, then page_name IN (...) so the page index is used. No date
+        // bound on the lookup: the range here is COALESCE(day, reporting_starts).
+        $storedPages = null;
         if ($pageName && $pageName !== 'all') {
-            $base->whereRaw('LOWER(TRIM(page_name)) = LOWER(TRIM(?))', [$pageName]);
+            $storedPages = $this->storedPageNames([(string) $pageName], null)[0];
+            $base->whereIn('page_name', $storedPages);
         }
 
         // Item filter — substring match (case-insensitive) to tolerate
@@ -1322,9 +1415,11 @@ class AdsManagerCampaignsController extends Controller
         // =========================
         if ($level === 'campaigns') {
             if ($campaignId) $base->where('campaign_id', $campaignId);
+            // Spec 261: ang mga campaign at ad set na nasa filtered rows lang ang kinukuwentahan ng status.
+            $statusIds = self::idsIn($base, ['campaign_id', 'ad_set_id']);
 
             $query = (clone $base)
-                ->leftJoinSub($campaignLatestStatus, 'ls', function ($j) {
+                ->leftJoinSub($campaignLatestStatus($statusIds['campaign_id']), 'ls', function ($j) {
                     $j->on('ads_manager_reports.campaign_id', '=', 'ls.campaign_id');
                 })
                 ->leftJoinSub($campaignStartedDates, 'sd', function ($j) {
@@ -1336,7 +1431,7 @@ class AdsManagerCampaignsController extends Controller
                 // Join the adset latest-status snapshot so we can count distinct
                 // ad_set_ids per campaign whose latest delivery is ACTIVE.
                 // Powers the "Inside" column (active adsets per campaign).
-                ->leftJoinSub($adSetLatestStatus, 'asls', function ($j) {
+                ->leftJoinSub($adSetLatestStatus($statusIds['ad_set_id']), 'asls', function ($j) {
                     $j->on('ads_manager_reports.ad_set_id', '=', 'asls.ad_set_id');
                 })
                 ->selectRaw('
@@ -1422,9 +1517,10 @@ class AdsManagerCampaignsController extends Controller
         // =========================
         } elseif ($level === 'adsets') {
             if (empty($campaignIds) && $campaignId) $base->where('campaign_id', $campaignId);
+            $statusIds = self::idsIn($base, ['ad_set_id']);
 
             $query = (clone $base)
-                ->leftJoinSub($adSetLatestStatus, 'ls', function ($j) {
+                ->leftJoinSub($adSetLatestStatus($statusIds['ad_set_id']), 'ls', function ($j) {
                     $j->on('ads_manager_reports.ad_set_id', '=', 'ls.ad_set_id');
                 })
                 ->leftJoinSub($adSetStartedDates, 'sd', function ($j) {
@@ -1522,10 +1618,11 @@ class AdsManagerCampaignsController extends Controller
         } else {
             // Naka-qualify: ang ls subquery ay may sariling ad_set_id (ambiguous kung wala, HTTP 500).
             if (empty($adSetIds) && $adSetId) $base->where('ads_manager_reports.ad_set_id', $adSetId);
+            $statusIds = self::idsIn($base, ['ad_set_id']);
 
             // Ads inherit status from latest-day Ad Set status
             $query = (clone $base)
-                ->leftJoinSub($adSetLatestStatus, 'ls', function ($j) {
+                ->leftJoinSub($adSetLatestStatus($statusIds['ad_set_id']), 'ls', function ($j) {
                     $j->on('ads_manager_reports.ad_set_id', '=', 'ls.ad_set_id');
                 })
                 ->leftJoinSub($adStartedDates, 'sd', function ($j) {
@@ -1564,11 +1661,19 @@ class AdsManagerCampaignsController extends Controller
                     MAX(sd.running_at_start) AS running_at_start,
                     MAX(fs.latest_started) AS latest_started
                 ')
+                // No COALESCE: an ad without video (all null) stays null, not 0.
+                ->when($hasVideo, fn ($q) => $q->selectRaw('
+                    SUM(ads_manager_reports.video_plays_3s)  AS video_plays_3s,
+                    SUM(ads_manager_reports.video_thruplays) AS video_thruplays,
+                    SUM(ads_manager_reports.video_p50)       AS video_p50
+                '))
+                ->when($hasVideo, fn ($q) => $q->selectRaw(self::videoRatesSql()))
                 ->groupBy('ads_manager_reports.ad_id');
 
             if ($onlyWithSpend) $query->havingRaw('COALESCE(SUM(amount_spent_php),0) > 0');
 
             $sortable = ['spend','messages','purchases','cpp','cpm_msg','cpm_1000','cpr','impressions','reach','frequency','link_clicks','welcome_msg_rate','conversion_rate','headline','item_name','first_started','latest_started'];
+            if ($hasVideo) $sortable = array_merge($sortable, self::VIDEO_RATES);
 
             if ($sortBy === 'default') {
                 $rows = $query->orderByDesc('is_on')
@@ -1581,7 +1686,7 @@ class AdsManagerCampaignsController extends Controller
                 $rows = $query->orderBy($sortBy, $sortDir)->limit($limit)->get();
             }
 
-            $rows = $rows->map(function ($r) {
+            $rows = $rows->map(function ($r) use ($hasVideo) {
                 return [
                     'level'           => 'ad',
                     'campaign_id'     => $r->campaign_id,
@@ -1611,11 +1716,14 @@ class AdsManagerCampaignsController extends Controller
                     'reach'           => (int)   ($r->reach ?? 0),
                     'frequency'       => isset($r->frequency) ? (float) $r->frequency : null,
                     'link_clicks'      => $r->link_clicks !== null ? (int) $r->link_clicks : null,
+                    'video_plays_3s'   => isset($r->video_plays_3s)  ? (int) $r->video_plays_3s  : null,
+                    'video_thruplays'  => isset($r->video_thruplays) ? (int) $r->video_thruplays : null,
+                    'video_p50'        => isset($r->video_p50)       ? (int) $r->video_p50       : null,
                     'welcome_msg_rate' => isset($r->welcome_msg_rate) ? (float) $r->welcome_msg_rate : null,
                     'conversion_rate'  => isset($r->conversion_rate)  ? (float) $r->conversion_rate  : null,
                     // "Inside" — ads are leaf-level, no children to count.
                     'active_subcount'  => null,
-                ];
+                ] + ($hasVideo ? self::videoRates($r) : []);
             });
         }
 
@@ -1640,8 +1748,8 @@ class AdsManagerCampaignsController extends Controller
             $winQuery = DB::table('ads_manager_reports')
                 ->whereRaw("$dayExpr BETWEEN ? AND ?", [$endMinus6, $endStr]);
 
-            if ($pageName && $pageName !== 'all') {
-                $winQuery->whereRaw('LOWER(TRIM(page_name)) = LOWER(TRIM(?))', [$pageName]);
+            if ($storedPages !== null) {
+                $winQuery->whereIn('page_name', $storedPages);
             }
             if (is_string($itemName) && trim($itemName) !== '') {
                 $likeItem = '%'.mb_strtolower(trim($itemName)).'%';
@@ -1964,7 +2072,9 @@ class AdsManagerCampaignsController extends Controller
             COALESCE(SUM(reach),0) AS reach,
             COALESCE(SUM(results),0) AS results,
             COALESCE(SUM(link_clicks),0) AS link_clicks
-        ')->first();
+        ')->when($hasVideo, fn ($q) => $q->selectRaw('
+            SUM(video_plays_3s) AS video_plays_3s, SUM(video_thruplays) AS video_thruplays, SUM(video_p50) AS video_p50
+        ')->selectRaw(self::videoRatesSql()))->first();
 
         $totals = [
             'spend'       => (float) ($tot->spend ?? 0),
@@ -1981,6 +2091,10 @@ class AdsManagerCampaignsController extends Controller
             'welcome_msg_rate' => ($tot->link_clicks ?? 0) > 0 ? (float) (($tot->messages * 100.0) / $tot->link_clicks) : null,
             'conversion_rate'  => ($tot->messages ?? 0)    > 0 ? (float) (($tot->purchases * 100.0) / $tot->messages) : null,
         ];
+        if ($hasVideo) {
+            foreach (['video_plays_3s', 'video_thruplays', 'video_p50'] as $c) $totals[$c] = isset($tot->$c) ? (int) $tot->$c : null;
+            $totals += self::videoRates($tot);
+        }
 
         // ── Stitch `has_ad_link` flag para sa /owner/private creative preview UI.
         // Frontend uses this para mag-display ng dimmed/light-blue name kapag
@@ -2014,23 +2128,36 @@ class AdsManagerCampaignsController extends Controller
                     ->flip()
                     ->all();
             }
+            // Spec 254: an ad with a row of its own uses only that row's link (never a sibling ad's); the campaign's
+            // link is the fallback for an ad without a row.
+            $ownAdIds = [];
+            $fallbackLinked = []; // campaign_id => the campaign's fallback row has a link
+            if (!empty($adIdsForLinks) && !empty($campaignIdsForLinks)) {
+                $seenCampaign = [];
+                foreach (DB::table('ad_campaign_creatives')->whereIn('campaign_id', $campaignIdsForLinks)
+                    ->orderByRaw('CASE WHEN ad_id IS NULL THEN 0 ELSE 1 END')->orderBy('id')
+                    ->get(['campaign_id', 'ad_link']) as $c) {
+                    if (isset($seenCampaign[(string) $c->campaign_id])) continue;
+                    $seenCampaign[(string) $c->campaign_id] = true;
+                    if (trim((string) $c->ad_link) !== '') $fallbackLinked[(string) $c->campaign_id] = true;
+                }
+            }
             if (!empty($adIdsForLinks)) {
-                $linkedAdIds = DB::table('ad_campaign_creatives')
+                $own = DB::table('ad_campaign_creatives')
                     ->whereIn('ad_id', $adIdsForLinks)
-                    ->whereNotNull('ad_link')
-                    ->where('ad_link', '!=', '')
-                    ->pluck('ad_id')
-                    ->map(fn($v) => (string)$v)
-                    ->unique()
-                    ->flip()
-                    ->all();
+                    ->get(['ad_id', 'ad_link']);
+                foreach ($own as $o) {
+                    $ownAdIds[(string) $o->ad_id] = true;
+                    if (trim((string) $o->ad_link) !== '') $linkedAdIds[(string) $o->ad_id] = true;
+                }
             }
 
-            $rowsArr = array_map(function ($r) use ($linkedCampaignIds, $linkedAdIds, $level) {
+            $rowsArr = array_map(function ($r) use ($linkedCampaignIds, $linkedAdIds, $ownAdIds, $fallbackLinked, $level) {
                 $cid = !empty($r['campaign_id']) ? (string)$r['campaign_id'] : null;
                 $aid = !empty($r['ad_id'])       ? (string)$r['ad_id']       : null;
                 $hasLink = false;
-                if ($aid && isset($linkedAdIds[$aid]))            $hasLink = true;
+                if ($aid && isset($ownAdIds[$aid]))               $hasLink = isset($linkedAdIds[$aid]);
+                elseif ($aid)                                     $hasLink = $cid !== null && isset($fallbackLinked[$cid]);
                 elseif ($cid && isset($linkedCampaignIds[$cid]))  $hasLink = true;
                 $r['has_ad_link'] = $hasLink;
                 return $r;
@@ -2108,7 +2235,7 @@ class AdsManagerCampaignsController extends Controller
                     ]);
                 }
             } else {
-                fputcsv($out, ['Ad (Headline)','Ad set','Campaign','Page','Active','First Launched','Days Running','Latest Start','Spend','CPM (1k)','Cost/Msg','Cost/Result','Cost/Purchase','Impr.','Link Clicks','Welcome Msg Rate (%)','Msgs','Conv Rate (%)','Purchases']);
+                fputcsv($out, ['Ad (Headline)','Ad set','Campaign','Page','Active','First Launched','Days Running','Latest Start','Spend','CPM (1k)','Cost/Msg','Cost/Result','Cost/Purchase','Impr.','Link Clicks','3s plays','ThruPlays (15s)','50% views','Hook Rate (%)','Hold Rate (%)','Hold Rate 50% (%)','Welcome Msg Rate (%)','Msgs','Conv Rate (%)','Purchases']);
                 foreach ($rows as $r) {
                     fputcsv($out, [
                         ($r['headline'] ?? 'Ad '.$r['ad_id']), $r['ad_set_name'], $r['campaign_name'], $r['page_name'], $r['on'] ? '1':'0',
@@ -2116,12 +2243,125 @@ class AdsManagerCampaignsController extends Controller
                         ((!empty($r['running_at_start']) && !empty($r['first_started'])) ? '>= ' : '') . $daysAgo($r['first_started'] ?? null, !empty($r['on'])),
                         $r['latest_started'] ?? '',
                         $r['spend'], $r['cpm_1000'], $r['cpm_msg'], $r['cpr'], $r['cpp'],
-                        $r['impressions'], $intOrBlank($r['link_clicks'] ?? null), $rate($r['welcome_msg_rate'] ?? null),
+                        $r['impressions'], $intOrBlank($r['link_clicks'] ?? null),
+                        $intOrBlank($r['video_plays_3s'] ?? null), $intOrBlank($r['video_thruplays'] ?? null), $intOrBlank($r['video_p50'] ?? null),
+                        $rate($r['hook_rate'] ?? null), $rate($r['hold_rate'] ?? null), $rate($r['hold_rate_50'] ?? null),
+                        $rate($r['welcome_msg_rate'] ?? null),
                         $r['messages'], $rate($r['conversion_rate'] ?? null), $r['purchases']
                     ]);
                 }
             }
             fclose($out);
         }, 200, $headers);
+    }
+
+    /** Spec 246: the three video rates of the ads level, in percent. */
+    private const VIDEO_RATES = ['hook_rate', 'hold_rate', 'hold_rate_50'];
+
+    /**
+     * Hook Rate = 3-second plays ÷ impressions, Hold Rate = ThruPlays ÷ 3-second plays, Hold Rate 50% = 50% views ÷
+     * 3-second plays, all from summed numbers (an average of per-ad rates would weigh a small ad like a big one).
+     * Each divisor is summed only over the rows that carry the numerator: days stored before the video sync have null
+     * video numbers (no backfill), and counting their impressions would make every rate that spans them look low.
+     * A divisor of 0 or a null numerator gives NULL, shown as "—".
+     */
+    /**
+     * Spec 261: the stored page_name values per requested name, by the old rule
+     * LOWER(TRIM(page_name)) = LOWER(TRIM(?)) (TRIM = spaces only), matched in PHP.
+     * One small query: one row per stored page name (loose index scan on the page index),
+     * limited to names with rows on or after $since when given.
+     *
+     * @param  string[]  $requested
+     * @return array<int, string[]>  stored names per requested index (empty = no rows)
+     */
+    private function storedPageNames(array $requested, ?string $since): array
+    {
+        $q = DB::table('ads_manager_reports')->whereNotNull('page_name')->groupBy('page_name')->select('page_name');
+        if ($since !== null) $q->havingRaw('MAX(day) >= ?', [$since]);
+
+        $byKey = [];
+        foreach ($q->pluck('page_name') as $stored) {
+            $byKey[self::pageKey((string) $stored)][] = (string) $stored;
+        }
+        $out = [];
+        foreach ($requested as $i => $name) {
+            $out[$i] = $byKey[self::pageKey((string) $name)] ?? [];
+        }
+
+        return $out;
+    }
+
+    /**
+     * Spec 261: the distinct non-null values of $cols in the filtered rows of $base
+     * (a reports query without joins), for the latest-status subqueries.
+     *
+     * @return array<string, array>  column => ids
+     */
+    private static function idsIn($base, array $cols): array
+    {
+        $rows = (clone $base)->distinct()->get(array_map(fn ($c) => 'ads_manager_reports.' . $c, $cols));
+        $out = [];
+        foreach ($cols as $c) {
+            $out[$c] = $rows->pluck($c)->filter(fn ($v) => $v !== null)->unique()->values()->all();
+        }
+
+        return $out;
+    }
+
+    /** LOWER(TRIM(x)) in PHP: MySQL TRIM strips spaces only. */
+    private static function pageKey(string $name): string
+    {
+        return mb_strtolower(trim($name, ' '));
+    }
+
+    /** The earliest of the given Y-m-d dates, or null when any is not a plain Y-m-d (then no bound). */
+    private static function earliestDay(array $dates): ?string
+    {
+        if (empty($dates)) return null;
+        foreach ($dates as $d) {
+            if (!is_string($d) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $d)) return null;
+        }
+
+        return min($dates);
+    }
+
+    /**
+     * Spec 261: limit a latest-status subquery to the entities in the result ($col IN $ids),
+     * and, when every result row is on or after $since, skip rows dated before it: such a row
+     * can never be the entity's latest COALESCE(day, reporting_starts) day. Rows without a day
+     * stay in (their day comes from reporting_starts).
+     */
+    private static function onlyLatestCandidates($q, string $col, array $ids, ?string $since, string $alias = '')
+    {
+        $p = $alias !== '' ? $alias . '.' : '';
+        $q->whereIn($p . $col, $ids);
+        if ($since !== null) {
+            $q->where(function ($w) use ($p, $since) {
+                $w->where($p . 'day', '>=', $since)->orWhereNull($p . 'day');
+            });
+        }
+
+        return $q;
+    }
+
+    private static function videoRatesSql(): string
+    {
+        $t = 'ads_manager_reports.';
+        $rate = fn (string $num, string $den, string $as) => "CASE WHEN SUM(CASE WHEN {$t}{$num} IS NOT NULL THEN {$t}{$den} END) > 0"
+            . " THEN (SUM({$t}{$num}) * 100.0) / SUM(CASE WHEN {$t}{$num} IS NOT NULL THEN {$t}{$den} END) END AS {$as}";
+
+        return implode(', ', [
+            $rate('video_plays_3s', 'impressions', 'hook_rate'),
+            $rate('video_thruplays', 'video_plays_3s', 'hold_rate'),
+            $rate('video_p50', 'video_plays_3s', 'hold_rate_50'),
+        ]);
+    }
+
+    /** The rates of one aggregated row (an ad or the totals) as floats, null when there is none. */
+    private static function videoRates(object $r): array
+    {
+        $out = [];
+        foreach (self::VIDEO_RATES as $id) $out[$id] = isset($r->$id) ? (float) $r->$id : null;
+        return $out;
     }
 }

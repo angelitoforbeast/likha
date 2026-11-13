@@ -339,41 +339,59 @@ class JntClient
 
     public function printWaybill(string $billCode): array
 {
-    $endpoint = $this->endpoints['print'] ?? '/api/order/print';
-
-    $li = json_encode([
-        'customerid' => $this->customerid,
-        'billCode'   => $billCode,
-    ], JSON_UNESCAPED_SLASHES);
-
-    // ✅ signing mode: base64( md5_hex( logistics_interface + secret ) )
-    $digest = $this->signMd5HexBase64($li);
-
-    $form = [
-        'logistics_interface' => $li,
-        'data_digest'         => $digest,
-        'msg_type'            => 'BILLQUERY',
-        'eccompanyid'         => $this->eccompanyid,
-    ];
+    $form = $this->printWaybillForm($billCode);
 
     $resp = \Illuminate\Support\Facades\Http::asForm()
-        ->timeout($this->timeoutSeconds ?? 30)
-        ->post(rtrim($this->baseUrl, '/') . $endpoint, $form);
+        ->timeout($this->getTimeoutSeconds())
+        ->post($this->printWaybillUrl(), $form);
 
     $this->lastRequest  = $form;
     $this->lastResponse = ['status' => $resp->status(), 'body' => $resp->body()];
 
-    if (!$resp->ok()) {
-        throw new \RuntimeException("J&T print failed HTTP {$resp->status()}: " . $resp->body());
-    }
-
-    $json = $resp->json();
-    if (!is_array($json)) {
-        throw new \RuntimeException("J&T print returned non-JSON: " . $resp->body());
-    }
-
-    return $json;
+    return self::printWaybillJson($resp);
 }
+
+    /** The signed BILLQUERY form of one waybill (printWaybill, and the parallel label fetch of spec 269). */
+    public function printWaybillForm(string $billCode): array
+    {
+        $li = json_encode([
+            'customerid' => $this->customerid,
+            'billCode'   => $billCode,
+        ], JSON_UNESCAPED_SLASHES);
+
+        // ✅ signing mode: base64( md5_hex( logistics_interface + secret ) )
+        return [
+            'logistics_interface' => $li,
+            'data_digest'         => $this->signMd5HexBase64($li),
+            'msg_type'            => 'BILLQUERY',
+            'eccompanyid'         => $this->eccompanyid,
+        ];
+    }
+
+    public function printWaybillUrl(): string
+    {
+        return rtrim($this->baseUrl, '/') . ($this->endpoints['print'] ?? '/api/order/print');
+    }
+
+    public function getTimeoutSeconds(): int
+    {
+        return (int) ($this->timeoutSeconds ?? 30);
+    }
+
+    /** The JSON of a BILLQUERY answer; a non-2xx or non-JSON answer throws, as printWaybill always did. */
+    public static function printWaybillJson(\Illuminate\Http\Client\Response $resp): array
+    {
+        if (!$resp->ok()) {
+            throw new \RuntimeException("J&T print failed HTTP {$resp->status()}: " . $resp->body());
+        }
+
+        $json = $resp->json();
+        if (!is_array($json)) {
+            throw new \RuntimeException("J&T print returned non-JSON: " . $resp->body());
+        }
+
+        return $json;
+    }
 
 /** base64( md5_hex( li + secret ) ) */
 protected function signMd5HexBase64(string $logisticsInterface): string

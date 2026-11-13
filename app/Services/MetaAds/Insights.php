@@ -14,7 +14,19 @@ use Throwable;
 class Insights
 {
     public const FIELDS = 'account_id,ad_id,ad_name,adset_id,adset_name,campaign_id,campaign_name,reach,impressions,'
-        . 'inline_link_clicks,spend,actions,cost_per_action_type,results,cost_per_result,attribution_setting,date_start,date_stop';
+        . 'inline_link_clicks,spend,actions,cost_per_action_type,results,cost_per_result,attribution_setting,date_start,date_stop,'
+        . 'video_thruplay_watched_actions,video_p50_watched_actions';
+
+    /**
+     * Spec 244. Each video number is the `video_view` entry of a list of {action_type, value}:
+     * - 3-second plays: in `actions` (already requested), which is what Ads Manager calls "3-second video plays";
+     *   `video_play_actions` / the `video_play` action count plays that merely started, so they are not used.
+     * - ThruPlays: `video_thruplay_watched_actions` (15 seconds, or to the end of a shorter video). This is the
+     *   "15 seconds" number because it is the one Ads Manager shows; `video_15_sec_watched_actions` is still in Meta's
+     *   field list but is not requested, so the report has one 15-second number and it matches Ads Manager.
+     * - 50% watched: `video_p50_watched_actions`.
+     */
+    public const VIDEO_VIEW = 'video_view';
 
     public const AD_FIELDS = 'id,effective_status,'
         . 'adset{id,effective_status,daily_budget,lifetime_budget,start_time,end_time,optimization_goal},'
@@ -140,6 +152,23 @@ class Insights
         return null;
     }
 
+    /**
+     * Spec 252/256/257. Ang link ng ad na nae-embed ng preview (fbEmbedSrc), para sa lahat ng ad, video man o hindi:
+     * https://www.facebook.com/<page id>/posts/<post id>, mula sa effective_object_story_id ("<page id>_<post id>";
+     * post plugin). Hindi ginagamit ang video_data.video_id: hindi iyon ang pampublikong reel id (spec 257).
+     * Digits lang ang tinatanggap na id; ang wala o mali ang hugis ay null (hindi ginagalaw ng importer ang nakatabing
+     * link).
+     */
+    public static function adLink(mixed $creative): ?string
+    {
+        if (!is_array($creative)) return null;
+
+        $storyId = $creative['effective_object_story_id'] ?? null;
+        if (!is_string($storyId) || !preg_match('/^(\d+)_(\d+)$/D', $storyId, $m)) return null;
+
+        return 'https://www.facebook.com/' . $m[1] . '/posts/' . $m[2];
+    }
+
     /** Isang insights row (+ detalye ng ad) → mga column ng ads_manager_reports, gaya ng normalizeRow ng upload. */
     public function map(string $accountId, array $r, ?array $ad, array $pages): ?array
     {
@@ -164,6 +193,9 @@ class Insights
             'reach'                           => self::int($r['reach'] ?? null),
             'impressions'                     => self::int($r['impressions'] ?? null),
             'link_clicks'                     => self::int($r['inline_link_clicks'] ?? null),
+            'video_plays_3s'                  => self::videoViews($r['actions'] ?? null),
+            'video_thruplays'                 => self::videoViews($r['video_thruplay_watched_actions'] ?? null),
+            'video_p50'                       => self::videoViews($r['video_p50_watched_actions'] ?? null),
             'messaging_conversations_started' => self::action($r['actions'] ?? [], [self::MESSAGING]),
             'purchases'                       => self::action($r['actions'] ?? [], self::PURCHASE_KEYS),
             'results'                         => $results,
@@ -181,6 +213,7 @@ class Insights
 
             $row['page_id']            = self::pageId($ad); // hindi column: para sa talaan ng nilaktawan (Sync)
             $row['page_name']          = $pages[(string) $row['page_id']] ?? null;
+            $row['ad_link']            = self::adLink($cr); // ad_campaign_creatives lang (spec 252/257)
             $row['ad_set_delivery']    = self::delivery($set['effective_status'] ?? null);
             $campaign                  = self::delivery($ad['campaign']['effective_status'] ?? null);
             $row['campaign_delivery']  = $campaign === null ? null
@@ -256,6 +289,23 @@ class Insights
             foreach ($actions as $a) {
                 if (($a['action_type'] ?? null) === $k && is_numeric($a['value'] ?? null)) return (int) round((float) $a['value']);
             }
+        }
+
+        return null;
+    }
+
+    /**
+     * The `video_view` value of a Meta list, or null when there is none (an image ad) or the answer has an unknown
+     * shape: the answer is untrusted, and 0 would read as a video nobody watched.
+     */
+    private static function videoViews(mixed $list): ?int
+    {
+        if (!is_array($list) || !array_is_list($list)) return null;
+        foreach ($list as $a) {
+            if (!is_array($a) || ($a['action_type'] ?? null) !== self::VIDEO_VIEW) continue;
+            $v = $a['value'] ?? null;
+
+            return is_numeric($v) && (float) $v >= 0 ? (int) round((float) $v) : null;
         }
 
         return null;

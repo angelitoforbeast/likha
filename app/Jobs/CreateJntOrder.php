@@ -14,6 +14,7 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 
 
@@ -176,13 +177,15 @@ class CreateJntOrder implements ShouldQueue
             'json'        => $client->lastResponse['json'] ?? $res, // parsed json
         ];
 
+        $booked = false;
         DB::transaction(function () use (
             $shipment, $success, $tx, $mailno, $reason,
-            $payload, $protocol, $responsePayload
+            $payload, $protocol, $responsePayload, &$booked
         ) {
             $locked = JntShipment::query()->lockForUpdate()->find($shipment->id);
             if (!$locked) return;
             if (!empty($locked->mailno)) return;
+            $booked = $success && !empty($mailno);
 
             // ✅ snapshot receiver fields for debugging B063
             $receiver = $payload['receiver'] ?? [];
@@ -223,6 +226,11 @@ class CreateJntOrder implements ShouldQueue
             }
         });
 
+        // Spec 269: the label is fetched and kept now, so printing only stitches it.
+        if ($booked) {
+            $this->queueLabel((string) $mailno, $page);
+        }
+
     } catch (\Throwable $e) {
         // A missing sender mapping does not fix itself between tries: the job fails now, once (failed() counts it).
         if (str_starts_with($e->getMessage(), 'SENDER_NAME_')) {
@@ -239,6 +247,18 @@ class CreateJntOrder implements ShouldQueue
     }
 }
 
+
+    /** The booking is stored already: a label job that cannot be queued never fails it (the print run fetches the label). */
+    private function queueLabel(string $mailno, string $page): void
+    {
+        try {
+            FetchJntLabel::dispatch($mailno, $page !== '' ? $page : null, $this->shipmentId);
+        } catch (\Throwable $e) {
+            Log::warning('J&T label job not queued; the print run fetches the label', [
+                'mailno' => $mailno, 'error' => $e->getMessage(),
+            ]);
+        }
+    }
 
     private function markFail(JntShipment $shipment, string $reason, array $extraResponse = [], bool $count = true): void
     {

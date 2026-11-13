@@ -84,6 +84,7 @@ class ProblemsPanelTest extends ChatblastTestCase
     {
         $this->check('Page Tres', ['No custom field named message in Botcake']);
         DB::table('chatblast_campaigns')->update(['pages' => json_encode(['Page Uno', 'Page Dos'])]); // Page Tres: hindi pinapadalhan
+        DB::table('macro_output')->where('PAGE', 'Page Tres')->delete(); // spec 271: walang order at ad, kaya puti pa rin
         $this->check('Page Dos', ['2 flows named UPDATE SHIPPING STATUS 2026']);
         foreach (['11:20:00', '11:30:00', '11:40:00'] as $t) $this->reply('1001', '7001', '2026-10-27 ' . $t, 'failed', self::RESTRICTED);
         for ($i = 0; $i < 7; $i++) $this->reply('1001', '7001', '2026-10-27 11:4' . $i . ':30'); // 3 of 10 (30%): pula ayon sa % ng restricted
@@ -129,13 +130,14 @@ class ProblemsPanelTest extends ChatblastTestCase
         $this->assertSame(['/chatbot/inbox?page_id=1001&psid=8004', '/chatbot/health?page_id=1001#who-answered'], $lines[0]['links']);
         $this->assertStringStartsWith('🟠 Moved to Botcake at 10:15: Forbeast health check failed: no answer for 3 checks', $lines[1]['text']);
         $this->assertSame(['/chatbot/pages?changes=Page+Uno&field=auto_switch'], $lines[1]['links']);
-        $this->assertStringStartsWith('🟠 Setup: No flow named UPDATE SHIPPING STATUS 2026', $lines[2]['text']);
+        $this->assertStringStartsWith('🟠 No shipping status setup: No flow named UPDATE SHIPPING STATUS 2026', $lines[2]['text']);
         $this->assertSame(['/chatblast/page-settings?q=Page+Uno'], $lines[2]['links']);
     }
 
     public function test_S_184_3_a_setup_x_on_a_page_chatblast_does_not_send_to_is_white_not_orange(): void
     {
         DB::table('chatblast_campaigns')->update(['pages' => json_encode(['Page Dos'])]);
+        DB::table('macro_output')->where('PAGE', 'Page Uno')->delete(); // spec 271: ang may order o ad ay urgent kahit hindi pinapadalhan
         $this->check('Page Uno', ['No custom field named message in Botcake']);
 
         $this->actingAs($this->user());

@@ -4740,3 +4740,153 @@ Threat model: the chat text comes from the customer through Botcake (untrusted);
 | S-241.2.2 | negative | A `cdn.fbsbx.com` `.mp4`/`.png` in `t59.2708-21`, a `.gif` in `t59.3654-21` or `t59.2708-210`, or `.gif` only in the query is text | same two tests | 2026-11-07 passed |
 | S-241.2.3 | negative | The GIF link with words before or after (`ito po https://cdn.fbsbx.com/…gif`) is text and runs the flow | same two tests | 2026-11-07 passed |
 | S-241.2.4 | edge | `[Photo]` → photo, a sticker photo `/t39.1997-6/` → null, Like → null, `[audio](…)` → audio, `[photo] ito` → null: unchanged | `test_S_241_2_other_links_text_and_existing_markers_keep_todays_type` and the S-149.28/29 tests | 2026-11-07 passed |
+
+## Slice 242 – Storage view for the marketing OIC and a storage banner at 80%
+
+As the CEO or the marketing OIC, I want to see the server storage and be warned on every Likha screen when the disk is filling up, so a full disk (as on 2026-11-08) is seen before it takes Likha down.
+
+Threat model: the server's own disk numbers and database answers are trusted; no request parameter is read. The view and the banner expose sizes only (fixed labels, no paths, no table contents). Risk tier: low-medium (the banner is on every `<x-layout>` page). Tests: `tests/Feature/SystemMonitor/StorageViewTest.php`, `tests/Feature/SystemMonitor/StorageBannerTest.php` (a fake `ServerStorage` bound in the container).
+
+### S-242.1 The marketing OIC sees a read-only Storage view (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-242.1.1 | happy | `Marketing - OIC` (also with extra spaces; since spec 243 the role is matched as nav settings match it) opens `/system-monitor/storage`: disk of `/` total, used, free GB and used %; database size; binary log size and file count | `test_S1_1_the_marketing_oic_sees_disk_database_and_binary_logs` | 2026-11-08 passed |
+| S-242.1.2 | happy | The CEO sees the Storage view and the System Monitor as today; the OIC gets 404 on `/system-monitor` and `/system-monitor/data` | `test_S1_2_the_ceo_sees_the_storage_view_and_the_system_monitor_as_today`, `test_S1_2_the_oic_gets_only_the_storage_view_not_the_rest_of_the_monitor` | 2026-11-08 passed |
+| S-242.1.3 | negative | `Marketing`, `Encoder - OIC`, `Marketing OIC` (no dash), no role: 404, nothing measured | `test_S1_3_other_roles_get_404` | 2026-11-08 passed |
+| S-242.1.4 | edge | `SHOW BINARY LOGS` refused: "Not available", page 200, nothing logged at warning or above; information_schema unreadable or the disk read failing: "Not available"; the rows of `SHOW BINARY LOGS` are summed whatever the column case | `test_S1_4_refused_binary_logs_say_not_available_and_the_page_renders`, `test_S1_4_the_real_class_returns_null_when_the_server_refuses_and_sums_the_rows_otherwise`, `test_S1_4_a_failed_disk_read_says_not_available` | 2026-11-08 passed |
+| S-242.1.5 | edge | Read-only: the view adds no form, button, input, select or textarea to the layout | `test_S1_5_the_view_is_read_only` | 2026-11-08 passed |
+
+### S-242.2 A storage banner on every Likha screen from 80% (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-242.2.1 | happy | 80% to under 90% used (80, 85, 89.9): amber "Server storage is at NN% (FF GB free)." with a link to the Storage view, for CEO and OIC | `test_S2_1_amber_banner_from_80_to_under_90_percent`, `test_S2_1_exactly_80_percent_is_amber_and_89_9_is_still_amber` | 2026-11-08 passed |
+| S-242.2.2 | happy | 90% or more: the same banner in red | `test_S2_2_red_banner_at_90_percent_or_more` | 2026-11-08 passed |
+| S-242.2.3 | negative | Other roles (`Marketing`, `Encoder`, none) never see it (since spec 243 the cached disk is read first and the nav settings say no) | `test_S2_3_other_roles_never_see_it` | 2026-11-08 passed |
+| S-242.2.4 | negative | Under 80% (79.9): nothing rendered | `test_S2_4_under_80_percent_nothing_is_rendered` | 2026-11-08 passed |
+| S-242.2.5 | edge | The disk read fails (null) or throws: no banner, the page renders; on a real request the banner sits above the page heading | `test_S2_5_a_failed_measurement_shows_no_banner_and_the_page_renders`, `test_S2_5_the_banner_is_on_a_real_page_request` | 2026-11-08 passed |
+| S-242.2.6 | perf | Cached 60 s (one disk read for three page views, a new read after 61 s); no information_schema or binary log query, no database or binary log call | `test_S2_6_the_check_is_cached_and_never_scans_or_queries_information_schema` | 2026-11-08 passed |
+| S-242.2.7 | happy | The same banner on the Chatblast/Chatbot screens (`layouts/chatblast`, above the problems banner): `/chatblast` and `/chatbot/pages` show it for `Marketing - OIC` at 85 % (amber) and 95 % (red); not for `Marketing`, not under 80 %; without a banner the page is unchanged. The TV screen (`layouts/chatbot-tv`) has none | `tests/Feature/Chatblast/ChatblastStorageBannerTest.php` | 2026-11-08 passed |
+
+## Slice 243 – Storage follows the nav settings
+
+As the CEO, I want to give the Storage view and its 80% banner to a role by checking the "Storage" link in `/owner/nav-settings`, like every other page, so who watches storage is not written in code.
+
+Threat model: the nav tables (written only by the CEO through nav settings) and the server's disk and server numbers are trusted; no request input is used. Risk tier: low. Tests: `tests/Feature/SystemMonitor/StorageNavAccessTest.php`, `tests/Feature/SystemMonitor/StorageServerStatsTest.php`, `tests/Feature/Chatblast/ChatblastStorageBannerTest.php`; the spec 242 tests seed the nav rows through the new migration (`StorageTestCase`).
+
+### S-243.1 A "Storage" nav link like the others (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-243.1.1 | happy | After the migration: one link `storage`, "Storage", `/system-monitor/storage`, `fa-solid fa-hard-drive`, active, sorted last; a visibility row for CEO, Marketing - OIC, Marketing, Data Encoder, Data Encoder - OIC, checked for CEO and Marketing - OIC only | `test_S1_the_migration_adds_the_storage_link_last_checked_for_ceo_and_oic_only` | 2026-11-08 passed |
+| S-243.1.2 | edge | Running `up()` again adds nothing; `down()` removes the link and its rows only, and is safe to run twice | `test_S1_the_migration_is_idempotent_and_down_removes_the_link` | 2026-11-08 passed |
+| S-243.1.3 | happy | `/owner/nav-settings` lists Storage with its URL, icon and a checkbox per role (CEO and OIC checked) | `test_S1_nav_settings_lists_storage_like_the_other_links` | 2026-11-08 passed |
+| S-243.1.4 | happy/negative | The menu shows Storage to a checked role (OIC, CEO, Marketing once checked), not to an unchecked one (Marketing, OIC once unchecked) | `test_S1_the_menu_shows_storage_to_a_checked_role_only` | 2026-11-08 passed |
+
+### S-243.2 The Storage view follows `NavAccess` (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-243.2.1 | happy | A checked role opens the view (OIC; Data Encoder once checked); CEO always, even with the CEO row unchecked | `test_S2_a_checked_role_opens_the_view_and_the_ceo_always_does` | 2026-11-08 passed |
+| S-243.2.2 | negative | Unchecked roles (Marketing, Data Encoder, Data Encoder - OIC, a role not in nav settings, no role) get 404; an inactive link closes it for all but the CEO | `test_S2_an_unchecked_role_gets_404`, `test_S2_an_inactive_link_closes_the_view_for_everyone_but_the_ceo` | 2026-11-08 passed |
+| S-243.2.3 | edge | The CEO unchecks Marketing - OIC through `POST /owner/nav-settings`: the OIC gets 404 and no banner on the next view (no 60 s wait); checking Marketing gives Marketing the view and the banner; Reset drops the cached answers too | `test_S2_S3_unchecking_the_oic_in_nav_settings_closes_the_view_and_the_banner_at_once`, `test_S2_S3_checking_marketing_in_nav_settings_gives_marketing_the_view_and_the_banner`, `test_S2_S3_reset_in_nav_settings_also_drops_the_cached_answers` | 2026-11-08 passed |
+
+### S-243.3 The banner shows to exactly those roles, without a query per page view (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-243.3.1 | happy/negative | At 95 % the red banner shows to CEO, OIC and a checked Data Encoder - OIC, not to unchecked Marketing or Data Encoder, and each gets 200 or 404 on the view to match; the same on the Chatblast/Chatbot layout (Marketing checked sees it, OIC unchecked does not) | `test_S3_the_banner_shows_to_exactly_the_roles_that_may_open_the_view`, `test_243_S3_the_banner_follows_the_storage_link_in_nav_settings_on_chatblast_and_chatbot` | 2026-11-08 passed |
+| S-243.3.2 | perf | Under 80 % (or a failed disk read) `banner()` runs no query at all | `test_S3_under_80_percent_the_banner_runs_no_query_at_all` | 2026-11-08 passed |
+| S-243.3.3 | perf | At 85 % the first view per role asks nav settings once; the same role (any spacing) within 60 s asks nothing; a "no" is cached too; after 61 s it asks again | `test_S3_the_access_answer_is_cached_per_role_for_60_seconds` | 2026-11-08 passed |
+| S-243.3.4 | edge | Without the nav tables only the CEO sees the banner (as `NavAccess`) | `test_S3_without_the_nav_tables_only_the_ceo_sees_it` | 2026-11-08 passed |
+
+### S-243.4 The Storage view also shows the server stats (P1, amendment 243-1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-243.4.1 | happy | A checked role (OIC) sees "Server stats" after the disk: memory used / total MB with %, memory available (MB under 1 GB, else GB with 2 decimals, as on the monitor), swap used / total MB, CPU load 1 / 5 / 15 min with the cores, uptime (`3d 5h 7m`, `2h 15m`) | `test_S4_the_oic_sees_the_server_stats_on_the_storage_view`, `test_S4_memory_available_under_1_gb_is_shown_in_mb_and_short_uptimes_drop_the_days` | 2026-11-08 passed |
+| S-243.4.2 | negative | Same access as the rest of the view: unchecked `Marketing` gets 404 and nothing is read; once checked, sees the section | `test_S4_the_section_follows_the_storage_link_like_the_rest_of_the_view` | 2026-11-08 passed |
+| S-243.4.3 | edge | Nothing readable (no /proc, no `sys_getloadavg`): every line says "Not available", the page renders; only the load missing: only that line says it, no cores | `test_S4_unreadable_stats_say_not_available_and_the_page_renders`, `test_S4_one_stat_missing_says_not_available_only_on_its_line` | 2026-11-08 passed |
+| S-243.4.4 | perf | One shared reader and cache: two views in 10 s read once, the cache entry is the monitor's `sysmon_server`, read again after 11 s; the CEO monitor's `getServerStats` returns the same numbers with the same keys | `test_S4_the_view_shares_the_ceo_monitors_10_second_cache`, `test_S4_the_ceo_monitor_reads_the_same_shared_code` | 2026-11-08 passed |
+| S-243.4.5 | negative | The database table list, file storage and processes are not on the Storage view; the OIC still gets 404 on `/system-monitor` | `test_S4_the_database_tables_and_processes_stay_on_the_ceo_monitor` | 2026-11-08 passed |
+
+## Slice 245 – The problems banner splits its list into Red, Orange and White tabs
+
+As anyone with the Chatbot menu, I want the expanded problems banner split by level in tabs, so the urgent lines are not buried among the orange and white ones.
+
+Threat model: the panel data (built by the server) is trusted; the only input is the tab choice, which only shows or hides lines already on the page. Risk tier: low. Tests: `tests/Feature/Chatblast/ProblemTabsTest.php` (faked `ProblemsPanel`); the existing banner tests (`ProblemsPanelTest`, `PageProblemsTest`, `SetupProblemsBannerTest`, `AiProblemsTest`, `QuietSetupTest`) still read the same list.
+
+### S-245.1 Tabs per level above the list (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-245.1.1 | happy | Red, orange and white lines on four pages: on `/chatbot/inbox` and `/chatblast/page-settings` a `role="tablist"` row "🔴 Red (2)", "🟠 Orange (2)", "⚪ White (2)", "All (6)" (lines, not pages), each `role="tab"` with `aria-controls="cb-problems-list"`; Red is selected; the row is hidden while the banner is collapsed | `test_S_245_1_the_tabs_count_lines_per_level_and_red_opens_first_on_both_screens` | 2026-11-08 passed |
+| S-245.1.2 | happy | Red tab: only red lines, under their pages in `panel()` order; a page without a red line is hidden. Orange and White by the same rule (the script's rule over the markup): only that level, pages in order, pages without it absent | `test_S_245_1_each_level_tab_shows_only_its_lines_grouped_by_page_in_order` | 2026-11-08 passed |
+| S-245.1.3 | happy | All tab: every page and line, as the list was before | `test_S_245_1_the_all_tab_is_todays_list` | 2026-11-08 passed |
+| S-245.1.4 | happy | Every link, Acknowledge and Done button (with `data-page`, `data-kind`, `data-level`), the "came back" mark, and the "Acknowledged and done" section with Undo are unchanged; the tabs filter only the page rows | `test_S_245_1_lines_keep_their_links_buttons_ack_marks_and_the_acknowledged_section_in_every_tab` | 2026-11-08 passed |
+| S-245.1.5 | edge | No red lines: Red (0) is disabled and Orange opens; only white lines: White opens, Red and Orange disabled; only acknowledged lines: All (0) opens and is not disabled | `test_S_245_1_a_tab_with_no_lines_is_disabled_and_the_first_level_with_lines_opens`, `test_S_245_edge_only_white_lines_open_the_white_tab`, `test_S_245_edge_only_acknowledged_lines_open_all_and_no_problems_means_no_banner` | 2026-11-08 passed |
+| S-245.1.6 | edge | No problems: no banner and no tab row | `test_S_245_edge_only_acknowledged_lines_open_all_and_no_problems_means_no_banner` | 2026-11-08 passed |
+
+### S-245.2 The collapsed line stays as it is (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-245.2.1 | happy | "⚠ N pages with problems (M urgent) ▾", the same button markup, red when urgent and slate when not | `test_S_245_2_the_collapsed_line_and_its_colours_stay_as_they_are` | 2026-11-08 passed |
+
+### S-245.3 The open tab is remembered (P2)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-245.3.1 | script hook | The tab picked is stored in `localStorage` `cb-problems-tab` and read back on the next view, both inside try/catch; a stored tab that is unknown or disabled now is skipped, so the server's default stays. No browser test in this repo: proven by the script hook, and tried once by hand in a browser on a rendered page (White picked, reload, White open) | `test_S_245_3_the_open_tab_is_remembered_in_local_storage_inside_try_catch` | 2026-11-08 passed |
+## Slice 244 – The Meta Ads sync brings in video views
+
+As the owner, I want 3-second plays, ThruPlays (15 seconds or to the end) and 50% views per ad next to reach, impressions and link clicks, so I can see which video ads hold attention without opening Ads Manager.
+
+Threat model: Meta's Insights answers are untrusted (each video number must be a list of `{action_type, value}` with a numeric, non-negative `video_view` value, otherwise it is null); the database is trusted; no user input is read. Risk tier: medium (a migration on the large `ads_manager_reports`; a wrong mapping would write wrong numbers into every synced row). Tests: `tests/Feature/MetaAds/MetaAdsVideoViewsTest.php` (recorded made-up answers through the fake Graph), `tests/Feature/MetaAds/AdsVideoViewsTableTest.php` (the migration, `/ads_manager/campaigns` and its data, CSV and column settings).
+
+### S-244.1 The sync stores the three numbers per ad and day (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-244.1.1 | happy | The insights request asks for `actions`, `video_thruplay_watched_actions` and `video_p50_watched_actions` (not `video_15_sec_watched_actions`); a video ad's answer stores `video_plays_3s` (the `video_view` action), `video_thruplays` and `video_p50` (their `video_view` entries) | `test_S1_1_the_sync_asks_for_the_video_fields_and_stores_3s_plays_thruplays_and_50_percent` | |
+| S-244.1.2 | edge | An image ad (no video fields), only `video_play`, a string, an object, a negative, empty or non-numeric value, a list without `video_view`: the column is null, never 0; a real 0 stays 0; each column reads only its own field; the rest of the row is as before | `test_S1_2_an_image_ad_stores_null_not_zero_and_the_rest_of_the_row_as_before`, `test_S1_2_missing_or_unknown_shapes_give_null_never_zero` | |
+| S-244.1.3 | edge | The same recorded answer with and without the video fields maps every other column to exactly the same values (spend, reach, impressions, link clicks, messages, purchases, results, cost per result, result type, …) | `test_S1_3_every_other_column_keeps_its_value_for_the_same_recorded_answer` | |
+| S-244.1.4 | happy | The update path: a stored row (same day + ad) gets the three numbers; a later answer without them keeps them; a later higher ThruPlay count replaces it; still one row | `test_S1_4_the_update_path_fills_the_columns_and_a_later_answer_without_them_keeps_them` | |
+| S-244.1.5 | edge | The migration adds the three unsigned nullable integer columns without a default and without `after()` (MySQL 8 INSTANT add, no table rebuild); running it again changes nothing; `down()` drops them and is safe twice | `test_S1_5_the_migration_adds_three_nullable_columns_without_a_default_and_down_removes_them` | |
+
+### S-244.2 The numbers in the per-ad table (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-244.2.1 | happy | `/ads_manager/campaigns/data?level=ads` returns the sums per ad (null for an image ad) and in the totals; the ads CSV has "3s plays", "ThruPlays (15s)", "50% views" right after "Link Clicks", blank for null; before the migration has run the ads level and its CSV still load | `test_S2_1_the_ads_level_returns_the_three_sums_per_ad_null_for_an_image_ad_and_in_the_totals`, `test_S2_1_the_ads_csv_has_the_three_columns_right_after_link_clicks_and_blank_for_null`, `test_S2_1_before_the_migration_runs_the_ads_level_still_loads` | |
+| S-244.2.2 | happy | The Campaigns Manager (`/ads_manager/campaigns`) lists the three columns after Link clicks on the Ads tab only ("—" when null, like link clicks); the column settings catalog has them after Link clicks, the CEO sees them by default, and an older saved order gets them right after Link clicks | `test_S2_2_the_campaigns_manager_has_the_three_columns_after_link_clicks_on_the_ads_tab`, `test_S2_2_column_settings_list_them_after_link_clicks_and_an_older_saved_order_gets_them_there` | |
+
+### S-244.3 Compare and the upload are unchanged (P2)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-244.3.1 | negative | An uploaded export for the same day + ad updates its own columns and leaves the synced video numbers as they are (since spec 246 the upload carries the three video columns; blank cells keep the stored numbers, see S-246.3). `Compare` compares the same five numbers as before | `test_S3_an_uploaded_export_with_blank_video_cells_leaves_the_synced_video_numbers_as_they_are`, existing `MetaAdsCompareTest` | |
+
+## Slice 246 – Hook Rate, Hold Rate and Hold Rate 50% per ad; the upload requires the video columns
+
+As the owner, I want Hook Rate (3-second plays ÷ impressions), Hold Rate (ThruPlays ÷ 3-second plays) and Hold Rate 50% (50% views ÷ 3-second plays) on the ads rows, and every Ads Manager upload to carry the three video numbers, so I can compare video ads at a glance whichever way the data came in.
+
+Threat model: uploaded files are untrusted (a video cell is a non-negative count or null; a missing column refuses the whole file before any row is written); the database and the stored Meta API data are trusted. Risk tier: medium (a wrong required-column check blocks every upload). Tests: `tests/Feature/MetaAds/AdsHookHoldRatesTest.php` (data, totals, sort, CSV, both catalogs, column settings), `tests/Feature/MetaAds/AdsUploadVideoColumnsTest.php` (the upload), `tests/Feature/MetaAds/MetaAdsVideoViewsTest.php` (upload and sync together).
+
+### S-246.1 The three rates per ad and in the totals (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-246.1.1 | happy | `/ads_manager/campaigns/data?level=ads` returns `hook_rate`, `hold_rate`, `hold_rate_50` per ad as percentages of summed numbers; a day stored before the video sync (null) does not dilute them; the totals compute them from the summed numbers (28.0, not the 26.67 average of the ad rates) | `test_S1_1_the_ads_level_returns_the_three_rates_per_ad_from_summed_numbers`, `test_S1_1_the_totals_compute_the_rates_from_the_summed_numbers_not_an_average_of_the_ad_rates` | |
+| S-246.1.2 | edge | 0 impressions, 0 or null 3-second plays, a null numerator, an image ad, totals of image ads only: null ("—"), never 0% and never an error | `test_S1_2_a_zero_or_null_divisor_or_a_null_numerator_gives_null_never_zero` | |
+| S-246.1.3 | happy | Each rate sorts the ads level both ways; the campaign and ad set levels are unchanged and ignore a rate sort | `test_S1_3_each_rate_sorts_the_ads_level`, `test_S1_4_the_campaign_and_ad_set_levels_are_unchanged_and_ignore_a_rate_sort` | |
+| S-246.1.4 | happy | The ads CSV has "Hook Rate (%)", "Hold Rate (%)", "Hold Rate 50% (%)" right after "50% views", one decimal, blank for null | `test_S1_4_the_ads_csv_has_the_three_rates_after_50_percent_views_with_one_decimal_and_blank_for_null` | |
+
+### S-246.2 Visibility only through column settings (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-246.2.1 | happy | The Campaigns Manager has the three sortable percent columns after the video columns on the Ads tab only; `/owner/private` shows them on its ads rows only (the campaign and ad set tables leave them out) | `test_S2_1_the_campaigns_manager_has_the_three_percent_columns_after_the_video_columns_on_the_ads_tab`, `test_S2_1_owner_private_shows_the_three_rates_on_its_ads_rows_only` | |
+| S-246.2.2 | happy | Column settings list them after "50% views"; the CEO sees them by default; Marketing and Marketing - OIC only when ticked; an older saved order (with or without the video columns) gets them right after the video columns | `test_S2_2_column_settings_list_them_after_the_video_columns_and_the_ceo_sees_them_by_default`, `test_S2_2_other_roles_see_them_only_when_ticked_in_column_settings`, `test_S2_2_an_older_saved_order_gets_them_right_after_the_video_columns` | |
+
+### S-246.3 The upload requires the three video columns (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-246.3.1 | happy | A file with "3-second video plays", "ThruPlays", "Video plays at 50%" uploads as before and fills the three columns (a real 0 stays 0); a blank, "—", text or negative cell is null and keeps a stored number | `test_S3_1_an_upload_with_the_three_columns_fills_them_on_the_rows_it_writes`, `test_S3_1_a_blank_dash_text_or_negative_cell_is_null_and_keeps_a_stored_number` | |
+| S-246.3.2 | negative | A file missing any one, or all, of the three is refused before any row is written: the upload log fails with "Missing required column(s): …" naming exactly the missing columns, with the existing missing columns in the same message | `test_S3_2_a_file_missing_a_video_column_is_refused_before_any_row_is_written` | |
+| S-246.3.3 | edge | Header variants: any case, extra spaces, and the older names "3-second video views", "ThruPlay", "Video watches at 50%" | `test_S3_3_the_export_header_variants_are_accepted` | |
+| S-246.3.4 | edge | The upload and the sync write the same columns; a later sync without video numbers keeps the uploaded ones, an upload with blank cells keeps the synced ones | `test_S_246_3_the_upload_and_the_sync_write_the_same_columns_and_neither_overwrites_a_number_with_null`, `test_S3_an_uploaded_export_with_blank_video_cells_leaves_the_synced_video_numbers_as_they_are` | |
+| S-246.3.5 | negative | Amendment 1: through the page (`POST /ads_manager/report` → `ProcessAdsManagerReportsUpload`), an XLSX export without the three columns fails with the message naming them, nothing is written, and the uploader sees the message in the page's uploads table and in `/ads_manager/report/status`; with them, the upload fills the three columns | `test_S_246_3_5_the_page_upload_without_the_video_columns_is_refused_and_the_uploader_sees_which_are_missing`, `test_S_246_3_5_the_page_upload_with_the_video_columns_fills_them` (`AdsReportPageVideoColumnsTest`) | |
+
+### S-246.4 The "Ad accounts to sync" section is collapsed (P2, amendment 1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-246.4.1 | happy | On `/ads_manager/report` the section is one closed line "Ad accounts to sync (N of M checked) ▸" (`<details id="meta-accounts-section">`); the checkboxes and Save are inside it | `test_S_246_4_1_the_accounts_section_is_one_collapsed_line_with_the_count_and_holds_the_checkboxes_and_save` | |
+| S-246.4.2 | edge | After a save refused for an unknown account, or a save that failed validation, the section is open and the error shows; after a good save it is closed with the new count; what is saved is unchanged | `test_S_246_4_2_it_stays_open_after_a_save_that_returned_an_error_and_closed_after_a_good_one` | |

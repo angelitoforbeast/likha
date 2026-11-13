@@ -195,7 +195,8 @@ class MetaAdsController extends Controller
         $data = $request->validate(['accounts' => 'nullable|array|max:500', 'accounts.*' => 'string|max:50']);
 
         $unknown = $sync->chooseAccounts($data['accounts'] ?? [], Auth::id());
-        if ($unknown) return $this->back()->withErrors(['meta' => 'Not in any connection: ' . implode(', ', $unknown)]);
+        // The flag keeps the collapsed "Ad accounts to sync" section open on the page, so the refused choice is in view.
+        if ($unknown) return $this->back()->withErrors(['meta' => 'Not in any connection: ' . implode(', ', $unknown)])->with('meta_accounts_error', true);
 
         return $this->back()->with('status', 'Meta Ads ad accounts saved: ' . count(Sync::accounts()) . ' selected');
     }

@@ -397,7 +397,7 @@ class PageSettingsGridTest extends BotcakeApiTestCase
         $sync = app(BotcakeCustomerSync::class);
 
         $this->assertNull($this->grid()['sync_lock']);
-        $sync->withLock(function () {
+        $sync->withLock('Page Uno', function () {
             $this->travelTo('2026-10-17 08:45:00');
             $this->assertSame('2026-10-17 08:30', $this->grid()['sync_lock']);
             $this->assertSame('2026-10-17 08:30', $this->getJson('/chatblast/page-settings/grid?since=' . urlencode('2026-10-17 08:00:00'))->json('sync_lock'));

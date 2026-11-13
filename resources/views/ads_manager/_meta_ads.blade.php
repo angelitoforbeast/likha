@@ -71,9 +71,22 @@
 
   {{-- Mga ad account na binabasa ng Sync at Compare (CEO, Marketing, Marketing - OIC ang pumipili); ang numero ay mula sa huling Compare --}}
   @if ($meta['accounts'])
-    <form method="POST" action="{{ route('ads_manager.meta.accounts') }}" class="border-t pt-3 space-y-2" id="meta-accounts">
+    {{-- Collapsed to one line (spec 246); open again after a save that came back with an error, so the error is seen. --}}
+    @php
+      $accountsChecked = count(array_filter($meta['accounts'], fn ($a) => !empty($a['selected'])));
+      $accountsOpen = session('meta_accounts_error') || $errors->has('accounts') || $errors->has('accounts.*');
+    @endphp
+    <details id="meta-accounts-section" class="border-t pt-3"{{ $accountsOpen ? ' open' : '' }}>
+    <summary class="font-semibold text-sm cursor-pointer select-none">
+      Ad accounts to sync ({{ $accountsChecked }} of {{ count($meta['accounts']) }} checked)
+      <span class="meta-accounts-caret inline-block transition-transform">▸</span>
+    </summary>
+    <style>#meta-accounts-section[open] .meta-accounts-caret { transform: rotate(90deg); }</style>
+    <form method="POST" action="{{ route('ads_manager.meta.accounts') }}" class="pt-2 space-y-2" id="meta-accounts">
       @csrf
-      <h3 class="font-semibold text-sm">Ad accounts to sync</h3>
+      @if ($errors->has('accounts') || $errors->has('accounts.*'))
+        <div class="rounded bg-red-100 text-red-800 px-3 py-2 text-sm">{{ $errors->first('accounts') ?: $errors->first('accounts.*') }}</div>
+      @endif
       <p class="text-xs text-gray-500">
         Sync now at ang schedule: ang may check lang. Compare: ang may check, o lahat kapag walang may check.
         Ang bagong account ay naka-check na; ang inalisan ng check ay hindi na babalik.
@@ -106,6 +119,7 @@
         <p class="text-xs text-gray-500">CEO, Marketing at Marketing - OIC lang ang nakakapagpalit ng pili.</p>
       @endif
     </form>
+    </details>
   @endif
 
   {{-- Compare / Sync now --}}

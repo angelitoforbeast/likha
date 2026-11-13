@@ -143,6 +143,18 @@ Schedule::command('chatbot:connections-check')
 Schedule::command('botcake:setup-delivered')
     ->hourlyAt(45)
     ->withoutOverlapping(30);
+// Botcake Accounts (spec 272): each saved account token is checked once a day, early morning Manila, before the day's
+// work; only the check status changes (page tokens stay the button on /chatbot/botcake-accounts).
+Schedule::command('botcake:accounts-check')
+    ->timezone('Asia/Manila')
+    ->dailyAt('05:10')
+    ->withoutOverlapping(30);
+
+// J&T waybill labels kept after booking (spec 269): 14 days only. 04:30 Manila, after the 04:20 and 04:25 prunes.
+Schedule::command('jnt:prune-labels')
+    ->timezone('Asia/Manila')
+    ->dailyAt('04:30')
+    ->withoutOverlapping(30);
 
 // Mga chat ng customer mula sa Botcake (/api/botcake/chat): 90 araw lang ang itinatago.
 Schedule::command('botcake:prune-chats')
@@ -176,6 +188,13 @@ Schedule::command('chatblast:auto')
     ->timezone('Asia/Manila')
     ->everyFiveMinutes()
     ->withoutOverlapping(30);
+
+// Broadcast (spec 263): every minute, the waiting rows of the sending broadcasts go to the chatblast sender under each
+// page's hourly cap and the in-flight limit. Does nothing while no broadcast is sending.
+Schedule::command('chatblast:broadcast-feed')
+    ->everyMinute()
+    ->withoutOverlapping(5)
+    ->runInBackground();
 
 // Ang bantay ng Forbeast: kada minuto, ang health check at ang paghahambing ng chat ng bawat page na nasa Forbeast; ang
 // pumapalya ay kusang lumilipat sa Botcake (ForbeastWatch). Sa background, para hindi maantala ang ibang naka-schedule.

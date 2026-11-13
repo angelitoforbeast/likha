@@ -59,7 +59,8 @@ class ChatblastReady
         // Wala pang botcake_messages (hal. bago ang migrate ng chatblast): walang totoong padala. Ang oras ng totoong padala
         // ay ang pagka-queue nito (bago basahin ng sender ang setup), hindi ang pagkatapos: ang ipinadala habang nagbabago
         // ang setup ay hindi bilang para sa bagong setup.
-        $sent = !Schema::hasTable('botcake_messages') ? collect() : BotcakeMessage::where('status', 'sent')->where('is_test', false)->whereNotNull('queued_at')
+        // A broadcast (spec 263) may send another flow: it is not the proof that the page's own setup works.
+        $sent = !Schema::hasTable('botcake_messages') ? collect() : BotcakeMessage::where('status', 'sent')->where('is_test', false)->where('kind', '<>', Broadcast::KIND)->whereNotNull('queued_at')
             ->selectRaw('page_name, MAX(queued_at) AS last')->groupBy('page_name')->get();
         foreach ($sent as $row) {
             $pk = $this->settings->pageKey((string) $row->page_name);
@@ -122,7 +123,7 @@ class ChatblastReady
         // Ayon sa pageKey (gaya ng states() at ng build): ang page_name ng row ay ang baybay ng PAGE sa order, na maaaring
         // iba-iba (hal. "Page Uno" at "PAGE UNO"); ang eksaktong tugma ay magpapaikot sa row (ready → tinanggihan → ready).
         $trim = DB::getDriverName() === 'pgsql' ? 'BTRIM' : 'TRIM';
-        $last = !Schema::hasTable('botcake_messages') ? null : BotcakeMessage::where('status', 'sent')->where('is_test', false)->whereNotNull('queued_at')
+        $last = !Schema::hasTable('botcake_messages') ? null : BotcakeMessage::where('status', 'sent')->where('is_test', false)->where('kind', '<>', Broadcast::KIND)->whereNotNull('queued_at')
             ->whereRaw("LOWER($trim(page_name)) = ?", [$this->settings->pageKey($page)])->max('queued_at');
         $s['last_send'] = $last ? Carbon::parse($last)->format('Y-m-d H:i:s') : null;
 

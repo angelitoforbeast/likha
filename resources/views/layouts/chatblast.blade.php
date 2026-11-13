@@ -18,6 +18,13 @@
   $cbChatbotOpen = \App\Support\NavAccess::allows(preg_replace('/\s+/u', ' ', trim((string) $cbRole)), '/chatblast');
   // Ang mga page na may problema (pumapalya, hindi nasagot, lipat ng bot, mabagal, setup, walang chat): para sa may Chatbot menu lang.
   $cbProblems = $cbChatbotOpen ? app(\App\Services\Chatbot\ProblemsPanel::class)->panel() : null;
+  // Spec 245: lines per level for the tabs, so the urgent ones are not buried. Red opens first, else the first level
+  // that has lines; All only when every line is acknowledged (then All is the only tab with something under it).
+  $cbTabCounts = array_fill_keys([...array_keys(\App\Services\Chatbot\ProblemsPanel::LEVELS), 'all'], 0);
+  foreach ($cbProblems['pages'] ?? [] as $cbPage) {
+      foreach ($cbPage['lines'] as $cbLine) { $cbTabCounts[$cbLine['level']]++; $cbTabCounts['all']++; }
+  }
+  $cbTab = array_key_first(array_filter(array_diff_key($cbTabCounts, ['all' => 0]))) ?? 'all';
 @endphp
 <!DOCTYPE html>
 <html lang="en">
@@ -99,18 +106,39 @@
     </div>
 </header>
 
+{{-- Storage banner (spec 242), the same as on the main Likha layout: the roles checked for the Storage link in nav
+     settings (spec 243) and the CEO, at 80 % used or more,
+     cached 60 s, above the problems banner. Inline @php (this layout already uses the inline form, which a block
+     form here would swallow), at column 0 right after the comment, so that without a banner the page is byte for
+     byte what it was before. --}}@php($cbStorageBanner = \App\Services\StorageWarning::banner(Auth::user()))
+@if($cbStorageBanner)
+    <div data-storage-banner="{{ $cbStorageBanner['tone'] }}" role="alert"
+         class="shrink-0 border-b px-4 py-1.5 text-sm font-semibold sm:px-6 {{ $cbStorageBanner['tone'] === 'red' ? 'border-red-300 bg-red-600 text-white' : 'border-amber-300 bg-amber-100 text-amber-900' }}">
+        {{ $cbStorageBanner['text'] }}
+        <a href="{{ route('system.monitor.storage') }}" class="ml-2 underline">View storage</a>
+    </div>
+@endif
 @if($cbProblems)
     {{-- Isang linya muna; ang pag-click ay nagbubukas ng listahan dito rin (walang lipat ng page). --}}
     <div class="shrink-0 border-b {{ $cbProblems['urgent'] ? 'border-red-300 bg-red-600 text-white' : 'border-slate-300 bg-slate-100 text-slate-800' }} text-sm" role="alert" data-alert="problems">
         <button type="button" id="cb-problems-toggle" aria-expanded="false" aria-controls="cb-problems-list"
                 class="block w-full truncate px-4 py-1.5 text-left font-semibold sm:px-6">⚠ {{ count($cbProblems['pages']) }} {{ count($cbProblems['pages']) === 1 ? 'page' : 'pages' }} with problems ({{ $cbProblems['urgent'] }} urgent) <span aria-hidden="true">▾</span></button>
-        <ol id="cb-problems-list" class="max-h-[60vh] overflow-y-auto break-words border-t border-slate-200 bg-white px-4 py-2 text-slate-800 sm:px-6" hidden>
+        {{-- Spec 245: tabs per level over the one list below. The tabs only hide lines of the other levels (and pages
+             left without a line), so every link, button and data attribute stays the same element in every tab. The
+             open tab is applied here already; the script below does the same when another tab is picked. --}}
+        <div id="cb-problems-tabs" role="tablist" aria-label="Problem levels" class="flex flex-wrap gap-1 border-t border-slate-200 bg-white px-4 pt-2 text-slate-800 sm:px-6" hidden>
+            @foreach([...\App\Services\Chatbot\ProblemsPanel::LEVELS, 'all' => null] as $t => $icon)
+                <button type="button" role="tab" id="cb-problems-tab-{{ $t }}" data-tab="{{ $t }}" aria-controls="cb-problems-list" aria-selected="{{ $t === $cbTab ? 'true' : 'false' }}"@if($cbTabCounts[$t] === 0 && $t !== $cbTab) disabled @endif
+                        class="rounded border border-slate-300 px-2 py-0.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 aria-selected:border-slate-800 aria-selected:bg-slate-800 aria-selected:text-white disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent">{{ $icon ? $icon . ' ' . ucfirst($t) : 'All' }} ({{ $cbTabCounts[$t] }})</button>
+            @endforeach
+        </div>
+        <ol id="cb-problems-list" class="max-h-[60vh] overflow-y-auto break-words border-t border-slate-200 bg-white px-4 py-2 text-slate-800 sm:px-6" role="tabpanel" hidden>
             @foreach($cbProblems['pages'] as $p)
-                <li data-page="{{ $p['page'] }}" data-level="{{ $p['level'] }}" class="py-1.5">
+                <li data-page="{{ $p['page'] }}" data-level="{{ $p['level'] }}" class="py-1.5"@if($cbTab !== 'all' && !in_array($cbTab, array_column($p['lines'], 'level'), true)) hidden @endif>
                     <div class="font-semibold">{{ $p['page'] }}</div>
                     <ul class="space-y-0.5 pl-1">
                         @foreach($p['lines'] as $l)
-                            <li data-level="{{ $l['level'] }}" data-kind="{{ $l['kind'] ?? '' }}">{{ \App\Services\Chatbot\ProblemsPanel::LEVELS[$l['level']] }} {{ $l['text'] }} @foreach($l['links'] as [$label, $href]) <a href="{{ $href }}" class="text-blue-700 underline hover:text-blue-900">{{ $label }}</a>@endforeach
+                            <li data-level="{{ $l['level'] }}" data-kind="{{ $l['kind'] ?? '' }}"@if($cbTab !== 'all' && $l['level'] !== $cbTab) hidden @endif>{{ \App\Services\Chatbot\ProblemsPanel::LEVELS[$l['level']] }} {{ $l['text'] }} @foreach($l['links'] as [$label, $href]) <a href="{{ $href }}" class="text-blue-700 underline hover:text-blue-900">{{ $label }}</a>@endforeach
                                 @if(isset($l['ack']))
                                     <span class="text-xs text-amber-700" data-ack-back>({{ $l['ack']['status'] === 'done' ? 'Done' : 'Acknowledged' }} by {{ $l['ack']['by'] }} {{ $l['ack']['at'] }}: "{{ $l['ack']['note'] }}"; {{ $l['ack']['back'] }})</span>
                                 @endif
@@ -198,13 +226,34 @@
     (() => {
         const btn = document.getElementById('cb-problems-toggle'), list = document.getElementById('cb-problems-list');
         if (!btn || !list) return;
-        const actions = document.getElementById('cb-problems-actions');
-        const show = open => { list.hidden = !open; if (actions) actions.hidden = !open; btn.setAttribute('aria-expanded', open ? 'true' : 'false'); };
+        const actions = document.getElementById('cb-problems-actions'), bar = document.getElementById('cb-problems-tabs');
+        const show = open => { list.hidden = !open; if (actions) actions.hidden = !open; if (bar) bar.hidden = !open; btn.setAttribute('aria-expanded', open ? 'true' : 'false'); };
         try { show(localStorage.getItem('cb-problems-open') === '1'); } catch (e) {}
         btn.addEventListener('click', () => {
             const open = list.hidden;
             show(open);
             try { localStorage.setItem('cb-problems-open', open ? '1' : '0'); } catch (e) {}
+        });
+        // Spec 245: a tab shows the lines of its level (All: every line) and hides a page left with none, by the same
+        // rule the server used for the open tab. Only page rows are filtered: the acknowledged section stays in every tab.
+        const tabs = [...document.querySelectorAll('#cb-problems-tabs [role="tab"]')];
+        const pick = tab => {
+            for (const t of tabs) t.setAttribute('aria-selected', t.dataset.tab === tab ? 'true' : 'false');
+            for (const page of list.querySelectorAll('li[data-page]')) {
+                let any = false;
+                for (const line of page.querySelectorAll('li[data-level]')) {
+                    const on = tab === 'all' || line.dataset.level === tab;
+                    line.hidden = !on;
+                    any = any || on;
+                }
+                page.hidden = !any;
+            }
+        };
+        // The last tab picked opens again; one that is unknown or has no lines now is skipped, so the server's default stays.
+        try { const saved = localStorage.getItem('cb-problems-tab'); if (tabs.find(x => x.dataset.tab === saved && !x.disabled)) pick(saved); } catch (e) {}
+        for (const t of tabs) t.addEventListener('click', () => {
+            pick(t.dataset.tab);
+            try { localStorage.setItem('cb-problems-tab', t.dataset.tab); } catch (e) {}
         });
         // Acknowledge / Done (isang linya, o lahat: CEO lang) sa iisang form: note (kailangan), at sa Acknowledge, hanggang kailan.
         // Ang Undo ay walang form.

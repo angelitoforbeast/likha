@@ -34,6 +34,7 @@ class ChatblastNav
             $items[] = ['label' => 'History', 'url' => '/chatblast/history', 'active' => request()->is('chatblast/history')];
             $items[] = ['label' => 'Messages', 'url' => '/chatblast/campaigns', 'active' => request()->is('chatblast/campaigns*')];
             $items[] = ['label' => 'Sequences', 'url' => '/chatblast/sequence', 'active' => request()->is('chatblast/sequence*')];
+            $items[] = ['label' => 'Broadcast', 'url' => '/chatblast/broadcast', 'active' => request()->is('chatblast/broadcast*')];
             $items[] = ['label' => 'Chats', 'url' => '/chatblast/chats', 'active' => request()->is('chatblast/chats*')];
         }
         if (self::allowsPageSettings($role)) {

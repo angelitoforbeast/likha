@@ -359,7 +359,7 @@ class ChatbotConnectionsTest extends ChatblastTestCase
             $this->actingAs($this->user($role, $email));
             $this->postJson('/chatbot/active', ['page_name' => 'Page Uno', 'on' => false])->assertOk()->assertJson(['active' => false]);
             $this->postJson('/chatbot/active', ['page_name' => 'Page Uno', 'on' => true])->assertOk()->assertJson(['active' => true]);
-            Http::fake(['botcake.io/*/pages/' . $newId . '/*' => Http::response(['success' => true, 'data' => []])]);
+            Http::fake(self::setupOkFakes() + ['botcake.io/*/pages/' . $newId . '/*' => Http::response(['success' => true, 'data' => []])]); // spec 271: kumpleto ang setup
             $this->postJson('/chatbot/pages', ['page_name' => $newPage, 'page_id' => $newId, 'token' => self::NEW_BC])->assertOk()->assertJson(['page' => $newPage]);
             $this->getJson('/chatbot/connections?page_name=Page%20Uno')->assertOk();
             $this->postJson('/chatbot/connections/botcake', ['page_name' => 'Page Uno', 'page_id' => '1001', 'token' => self::NEW_BC])->assertOk();

@@ -20,6 +20,17 @@ return [
     'queues' => [
         'book'  => env('JNT_BOOK_QUEUE', 'jnt-book'),
         'print' => env('JNT_PRINT_QUEUE', 'default'),
+        // Spec 269: the label of each booked waybill is fetched right after booking (FetchJntLabel).
+        'label' => env('JNT_LABEL_QUEUE', 'jnt-label'),
+    ],
+
+    // Waybill labels kept on the local disk (spec 269): printing stitches them instead of fetching each one again.
+    // J&T label calls run `batch` at a time per worker, and never more than `max_concurrent` at once across all
+    // workers (a shared cache limiter). Stored labels older than `keep_days` are pruned daily (jnt:prune-labels).
+    'labels' => [
+        'batch'          => (int) env('JNT_LABEL_BATCH', 10),
+        'max_concurrent' => (int) env('JNT_LABEL_MAX_CONCURRENT', 20),
+        'keep_days'      => (int) env('JNT_LABEL_KEEP_DAYS', 14),
     ],
 
     'signing' => [

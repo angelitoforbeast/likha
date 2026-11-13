@@ -456,7 +456,7 @@
 
                     {{-- Description --}}
                     <td class="px-3 py-3 text-gray-400 text-sm align-top">
-                      {{ $task->description ?: '—' }}
+                      {{ $task->description ? \App\Support\ChecklistText::render($task->description) : '—' }}
                     </td>
 
                     {{-- Images --}}
@@ -867,7 +867,7 @@
                         </span>
                       </td>
                       {{-- Description --}}
-                      <td class="px-3 py-3 text-gray-400 text-xs align-top">{{ $task->description ?: '—' }}</td>
+                      <td class="px-3 py-3 text-gray-400 text-xs align-top">{{ $task->description ? \App\Support\ChecklistText::render($task->description) : '—' }}</td>
                       {{-- Images --}}
                       <td class="px-3 py-3 align-top">
                         @if($userImageFiles->count() > 0)

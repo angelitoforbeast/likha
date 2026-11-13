@@ -41,11 +41,11 @@ class SetupProblemsBannerTest extends ChatblastTestCase
         app(PageSettings::class)->set($page, 'botcake', ChatblastSetupCheck::CHECK_KEY, json_encode($value), false, null, true);
     }
 
-    /** Ang banner ng mga problema (spec 184, pumalit sa banner na ito) bilang text, o null. */
+    /** Ang banner ng mga problema (spec 184, pumalit sa banner na ito) bilang text, o null; the spec 245 tab row is not part of the list text. */
     private function banner(string $html): ?string
     {
         return preg_match('#<div[^>]*data-alert="problems"[^>]*>(.*?)</ol>#s', $html, $m)
-            ? trim(preg_replace('/\s+/', ' ', strip_tags(preg_replace(['#<span aria-hidden="true">.*?</span>#', '#<span data-ack-(controls|back)[^>]*>.*?</span>#s'], '', $m[1])))) : null;
+            ? trim(preg_replace('/\s+/', ' ', strip_tags(preg_replace(['#<span aria-hidden="true">.*?</span>#', '#<span data-ack-(controls|back)[^>]*>.*?</span>#s', '#<div id="cb-problems-tabs"[^>]*>.*?</div>#s'], '', $m[1])))) : null;
     }
 
     public function test_S_171_4_a_page_with_an_x_shows_on_chatbot_and_chatblast_screens_with_the_reason_and_the_link(): void
@@ -55,7 +55,7 @@ class SetupProblemsBannerTest extends ChatblastTestCase
         $this->actingAs($this->user());
         foreach (['/chatbot/inbox', '/chatblast/page-settings'] as $url) {
             $html = $this->get($url)->assertOk()->getContent();
-            $this->assertSame('⚠ 1 page with problems (1 urgent) Page Uno 🟠 Setup: 2 flows named UPDATE SHIPPING STATUS 2026 Page settings', $this->banner($html), $url);
+            $this->assertSame('⚠ 1 page with problems (1 urgent) Page Uno 🟠 No shipping status setup: 2 flows named UPDATE SHIPPING STATUS 2026 Page settings', $this->banner($html), $url);
             $this->assertMatchesRegularExpression('#data-alert="problems".*?href="/chatblast/page-settings\?q=Page\+Uno"#s', $html, 'the page opens filtered');
         }
         $this->check('Page Dos', ['ok' => false, 'x' => ['2 flows named <b>X</b>']]);
@@ -123,6 +123,6 @@ class SetupProblemsBannerTest extends ChatblastTestCase
         $html = $this->get('/chatbot/inbox')->assertOk()->getContent();
         // Spec 184: iisang banner; ang pulang page ang nauuna.
         $this->assertSame('⚠ 2 pages with problems (2 urgent) Page Dos 🔴 Page restricted by Facebook: 3 of 10 sends failed since 11:20 Health Inbox '
-            . 'Page Uno 🟠 Setup: 2 flows named UPDATE SHIPPING STATUS 2026 Page settings', $this->banner($html));
+            . 'Page Uno 🟠 No shipping status setup: 2 flows named UPDATE SHIPPING STATUS 2026 Page settings', $this->banner($html));
     }
 }

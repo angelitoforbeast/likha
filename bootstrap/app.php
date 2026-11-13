@@ -25,5 +25,5 @@ return Application::configure(basePath: dirname(__DIR__))
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         // Huwag kailanman i-flash sa session ang API key fields (/boardroom/agents) kapag may validation error.
-        $exceptions->dontFlash(['api_key']);
+        $exceptions->dontFlash(['api_key', 'access_token']); // access_token: the Botcake account token (spec 272)
     })->create();

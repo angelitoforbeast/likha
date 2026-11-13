@@ -239,4 +239,21 @@ class ItemSummaryProfitMTest extends OwnerPrivateTestCase
 
         $this->assertSame('NONE', $this->rows()['pahina alpha']['promo']);
     }
+
+    /** Spec 261: ang cold item-summary ay may range sa naka-index na column (ts_date, day), hindi DATE(col) lang. */
+    public function test_S_261_the_date_filters_range_on_the_indexed_columns(): void
+    {
+        $this->pageA();
+        $sql = [];
+        DB::listen(function ($q) use (&$sql) { $sql[] = $q->sql; });
+
+        $this->assertArrayHasKey('pahina alpha', $this->rows('CEO', ['refresh' => 1]));
+
+        $moDated = array_filter($sql, fn ($s) => str_contains($s, '"macro_output" as "mo"') && str_contains($s, 'DATE(mo.ts_date) BETWEEN'));
+        $this->assertCount(2, $moDated, 'statRows + pagesSeen');
+        foreach ($moDated as $s) $this->assertStringContainsString('"mo"."ts_date" >= ? and "mo"."ts_date" < ?', $s);
+        $ads = array_values(array_filter($sql, fn ($s) => str_contains($s, 'from "ads_manager_reports"') && str_contains($s, 'DATE(day) BETWEEN')));
+        $this->assertNotEmpty($ads);
+        $this->assertStringContainsString('"day" >= ? and "day" < ?', $ads[0]);
+    }
 }

@@ -192,17 +192,22 @@ class ChatblastSender
             $this->finish($m, 'no_config', 'missing ' . implode(', ', $missing), null, []);
             return;
         }
+        // A broadcast row (spec 263): its own checks (stopped, paused, the page paused or not Ready) instead of the
+        // sequence, waybill and daily-cap checks below; the token, the customer lock and gap, CustomerReach and the three
+        // steps are the same.
+        $broadcast = $m->kind === Broadcast::KIND;
+        if ($broadcast && !$this->broadcastMaySend($m)) return;
         // Ang page ay dapat Ready: may kumpirmadong padala (test o totoo) pagkatapos ng huling pagbabago ng setup. Ang test
         // send mismo ang paraan para maging Ready, kaya hindi ito saklaw. Babalik sa ready sa unang pagkuha pagkatapos ng test.
         // Ang dahilan ay ang X ng setup check o ng delivered check kapag mayroon, kung hindi "needs a test send".
-        if (!$m->is_test && ($why = app(ChatblastReady::class)->reason($m->page_name)) !== null) {
+        if (!$m->is_test && !$broadcast && ($why = app(ChatblastReady::class)->reason($m->page_name)) !== null) {
             $this->finish($m, 'no_config', $why, null, []);
             return;
         }
 
         // Ang campaign ay dapat naka-on, ang waybill ay nasa mga status pa nito (hal. hindi na "In Transit" kapag
         // Delivered na), isa lang kada araw ang mensahe ng campaign sa waybill, at dapat mayroon pa ang araw nito.
-        if (!$m->is_test) {
+        if (!$m->is_test && !$broadcast) {
             $c = $this->chatblast->campaign($m->kind);
             if (!$c) { // walang campaign (hal. inalis): hindi ipinapadala nang walang patakaran
                 $this->finish($m, 'skipped', self::NO_CAMPAIGN, null, []);
@@ -263,11 +268,12 @@ class ChatblastSender
         }
 
         $cap = max(1, (int) config('services.botcake.chatblast_daily_cap', 3000));
-        if (!$m->is_test) {
+        if (!$m->is_test && !$broadcast) {
             // Kasama ang unknown: maaaring naipadala na. Dalawang bilang, bawat isa sa sariling index (walang OR).
+            // A broadcast has its own hourly cap per page and does not use up the waybill updates' daily cap.
             $start = Carbon::now('Asia/Manila')->startOfDay();
             $count = fn (string $status, string $column) => BotcakeMessage::where('page_name', $m->page_name)->where('status', $status)
-                ->where($column, '>=', $start)->where('is_test', false)->count();
+                ->where($column, '>=', $start)->where('is_test', false)->where('kind', '<>', Broadcast::KIND)->count();
             $today = $count('sent', 'sent_at') + $count('unknown', 'updated_at');
             if ($today >= $cap) {
                 $this->finish($m, 'skipped', 'Page daily cap reached (' . $cap . ' today); send again tomorrow', null, []);
@@ -308,10 +314,10 @@ class ChatblastSender
             // pa nagsisimula, kaya ang naipadala lang talaga ang humaharang (hindi ang naka-queue na maaaring mabigo).
             // Itala ang status na kasalukuyan (hindi ang noong binuo): ito ang status na ipapadalhan ng mensahe, at
             // ito ang tinitingnan ng ibang campaign sa patakarang isa kada araw kada status.
-            if (!$m->is_test && ($status = $this->chatblast->currentStatus($m->waybill)) !== null && $status !== $m->jnt_status) {
+            if (!$m->is_test && !$broadcast && ($status = $this->chatblast->currentStatus($m->waybill)) !== null && $status !== $m->jnt_status) {
                 $m->forceFill(['jnt_status' => $status])->save();
             }
-            if (!$m->is_test && ($why = $this->chatblast->sentByOtherCampaign($m)) !== null) {
+            if (!$m->is_test && !$broadcast && ($why = $this->chatblast->sentByOtherCampaign($m)) !== null) {
                 $this->finish($m, 'skipped', $why, null, []);
                 // Para sa araw na ito lang: bukas ay may sariling row ulit ang waybill sa campaign na ito.
                 BotcakeMessage::whereKey($m->id)->update(['dedupe_key' => null]);
@@ -352,7 +358,13 @@ class ChatblastSender
             $lock->release();
             return null;
         }
-        if (!$m->is_test && ($why = $this->chatblast->sentByOtherCampaign($m)) !== null) {
+        // A broadcast row that waited in the pool: stopped or paused meanwhile → no send (cancelled, or back to queued).
+        $broadcast = $m->kind === Broadcast::KIND;
+        if ($broadcast && !$this->broadcastMaySend($m)) {
+            $lock->release();
+            return '';
+        }
+        if (!$m->is_test && !$broadcast && ($why = $this->chatblast->sentByOtherCampaign($m)) !== null) {
             $this->finish($m, 'skipped', $why, null, []);
             BotcakeMessage::whereKey($m->id)->update(['dedupe_key' => null]); // gaya ng sa job: bukas ay may sariling row ulit
             $lock->release();
@@ -366,6 +378,29 @@ class ChatblastSender
         }
 
         return (string) $lock->owner();
+    }
+
+    /**
+     * A broadcast row may be sent now (Broadcast::hold): true = go on. Otherwise the row is finished without a send
+     * (stopped → cancelled; gone → skipped) or, when the broadcast or its page is paused, put back to queued with the
+     * reason; Resume dispatches it again. A row without a flow id is never sent with another flow.
+     */
+    private function broadcastMaySend(BotcakeMessage $m): bool
+    {
+        if (Broadcast::flowId($m) <= 0) {
+            $this->finish($m, 'no_config', 'The broadcast row has no flow', null, []);
+            return false;
+        }
+        $hold = app(Broadcast::class)->hold($m);
+        if ($hold === null) return true;
+        if ($hold[0] === 'wait') {
+            BotcakeMessage::whereKey($m->id)->where('status', 'sending')
+                ->update(['status' => 'queued', 'reason' => mb_substr('Waiting: ' . $hold[1], 0, 255), 'attempts' => DB::raw('CASE WHEN attempts > 0 THEN attempts - 1 ELSE 0 END')]);
+            return false;
+        }
+        $this->finish($m, $hold[0], $hold[1], null, []);
+
+        return false;
     }
 
     /** Ang dahilan ng laktaw kapag hindi maabot ang customer sa page (CustomerReach), o null. */
@@ -466,17 +501,23 @@ class ChatblastSender
         if (!$ok($w)) { $this->finish($m, 'failed', 'The custom field was not written (HTTP ' . $w['http'] . ')', $w['http'], $steps); return; }
 
         // 2. Basahin ulit: dapat eksaktong ang text ang laman, kung hindi ay walang padala.
-        $r = yield from $step('read', 'GET', $field, []);
-        if ($authFail($r)) { $this->tokenInvalid($m, $r['http'], $steps); return; }
-        $value = $this->fieldValue($r['body'], $cfg['field.message']);
-        if (!$ok($r) || $value !== (string) $m->text) {
-            $why = !$ok($r) ? 'The custom field could not be read (HTTP ' . $r['http'] . ')' : ($value === null ? 'Field ' . $cfg['field.message'] . ' is missing in the read-back' : 'The field holds a different text in the read-back');
-            $this->finish($m, 'field_mismatch', $why . '; not sent', $r['http'], $steps);
-            return;
+        // A broadcast row skips the read-back: two calls per customer instead of three, so a page sends half again as
+        // many per minute; the write's success:true is its check. In-transit and Delivering chatblast still read back.
+        if ($m->kind !== Broadcast::KIND) {
+            $r = yield from $step('read', 'GET', $field, []);
+            if ($authFail($r)) { $this->tokenInvalid($m, $r['http'], $steps); return; }
+            $value = $this->fieldValue($r['body'], $cfg['field.message']);
+            if (!$ok($r) || $value !== (string) $m->text) {
+                $why = !$ok($r) ? 'The custom field could not be read (HTTP ' . $r['http'] . ')' : ($value === null ? 'Field ' . $cfg['field.message'] . ' is missing in the read-back' : 'The field holds a different text in the read-back');
+                $this->finish($m, 'field_mismatch', $why . '; not sent', $r['http'], $steps);
+                return;
+            }
         }
 
         // 3. I-send ang flow. Hindi ligtas ulitin: ang 429 lang ang inuulit; ang 5xx o walang sagot ay "unknown".
-        $f = yield from $step('flow', 'POST', $base . '/flows/send_flow', ['psid' => (string) $m->psid, 'flow_id' => (int) $cfg['flow.shipping']], true);
+        // A broadcast row sends the flow picked for its page (its vars), never the page's flow.shipping in its place.
+        $flowId = $m->kind === Broadcast::KIND ? Broadcast::flowId($m) : (int) $cfg['flow.shipping'];
+        $f = yield from $step('flow', 'POST', $base . '/flows/send_flow', ['psid' => (string) $m->psid, 'flow_id' => $flowId], true);
         if ($authFail($f)) { $this->tokenInvalid($m, $f['http'], $steps); return; }
         // Hindi tiyak: walang sagot, 408, 5xx, o 2xx na walang malinaw na success. Ang success:false lang ang tiyak na "hindi".
         $refused = is_array($f['body']) && array_key_exists('success', $f['body']) && $f['body']['success'] === false;
@@ -489,7 +530,8 @@ class ChatblastSender
         $this->finish($m, 'sent', null, $f['http'], $steps);
         // Matagumpay na test (sulat, basa at flow: lahat 2xx): ang page ay Ready na (ChatblastReady). Kapag nagbago ang setup
         // habang ipinapadala (hal. ibang field mula sa dropdown), ang lumang setup ang nasubukan, hindi ang bago: walang tatak.
-        if ($m->is_test) {
+        // A broadcast test may use another flow than flow.shipping: it does not mark the page Ready.
+        if ($m->is_test && $m->kind !== Broadcast::KIND) {
             $current = [];
             foreach (Chatblast::REQUIRED as $key) $current[$key] = trim((string) $this->settings->get($m->page_name, 'botcake', $key));
             if ($current === $cfg) $this->settings->set($m->page_name, 'botcake', 'test_ok', now('Asia/Manila')->format('Y-m-d H:i:s'), false, null, true);
@@ -516,8 +558,11 @@ class ChatblastSender
     {
         $this->sync->tokenStatus($m->page_name, 'invalid');
         $this->finish($m, 'failed', 'Token invalid (HTTP ' . $http . '); fix the token on /page-settings', $http, $steps);
-        BotcakeMessage::where('page_name', $m->page_name)->where('status', 'queued')->where('id', '<>', $m->id)
+        // A broadcast row never becomes "ready" (that is the waybill list's Send all ready): the page pauses in its
+        // broadcasts instead, and its queued rows wait there.
+        BotcakeMessage::where('page_name', $m->page_name)->where('status', 'queued')->where('id', '<>', $m->id)->where('kind', '<>', Broadcast::KIND)
             ->update(['status' => 'ready', 'reason' => 'Stopped: token invalid']);
+        app(Broadcast::class)->pausePageEverywhere($m->page_name, 'Token invalid (HTTP ' . $http . '); fix the token on /page-settings, then Resume');
     }
 
     private function saveSteps(BotcakeMessage $m, array $steps): void
@@ -536,6 +581,8 @@ class ChatblastSender
             $said = implode("\n", array_map(fn ($s) => is_array($s) && in_array($s['step'] ?? '', ['flow', 'write'], true) ? (string) ($s['response'] ?? '') : '', $steps));
             CustomerReach::note($this->pageId($m), (string) $m->psid, $said);
         }
+        // A broadcast page's fail streak and auto-pause (20 in a row, or a restricted page).
+        if ($m->kind === Broadcast::KIND) app(Broadcast::class)->finished($m, $status, $steps);
     }
 
     /** Ang sagot, pinaikli para sa talaan. */

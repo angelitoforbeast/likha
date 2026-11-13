@@ -192,7 +192,8 @@ class PsidCoverageTest extends BotcakeApiTestCase
         }
 
         $queries = 0;
-        DB::listen(function ($q) use (&$queries) { if (str_contains($q->sql, 'ads_manager_reports')) $queries++; });
+        // Ang ad spend ng Problems panel (spec 271: ang Schema::hasTable at ang query na may amount_spent_php) ay hiwalay, hindi ang mga pangalan ng ad.
+        DB::listen(function ($q) use (&$queries) { if (str_contains($q->sql, 'ads_manager_reports') && !str_contains($q->sql, 'amount_spent_php') && !str_contains($q->sql, 'sqlite_master')) $queries++; });
         $res = $this->list('');
 
         $this->assertSame(1, $queries);

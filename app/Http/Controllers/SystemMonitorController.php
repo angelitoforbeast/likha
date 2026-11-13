@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\ServerStorage;
+use App\Services\StorageWarning;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
@@ -37,6 +39,23 @@ class SystemMonitorController extends Controller
     }
 
     /**
+     * Storage view (spec 242): the disk, the database and the binary logs, and the server stats (spec 243 S4, the same
+     * reader and cache as getServerStats), read-only, for the roles checked for the "Storage" link in
+     * /owner/nav-settings (spec 243) and the CEO. The table list and the processes stay with the CEO.
+     */
+    public function storage(ServerStorage $storage)
+    {
+        if (!StorageWarning::canSee(Auth::user())) abort(404);
+
+        return view('system_monitor.storage', [
+            'disk'          => $storage->disk(),
+            'server'        => $storage->cachedServerStats(),
+            'databaseBytes' => $storage->databaseBytes(),
+            'binaryLogs'    => $storage->binaryLogs(),
+        ]);
+    }
+
+    /**
      * JSON endpoint for live auto-refresh sa UI.
      * Cached aggressively kasi some queries are heavy.
      */
@@ -55,80 +74,12 @@ class SystemMonitorController extends Controller
     }
 
     /**
-     * Server-level stats — RAM, swap, CPU load.
+     * Server-level stats — RAM, swap, CPU load. The reader and its 10 s cache live in ServerStorage, shared with the
+     * Storage view (spec 243), so both pages show the same numbers.
      */
     private function getServerStats(): array
     {
-        return Cache::remember('sysmon_server', 10, function () {
-            $stats = [
-                'memory_total_mb'     => 0,
-                'memory_used_mb'      => 0,
-                'memory_free_mb'      => 0,
-                'memory_available_mb' => 0,
-                'memory_used_percent' => 0,
-                'swap_total_mb'       => 0,
-                'swap_used_mb'        => 0,
-                'load_1m'             => null,
-                'load_5m'             => null,
-                'load_15m'            => null,
-                'cpu_count'           => 0,
-                'uptime_seconds'      => 0,
-            ];
-
-            // Memory from /proc/meminfo (Linux only)
-            if (is_readable('/proc/meminfo')) {
-                $meminfo = @file_get_contents('/proc/meminfo');
-                if ($meminfo) {
-                    preg_match('/MemTotal:\s+(\d+)/', $meminfo, $mt);
-                    preg_match('/MemFree:\s+(\d+)/', $meminfo, $mf);
-                    preg_match('/MemAvailable:\s+(\d+)/', $meminfo, $ma);
-                    preg_match('/SwapTotal:\s+(\d+)/', $meminfo, $st);
-                    preg_match('/SwapFree:\s+(\d+)/', $meminfo, $sf);
-
-                    $totalKb = (int) ($mt[1] ?? 0);
-                    $freeKb  = (int) ($mf[1] ?? 0);
-                    $availKb = (int) ($ma[1] ?? 0);
-                    $swapTotalKb = (int) ($st[1] ?? 0);
-                    $swapFreeKb  = (int) ($sf[1] ?? 0);
-
-                    $stats['memory_total_mb']     = (int) round($totalKb / 1024);
-                    $stats['memory_free_mb']      = (int) round($freeKb / 1024);
-                    $stats['memory_available_mb'] = (int) round($availKb / 1024);
-                    $stats['memory_used_mb']      = (int) round(($totalKb - $availKb) / 1024);
-                    $stats['memory_used_percent'] = $totalKb > 0
-                        ? round(($totalKb - $availKb) / $totalKb * 100, 1)
-                        : 0;
-                    $stats['swap_total_mb'] = (int) round($swapTotalKb / 1024);
-                    $stats['swap_used_mb']  = (int) round(($swapTotalKb - $swapFreeKb) / 1024);
-                }
-            }
-
-            // CPU load
-            if (function_exists('sys_getloadavg')) {
-                $load = sys_getloadavg();
-                if (is_array($load)) {
-                    $stats['load_1m']  = round($load[0] ?? 0, 2);
-                    $stats['load_5m']  = round($load[1] ?? 0, 2);
-                    $stats['load_15m'] = round($load[2] ?? 0, 2);
-                }
-            }
-
-            // CPU count
-            if (is_readable('/proc/cpuinfo')) {
-                $cpuinfo = @file_get_contents('/proc/cpuinfo');
-                $stats['cpu_count'] = substr_count($cpuinfo ?: '', 'processor') ?: 1;
-            }
-
-            // Uptime
-            if (is_readable('/proc/uptime')) {
-                $uptime = @file_get_contents('/proc/uptime');
-                if ($uptime) {
-                    $stats['uptime_seconds'] = (int) floatval(explode(' ', $uptime)[0] ?? 0);
-                }
-            }
-
-            return $stats;
-        });
+        return app(ServerStorage::class)->cachedServerStats();
     }
 
     /**

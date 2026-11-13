@@ -65,7 +65,7 @@ class CPPController extends Controller
             [$start, $end] = [$end, $start];
         }
 
-        [$matrix, $dateRange, $adGroupRows] = $this->buildData($start, $end, true);
+        [$matrix, $dateRange, $adGroupRows, $freshness] = $this->buildData($start, $end, true, true);
 
         // Multi-page selection (?pages=A,B,C — comma-separated). Empty/missing
         // means "all". Backwards-compat: ?ui_page= still works as single-page
@@ -84,6 +84,7 @@ class CPPController extends Controller
             'end'            => $end,
             'selectedPages'  => $selectedPages, // pre-fill multi-select checkboxes
             'adGroupRows'    => $adGroupRows,   // Ad-based na page: ang mga row kada ad group sa ilalim ng row nito
+            'freshness'      => $freshness,     // page => date => {ads, order}: when the spend and the orders were last updated
         ]);
     }
 
@@ -93,7 +94,7 @@ class CPPController extends Controller
      * - Handles MySQL/Postgres timestamp parsing
      * - UNION of keys from Ads and Orders
      */
-    private function buildData(string $start, string $end, bool $withGroups = false): array
+    private function buildData(string $start, string $end, bool $withGroups = false, bool $withFreshness = false): array
     {
         $normalize = fn ($s) => strtolower(preg_replace('/\s+/', '', (string) $s));
 
@@ -118,12 +119,12 @@ class CPPController extends Controller
 
         if ($driver === 'mysql') {
             $orderRows = MacroOutput::query()
-                ->selectRaw("DATE(STR_TO_DATE(`TIMESTAMP`, '%H:%i %d-%m-%Y')) AS ts_date, `PAGE`, `ITEM_NAME`, `COD`, `STATUS`" . ($orderAdCol ? ', `botcake_ad_id`' : ''))
+                ->selectRaw("DATE(STR_TO_DATE(`TIMESTAMP`, '%H:%i %d-%m-%Y')) AS ts_date, `PAGE`, `ITEM_NAME`, `COD`, `STATUS`" . ($orderAdCol ? ', `botcake_ad_id`' : '') . ($withFreshness ? ', `TIMESTAMP`' : ''))
                 ->whereRaw("DATE(STR_TO_DATE(`TIMESTAMP`, '%H:%i %d-%m-%Y')) BETWEEN ? AND ?", [$start, $end])
                 ->get();
         } elseif ($driver === 'pgsql') {
             $orderRows = MacroOutput::query()
-                ->selectRaw("to_timestamp(\"TIMESTAMP\", 'HH24:MI DD-MM-YYYY')::date AS ts_date, \"PAGE\", \"ITEM_NAME\", \"COD\", \"STATUS\"" . ($orderAdCol ? ', "botcake_ad_id"' : ''))
+                ->selectRaw("to_timestamp(\"TIMESTAMP\", 'HH24:MI DD-MM-YYYY')::date AS ts_date, \"PAGE\", \"ITEM_NAME\", \"COD\", \"STATUS\"" . ($orderAdCol ? ', "botcake_ad_id"' : '') . ($withFreshness ? ', "TIMESTAMP"' : ''))
                 ->whereRaw("to_timestamp(\"TIMESTAMP\", 'HH24:MI DD-MM-YYYY')::date BETWEEN ? AND ?", [$start, $end])
                 ->get();
         } else {
@@ -145,6 +146,9 @@ class CPPController extends Controller
             if (!$row->ts_date) return null;
             return $row->ts_date . '__' . $normalize($row->PAGE);
         });
+
+        // 2b) Freshness per (date, page): last write of the spend rows and the newest order, 'Y-m-d H:i'.
+        [$adsAt, $orderAt] = $withFreshness ? $this->freshnessByKey($start, $end, $orderRows, $normalize) : [[], []];
 
         // 3) UNION of keys (so days with only orders or only ads still show)
         $allKeys = collect($adsByKey->keys())
@@ -171,6 +175,7 @@ class CPPController extends Controller
             ];
         }
         $matrix = [];
+        $freshness = []; // [page][date] => ['ads' => ?string, 'order' => ?string]
         $groupCells = []; // [page][bucket][date] => cell
         foreach ($allKeys as $key) {
             [$date, $normPage] = explode('__', $key);
@@ -183,6 +188,7 @@ class CPPController extends Controller
 
             $matrix[$pageName] ??= [];
             $matrix[$pageName][$date] = $this->cell($ads, $orders);
+            if ($withFreshness) $freshness[$pageName][$date] = ['ads' => $adsAt[$key] ?? null, 'order' => $orderAt[$key] ?? null];
 
             if (!isset($groupInfo[$normPage])) continue;
             $info = $groupInfo[$normPage];
@@ -220,7 +226,50 @@ class CPPController extends Controller
             $adGroupRows[$pageName] = $rows;
         }
 
-        return [$matrix, $dateRange, $adGroupRows];
+        return [$matrix, $dateRange, $adGroupRows, $freshness];
+    }
+
+    /**
+     * When the spend and the orders of each (date, page) key were last updated, as 'Y-m-d H:i' strings:
+     *  - ads: MAX(ads_manager_reports.updated_at), the last write by the sync or an upload (one grouped query);
+     *  - order: the newest macro_output.TIMESTAMP ('H:i d-m-Y') among the order rows buildData already loaded. There
+     *    is no query on macro_output here: a grouped MAX over it takes many seconds on production.
+     * Both are stored as Manila wall-clock time (the app writes now() in Asia/Manila; TIMESTAMP is a plain string), so
+     * they are read as they are, with no time zone conversion.
+     * @return array{0: array<string, string>, 1: array<string, string>} [adsAt, orderAt] keyed "Y-m-d__normalizedpage"
+     */
+    private function freshnessByKey(string $start, string $end, $orderRows, callable $normalize): array
+    {
+        $later = function (array &$map, string $key, ?string $at): void {
+            if ($at !== null && $at !== '' && (!isset($map[$key]) || $at > $map[$key])) $map[$key] = $at;
+        };
+        $minute = fn ($v) => $v === null || $v === '' ? null : Carbon::parse((string) $v)->format('Y-m-d H:i');
+
+        $adsAt = [];
+        if (Schema::hasColumn('ads_manager_reports', 'updated_at')) {
+            $rows = AdsManagerReport::query()
+                ->whereBetween('day', [$start, $end])
+                ->select(['day', 'page_name'])
+                ->selectRaw('MAX(updated_at) AS ads_at')
+                ->groupBy('day', 'page_name')
+                ->get();
+            foreach ($rows as $row) {
+                $date = $row->day instanceof Carbon ? $row->day->format('Y-m-d') : substr((string) $row->day, 0, 10);
+                $later($adsAt, $date . '__' . $normalize($row->page_name), $minute($row->ads_at));
+            }
+        }
+
+        // The order rows the page already loaded (every driver branch selects TIMESTAMP when freshness is on).
+        $orderAt = [];
+        foreach ($orderRows as $row) {
+            if (!$row->ts_date) continue;
+            try {
+                $at = Carbon::createFromFormat('H:i d-m-Y', trim((string) $row->TIMESTAMP))->format('Y-m-d H:i');
+            } catch (\Throwable $e) { continue; }
+            $later($orderAt, substr((string) $row->ts_date, 0, 10) . '__' . $normalize($row->PAGE), $at);
+        }
+
+        return [$adsAt, $orderAt];
     }
 
     /**

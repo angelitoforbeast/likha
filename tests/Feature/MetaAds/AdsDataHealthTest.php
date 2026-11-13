@@ -83,11 +83,11 @@ class AdsDataHealthTest extends MetaAdsTestCase
         $this->assertSame([
             ''    => ['upload only', 'OK'],
             '111' => ['API selected', 'OK'],
-            '333' => ['upload only', 'OK'],
+            '333' => ['upload only', 'Not readable by API'],
             '444' => ['API selected', 'Missing yesterday'],
             '555' => ['API selected', 'New'],
             '666' => ['API unticked', 'Not synced (unticked)'],
-            '777' => ['none', 'Not readable by API'],
+            '777' => ['none', 'No recent spend'],
         ], $got);
         $a111 = collect(DataHealth::evaluate()['accounts'])->firstWhere('id', '111');
         $this->assertSame([self::YESTERDAY, 2, 150.5, 'Account 111'], [$a111['latest_day'], $a111['rows'], $a111['spend'], $a111['name']]);
@@ -116,9 +116,17 @@ class AdsDataHealthTest extends MetaAdsTestCase
         $this->artisan('ads:data-health', ['--record' => true])->assertSuccessful();
 
         $saved = DataHealth::last();
-        $this->assertSame([self::YESTERDAY, 3], [$saved['day'], $saved['attention']]);
-        $this->actingAs($this->user('CEO'))->get('/ads_manager/report')
-            ->assertSee('id="ads-data-notice"', false)->assertSee('3 ad accounts need attention')->assertSee('Old Shop');
+        $this->assertSame([self::YESTERDAY, 3, 'scheduled'], [$saved['day'], $saved['attention'], $saved['trigger']]);
+        $need = array_column(array_filter($saved['accounts'], fn ($a) => in_array($a['status'], DataHealth::ATTENTION, true)), 'id');
+        sort($need);
+        $this->assertSame(['333', '444', '555'], $need);
+        $page = $this->actingAs($this->user('CEO'))->get('/ads_manager/report')
+            ->assertSee('id="ads-data-notice"', false)->assertSee('3 ad accounts need attention')
+            ->assertSee('Last recorded check: ' . $saved['checked_at'] . ' (scheduled)')->getContent();
+        $notice = $this->notice($page);
+        $this->assertStringContainsString('Not readable by API', $notice);
+        $this->assertStringContainsString('333', $notice);
+        $this->assertStringNotContainsString('Old Shop', $notice, '777 has no upload rows: not in the red notice');
 
         Artisan::call('ads:data-health', ['--json' => true]);
         $this->assertSame($saved, json_decode(Artisan::output(), true));
@@ -126,6 +134,80 @@ class AdsDataHealthTest extends MetaAdsTestCase
         $event = collect(app(\Illuminate\Console\Scheduling\Schedule::class)->events())
             ->first(fn ($e) => str_contains((string) $e->command, 'ads:data-health --record'));
         $this->assertSame(['0 12 * * *', 'Asia/Manila'], [$event->expression, $event->timezone]);
+    }
+
+    /** Ang HTML ng pulang paalala lang (id="ads-data-notice"), o '' kung wala. */
+    private function notice(string $page): string
+    {
+        $at = strpos($page, 'id="ads-data-notice"');
+        if ($at === false) return '';
+
+        return substr($page, $at, strpos($page, 'See Data health', $at) - $at);
+    }
+
+    /** Ang status ng bawat account (id => status) sa evaluate ng kahapon. */
+    private function statuses(): array
+    {
+        return array_column(DataHealth::evaluate()['accounts'], 'status', 'id');
+    }
+
+    public function test_S_253_1_an_account_the_api_cannot_read_with_no_upload_rows_that_day_is_quiet_and_not_in_the_notice(): void
+    {
+        $this->connect($this->user('Marketing', 'ana@example.test'), self::TOKEN_ANA, ['111'], self::OLD);
+        $this->report('a1', '111', self::YESTERDAY, 50);
+        $this->report('z9', '888', '2026-10-01', 20); // 888: luma lang ang upload, wala kahapon at sa 3 araw bago
+        DB::table('ad_accounts')->insert(['ad_account_id' => '777', 'name' => 'Old Shop', 'active' => true, 'action' => 'added',
+            'created_at' => '2026-09-01 10:00:00', 'updated_at' => '2026-09-01 10:00:00']);
+        DB::table('ad_accounts')->insert(['ad_account_id' => '778', 'name' => 'Just Added', 'active' => true, 'action' => 'added',
+            'created_at' => self::YESTERDAY . ' 10:00:00', 'updated_at' => self::YESTERDAY . ' 10:00:00']); // bago, walang row
+
+        $s = $this->statuses();
+
+        $this->assertSame([DataHealth::QUIET, DataHealth::QUIET, DataHealth::QUIET], [$s['777'], $s['778'], $s['888']]);
+        $saved = DataHealth::record();
+        $this->assertSame(0, $saved['attention']);
+        $this->actingAs($this->user('CEO'))->get('/ads_manager/report')->assertDontSee('id="ads-data-notice"', false);
+    }
+
+    public function test_S_253_1_an_account_the_api_cannot_read_with_upload_rows_that_day_is_not_readable_and_in_the_notice(): void
+    {
+        $this->connect($this->user('Marketing', 'ana@example.test'), self::TOKEN_ANA, ['111'], self::OLD);
+        $this->report('a1', '111', '2026-10-01', 50);
+        $this->report('a1', '111', self::YESTERDAY, 50);
+        $this->report('u1', '333', '2026-10-01', 10);
+        $this->report('u1', '333', self::YESTERDAY, 15);
+
+        $this->assertSame(DataHealth::NOT_READABLE, $this->statuses()['333']);
+        $saved = DataHealth::record();
+        $this->assertSame(1, $saved['attention']);
+        $notice = $this->notice($this->actingAs($this->user('CEO'))->get('/ads_manager/report')->getContent());
+        $this->assertStringContainsString('333', $notice);
+        $this->assertStringContainsString('Not readable by API', $notice);
+    }
+
+    public function test_S_253_1_accounts_the_api_reads_keep_their_statuses(): void
+    {
+        $this->world();
+
+        $s = $this->statuses();
+
+        $this->assertSame(['OK', 'Missing yesterday', 'New', 'Not synced (unticked)'], [$s['111'], $s['444'], $s['555'], $s['666']]);
+    }
+
+    public function test_S_253_1_missing_comes_first_and_an_unreadable_account_with_rows_shows_not_readable_even_when_new(): void
+    {
+        $this->connect($this->user('Marketing', 'ana@example.test'), self::TOKEN_ANA, ['111'], self::OLD);
+        $this->report('m9', '999', '2026-10-26', 30);     // 999: hindi mabasa ng API, may spend noong 26, wala kahapon
+        $this->report('n1', '321', self::YESTERDAY, 12);  // 321: hindi mabasa ng API, unang lumabas kahapon (bago)
+
+        $s = $this->statuses();
+
+        $this->assertSame([DataHealth::MISSING, DataHealth::NOT_READABLE], [$s['999'], $s['321']]);
+    }
+
+    public function test_S_253_3_the_card_says_when_no_check_was_recorded_yet(): void
+    {
+        $this->actingAs($this->user('CEO'))->get('/ads_manager/report')->assertSee('Last recorded check: none yet');
     }
 
     public function test_S_178_2_no_red_notice_when_every_account_is_ok(): void

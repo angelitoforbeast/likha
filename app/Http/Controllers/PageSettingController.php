@@ -476,6 +476,10 @@ class PageSettingController extends Controller
         if ($setting->provider === \App\Services\Chatbot\ChatbotAiKeys::PROVIDER) {
             return redirect()->route('page-settings.index')->withErrors(['value' => 'AI keys are changed on /chatbot/ai-keys.']);
         }
+        // Botcake account tokens (spec 272): only Remove on /chatbot/botcake-accounts also wipes the encrypted value.
+        if ($setting->provider === \App\Services\BotcakeAccounts::PROVIDER) {
+            return redirect()->route('page-settings.index')->withErrors(['value' => 'Botcake accounts are changed on /chatbot/botcake-accounts.']);
+        }
         if ($setting->fullKey() === 'forbeast.token') app(ForbeastPageSetup::class)->disconnect($setting->page_name, Auth::id());
         else $this->settings->deactivate($setting, Auth::id());
 

@@ -56,6 +56,7 @@ use App\Http\Controllers\AdAccountController;
 use App\Http\Controllers\Pancake\RetrieveOrdersController;
 use App\Http\Controllers\BotcakePsidGsheetController;
 use App\Http\Controllers\PageSettingController;
+use App\Http\Controllers\ChatblastBroadcastController;
 use App\Http\Controllers\ChatblastCampaignController;
 use App\Http\Controllers\ChatblastChatController;
 use App\Http\Controllers\ChatblastController;
@@ -264,6 +265,22 @@ Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('chatblast')->name('cha
     Route::get('/test-psid', [ChatblastController::class, 'searchTestPsid'])->middleware('throttle:60,1,chatblast-test-psid')->name('test-psid.search');
     Route::post('/test-psid', [ChatblastController::class, 'saveTestPsid'])->middleware('throttle:20,1,chatblast-test-psid-save')->name('test-psid.save');
 
+    // Broadcast (spec 263): one message to a chosen audience of PSIDs; the throttles of the send routes above.
+    Route::prefix('broadcast')->name('broadcast.')->group(function () {
+        Route::get('/', [ChatblastBroadcastController::class, 'index'])->name('index');
+        Route::get('/data', [ChatblastBroadcastController::class, 'data'])->name('data');
+        Route::post('/flows', [ChatblastBroadcastController::class, 'flows'])->middleware('throttle:30,1,chatblast-broadcast-flows')->name('flows');
+        Route::post('/preview', [ChatblastBroadcastController::class, 'preview'])->middleware('throttle:60,1,chatblast-broadcast-preview')->name('preview');
+        Route::post('/{id}/count', [ChatblastBroadcastController::class, 'count'])->whereNumber('id')->middleware('throttle:200,1,chatblast-broadcast-count')->name('count');
+        Route::get('/{id}/progress', [ChatblastBroadcastController::class, 'progress'])->whereNumber('id')->name('progress');
+        Route::post('/{id}/test', [ChatblastBroadcastController::class, 'test'])->whereNumber('id')->middleware('throttle:20,1,chatblast-test')->name('test');
+        Route::post('/{id}/start', [ChatblastBroadcastController::class, 'start'])->whereNumber('id')->middleware('throttle:10,1,chatblast-send-filtered')->name('start');
+        Route::post('/{id}/pause', [ChatblastBroadcastController::class, 'pause'])->whereNumber('id')->middleware('throttle:30,1,chatblast-control')->name('pause');
+        Route::post('/{id}/resume', [ChatblastBroadcastController::class, 'resume'])->whereNumber('id')->middleware('throttle:30,1,chatblast-control')->name('resume');
+        Route::post('/{id}/stop', [ChatblastBroadcastController::class, 'stop'])->whereNumber('id')->middleware('throttle:30,1,chatblast-control')->name('stop');
+        Route::post('/{id}/cap', [ChatblastBroadcastController::class, 'cap'])->whereNumber('id')->middleware('throttle:30,1,chatblast-control')->name('cap');
+    });
+
     // Mga mensahe (gaya ng flow sa Botcake): /chatblast/campaigns.
     Route::prefix('campaigns')->name('campaigns.')->group(function () {
         Route::get('/', [ChatblastMessageController::class, 'index'])->name('index');
@@ -381,6 +398,13 @@ Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('chatbot')->name('chatb
     Route::post('/ai-keys/{id}/enabled', [\App\Http\Controllers\ChatbotAiKeyController::class, 'enabled'])->middleware('throttle:30,1,chatbot-ai-keys-save')->name('ai-keys.enabled');
     Route::post('/ai-keys/{id}/label', [\App\Http\Controllers\ChatbotAiKeyController::class, 'label'])->middleware('throttle:30,1,chatbot-ai-keys-save')->name('ai-keys.label');
     Route::delete('/ai-keys/{id}', [\App\Http\Controllers\ChatbotAiKeyController::class, 'destroy'])->middleware('throttle:30,1,chatbot-ai-keys-save')->name('ai-keys.destroy');
+    // Botcake Accounts (spec 272): access by the page's own nav link (NavAccess, checked in the controller). Every action
+    // that calls Botcake is limited to 10 a minute per user; Remove to 30.
+    Route::get('/botcake-accounts', [\App\Http\Controllers\BotcakeAccountController::class, 'index'])->name('botcake-accounts.index');
+    Route::post('/botcake-accounts', [\App\Http\Controllers\BotcakeAccountController::class, 'store'])->middleware('throttle:10,1,chatbot-botcake-accounts')->name('botcake-accounts.store');
+    Route::get('/botcake-accounts/{id}/pages', [\App\Http\Controllers\BotcakeAccountController::class, 'pages'])->middleware('throttle:10,1,chatbot-botcake-accounts')->name('botcake-accounts.pages');
+    Route::post('/botcake-accounts/{id}/update-tokens', [\App\Http\Controllers\BotcakeAccountController::class, 'updateTokens'])->middleware('throttle:10,1,chatbot-botcake-accounts')->name('botcake-accounts.update-tokens');
+    Route::post('/botcake-accounts/{id}/remove', [\App\Http\Controllers\BotcakeAccountController::class, 'destroy'])->middleware('throttle:30,1,chatbot-botcake-accounts-remove')->name('botcake-accounts.remove');
     Route::get('/ai/compare', [\App\Http\Controllers\ChatbotAiController::class, 'compare'])->middleware('throttle:60,1,chatbot-ai-compare')->name('ai.compare');
     Route::post('/forbeast-token', [\App\Http\Controllers\ChatbotController::class, 'forbeastToken'])->middleware('throttle:30,1,chatbot-forbeast-token')->name('forbeast-token');
     Route::get('/connections', [\App\Http\Controllers\ChatbotController::class, 'connections'])->middleware('throttle:120,1,chatbot-connections')->name('connections');
@@ -816,6 +840,8 @@ Route::get('/encoder/checker_1/settings', [App\Http\Controllers\Encoder\Checker1
 Route::post('/encoder/checker_1/settings', [App\Http\Controllers\Encoder\Checker1SettingsController::class, 'update'])
      ->name('encoder.checker1.settings.update');
 Route::get('/encoder/summary', [App\Http\Controllers\MacroOutputController::class, 'summary'])->name('macro_output.summary');
+// Encoding timetable (spec 265): anong oras natapos ang encoding, J&T upload at waybill kada order date. Access ayon sa nav-settings.
+Route::get('/encoder/timetable', [App\Http\Controllers\Encoder\EncoderTimetableController::class, 'index'])->name('encoder.timetable');
     Route::get('/encoder/checker_1', [MacroOutputController::class, 'index'])->name('macro_output.index');
 Route::post('/encoder/checker_1/update', [MacroOutputController::class, 'bulkUpdate'])->name('macro_output.bulk_update');
 Route::post('/encoder/checker_1/update-field', [MacroOutputController::class, 'updateField'])->name('macro_output.update_field');
@@ -961,6 +987,10 @@ Route::get('/ads_manager/campaigns', [AdsManagerCampaignsController::class, 'ind
         ->name('ads_manager.campaigns.history');
      Route::get('/ads_manager/campaigns/history/data', [AdsManagerCampaignsController::class, 'historyData'])
         ->name('ads_manager.campaigns.history.data');
+
+     // Ads daily output (spec 266): bagong ads, pinatay, binuhay, budget changes at promo kada araw. Access ayon sa nav-settings.
+     Route::get('/ads_manager/daily-output', [\App\Http\Controllers\AdsDailyOutputController::class, 'index'])
+        ->name('ads_manager.daily_output');
 
      // Manual campaign ownership tagging — used by history page dropdown.
      Route::get ('/ads_manager/campaigns/assignments',         [\App\Http\Controllers\CampaignAssignmentController::class, 'list'])
@@ -1238,6 +1268,8 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
     // /system-monitor — CEO-only system + DB + storage health dashboard
     Route::get   ('/system-monitor',         [SystemMonitorController::class, 'index']) ->name('system.monitor');
     Route::get   ('/system-monitor/data',    [SystemMonitorController::class, 'data'])  ->name('system.monitor.data');
+    // Storage only (disk, database, binary logs): CEO and Marketing - OIC (spec 242)
+    Route::get   ('/system-monitor/storage', [SystemMonitorController::class, 'storage'])->name('system.monitor.storage');
 
     // Consolidate/merge controls per-run (manual button + pause/resume/cancel)
     Route::post  ('/jnt_upload_v2/run/{runId}/start-merge',    [JntUploadV2Controller::class, 'startMerge'])         ->whereNumber('runId')->name('jnt.upload.v2.merge.start');

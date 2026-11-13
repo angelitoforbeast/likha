@@ -11,6 +11,7 @@
     DataHealth::QUIET        => 'bg-gray-100 text-gray-700',
   ];
   $rows = fn (int $n) => $n . ' ' . ($n === 1 ? 'row' : 'rows');
+  $last = $health['last'] ?? null;
 @endphp
 <div class="border rounded p-4 space-y-3" id="ads-data-health">
   <div class="flex items-center justify-between flex-wrap gap-2">
@@ -19,8 +20,15 @@
   </div>
   <p class="text-xs text-gray-500">
     Bawat ad account (Facebook connection, /ads_manager/ad_account at mga upload) at kung may data kahapon.
-    Missing yesterday = may spend sa 3 araw bago pero wala kahapon. Not readable by API = i-upload nang manual o i-connect ng may access.
+    Missing yesterday = may spend sa 3 araw bago pero wala kahapon. Not readable by API = may upload rows kahapon pero hindi ito mabasa ng API; i-connect ng may access.
   </p>
+  <div class="text-xs text-gray-600" id="ads-data-health-last">
+    @if ($last)
+      Last recorded check: {{ $last['checked_at'] }} ({{ ($last['trigger'] ?? DataHealth::TRIGGER_SCHEDULED) === DataHealth::TRIGGER_UPLOAD ? 'after an upload' : 'scheduled' }}) · for {{ $last['day'] }}
+    @else
+      Last recorded check: none yet
+    @endif
+  </div>
   <div class="text-xs {{ ($live['refused']['today'] + $live['refused']['yesterday']) > 0 ? 'text-red-700' : 'text-gray-600' }}">
     Refused (lower values): today {{ $rows($live['refused']['today']) }} · yesterday {{ $rows($live['refused']['yesterday']) }}
   </div>

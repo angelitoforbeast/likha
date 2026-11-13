@@ -155,8 +155,10 @@
             </select>
           </div>
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            <input type="text" name="description" placeholder="Description (optional)..."
-                   class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400">
+            <textarea name="description" rows="5" maxlength="3000"
+                      placeholder="Description / instructions (optional)... isang hakbang bawat linya; puwede ang link, hal. /ads_manager/daily-output"
+                      oninput="this.style.height='auto';this.style.height=this.scrollHeight+'px'"
+                      class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"></textarea>
             <div class="grid grid-cols-3 gap-2">
               <input type="time" name="scheduled_time"
                      class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-sky-400">
@@ -576,9 +578,10 @@
                       </select>
                     </div>
                     <div class="grid grid-cols-1 sm:grid-cols-4 gap-2">
-                      <input type="text" name="description" value="{{ $t->description }}"
-                             placeholder="Description (optional)..."
-                             class="sm:col-span-1 border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400">
+                      <textarea name="description" rows="5" maxlength="3000"
+                                placeholder="Description / instructions (optional)... isang hakbang bawat linya; puwede ang link, hal. /ads_manager/daily-output"
+                                oninput="this.style.height='auto';this.style.height=this.scrollHeight+'px'"
+                                class="sm:col-span-4 border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400">{{ $t->description }}</textarea>
                       <input type="time" name="scheduled_time" value="{{ $t->scheduled_time }}"
                              class="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-sky-400">
                       <input type="time" name="deadline_time" value="{{ $t->deadline_time }}" aria-label="Deadline"

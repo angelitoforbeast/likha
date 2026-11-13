@@ -24,8 +24,8 @@ class SyncBotcakeCustomersJob implements ShouldQueue
 
     public function handle(BotcakeCustomerSync $sync): void
     {
-        // Kapag may tumatakbong sync (schedule o ibang button), laktaw: ang susunod na oras ang kukuha.
-        $sync->withLock(fn () => $sync->syncPage($this->page, $this->full));
+        // Kapag may tumatakbong sync ng page na ito (schedule, ibang button o --all-time), laktaw: ang susunod na oras ang kukuha.
+        $sync->withLock($this->page, fn () => $sync->syncPage($this->page, $this->full));
     }
 
     /** Pinatay o pumalya ang job: ang run na naiwang "running" ay failed (killed); itinutuloy ito ng susunod na sync. */

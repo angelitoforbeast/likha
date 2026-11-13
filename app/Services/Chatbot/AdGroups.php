@@ -1067,7 +1067,8 @@ class AdGroups
         $cre = $hasCreatives ? DB::table('ad_campaign_creatives')->where('ad_id', $ad)->first($cols) : null;
         $fromCampaign = false;
         if (!$cre && $hasCreatives && $report && $report->campaign_id) {
-            $cre = DB::table('ad_campaign_creatives')->where('campaign_id', $report->campaign_id)->first($cols);
+            // Spec 254: several rows per campaign (one per ad); the campaign's own row, never a random sibling ad's.
+            $cre = \App\Models\AdCampaignCreative::campaignFallback((string) $report->campaign_id, $cols);
             $fromCampaign = (bool) $cre;
         }
         $link = trim((string) ($cre->ad_link ?? ''));

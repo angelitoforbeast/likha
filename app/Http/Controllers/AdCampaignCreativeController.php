@@ -43,7 +43,7 @@ class AdCampaignCreativeController extends Controller
                 $join->on('acc.campaign_id', '=', 'sub.campaign_id');
             })
             ->select([
-                'acc.id','acc.campaign_id','acc.campaign_name','acc.page_name','acc.body_ad_settings',
+                'acc.id','acc.ad_id','acc.campaign_id','acc.campaign_name','acc.page_name','acc.body_ad_settings',
                 'acc.headline','acc.welcome_message','acc.quick_reply_1','acc.quick_reply_2','acc.quick_reply_3',
                 'acc.ad_set_delivery','acc.ad_link','acc.feedback',
                 DB::raw('sub.date_created'),
@@ -61,6 +61,8 @@ class AdCampaignCreativeController extends Controller
             $query->where(function ($w) use ($q) {
                 $like = "%{$q}%";
                 $w->where('acc.campaign_name', 'like', $like)
+                  ->orWhere('acc.ad_id', 'like', $like)
+                  ->orWhere('acc.campaign_id', 'like', $like)
                   ->orWhere('acc.page_name', 'like', $like)
                   ->orWhere('acc.body_ad_settings', 'like', $like)
                   ->orWhere('acc.headline', 'like', $like)
@@ -81,6 +83,10 @@ class AdCampaignCreativeController extends Controller
         } else {
             $query->orderBy("acc.$sortBy", $sortDirection);
         }
+        // Spec 254: one row per ad; the ads of one campaign sit together (campaign row first, then its ads).
+        $query->orderBy('acc.campaign_id')
+              ->orderByRaw('CASE WHEN acc.ad_id IS NULL THEN 0 ELSE 1 END')
+              ->orderBy('acc.ad_id');
 
         $creatives = $query->simplePaginate($perPage)->appends($request->query());
 

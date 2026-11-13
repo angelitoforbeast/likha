@@ -319,7 +319,7 @@
                             <table class="fb-table">
                               <thead>
                                 <tr>
-                                  <template x-for="col in visibleCampaignsCols()" :key="'ed-h-'+col.id">
+                                  <template x-for="col in visibleCampaignsCols('ads')" :key="'ed-h-'+col.id">
                                     <th :class="(col.sort ? 'sortable ' : '') + (col.align==='right' ? 'text-right' : '')"
                                         :style="col.minw ? ('min-width:'+col.minw+'px') : ''">
                                       <span x-text="campLabel(col, 'ads')"></span>
@@ -330,7 +330,7 @@
                               <tbody>
                                 <template x-for="ad in ((expandedAdSets[aset.ad_set_id] || {}).ads || [])" :key="ad.ad_id">
                                   <tr>
-                                    <template x-for="col in visibleCampaignsCols()" :key="'ed-c-'+col.id">
+                                    <template x-for="col in visibleCampaignsCols('ads')" :key="'ed-c-'+col.id">
                                       <td :class="(col.align==='right' ? 'num' : '')"
                                           :style="campaignsCellFormatStyle(col.id, ad, ad[col.id])">
                                         <template x-if="col.type==='on'">

@@ -330,7 +330,7 @@ class AiProblemsTest extends ChatblastTestCase
         Schema::create(ChatbotAiQueue::TABLE, fn ($t) => $t->id());
 
         $lines = $this->lines('/chatblast/page-settings');
-        $this->assertSame([['Page Dos', '🟠 Setup: No flow named X Page settings']], array_map(fn ($l) => [$l['page'], $l['text']], $lines));
+        $this->assertSame([['Page Dos', '🟠 No shipping status setup: No flow named X Page settings']], array_map(fn ($l) => [$l['page'], $l['text']], $lines));
     }
 
     public function test_S_231_5_4_the_ai_lines_wrap_in_the_banner_list(): void

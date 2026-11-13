@@ -21,9 +21,9 @@ class AdsManagerUploadCharacterizationTest extends MetaAdsTestCase
         $writer = new \OpenSpout\Writer\XLSX\Writer();
         $writer->openToFile(Storage::disk('local')->path($path));
         $writer->addRow(\OpenSpout\Common\Entity\Row::fromValues(['Day', 'Ad ID', 'Account ID', 'Campaign ID', 'Ad set ID', 'Page name', 'Campaign name',
-            'Ad set name', 'Amount spent (PHP)', 'Impressions', 'Results', 'Result type', 'Link clicks']));
+            'Ad set name', 'Amount spent (PHP)', 'Impressions', 'Results', 'Result type', 'Link clicks', '3-second video plays', 'ThruPlays', 'Video plays at 50%']));
         $writer->addRow(\OpenSpout\Common\Entity\Row::fromValues(['2026-10-20', 'a1', '111', 'c1', 'as1', 'Page P1', 'Camp', 'Adset', $spend, '1500', '12',
-            'Messaging conversations started', '33']));
+            'Messaging conversations started', '33', '', '', '']));
         $writer->close();
         $log = UploadLog::create(['type' => 'ads_manager_reports', 'disk' => 'local', 'path' => $path, 'original_name' => 't.xlsx', 'status' => 'queued']);
         (new ProcessAdsManagerReportsUpload($path, null, $log->id))->handle();

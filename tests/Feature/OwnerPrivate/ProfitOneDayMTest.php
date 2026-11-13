@@ -220,7 +220,7 @@ class ProfitOneDayMTest extends OwnerPrivateTestCase
         $html = $this->get('/owner/private')->assertOk()->getContent();
 
         foreach ([
-            "{ id:'proj_prof_1d_m', label:'PROF(1D)-M',  sort:'projected_profit_last_day_m'",           // defaultCols
+            "{ id:'proj_prof_1d_m', label:'PROF(1D)-M', sort:'projected_profit_last_day_m'",            // defaultCols
             "(col.id==='proj_prof_1d_m'?pbStyleN(row.projected_profit_last_day_m,1):'')",               // row style
             "x-text=\"md(row.projected_profit_last_day_m)\"",                                          // body cell
             "(col.id==='proj_prof_1d_m'?pbStyleN(tot().projected_profit_last_day_m,1):'')",             // TOTAL style
