@@ -35,7 +35,7 @@ class ProblemsPanel
     /** Ang page na "nag-a-ads": may amount_spent_php > 0 sa ads_manager_reports sa huling AD_DAYS araw (day), ngayon kasama. */
     public const AD_DAYS = 2;
     /** Ang mga kulay, pinakamabigat muna; ang puti ay hindi urgent. */
-    public const LEVELS = ['red' => '🔴', 'orange' => '🟠', 'white' => '⚪'];
+    public const LEVELS = ['red' => '🔴', 'orange' => '🟠', 'yellow' => '🟡', 'white' => '⚪'];
     /** Ang "page" ng linyang para sa buong site (hal. pumapalya ang AI sa karamihan ng page): may sariling Acknowledge/Done. */
     public const SITE = 'All pages';
     /** Ilang chat ang naka-link sa linya ng AI, at ilang palyang row ang binabasa para sa mga link at sa failed port. */
@@ -79,6 +79,7 @@ class ProblemsPanel
             $own['events'], $own['slow'], $own['quiet'], $own['ai'] ?? [],
             $this->safely(fn () => $this->setup($own['sending'], $own['selling'] ?? null, $own['advertising'] ?? null), []),
             $own['same_ids'] ?? [],
+            $this->safely(fn () => $this->steal(), []),
         );
         if (!$lines) return null;
 
@@ -111,8 +112,22 @@ class ProblemsPanel
             <=> [$rank[$b['level']], -$count($b, 'red'), -$count($b, 'orange'), -count($b['lines']), mb_strtolower($b['page'])]);
 
         // doubles: may linya ng dobleng sagot (ang hindi pula sa echo), para lumabas lang ang paliwanag ng "bago" kapag kailangan.
-        return ['pages' => $pages, 'urgent' => count(array_filter($pages, fn ($p) => $p['level'] !== 'white')),
+        // Yellow (spec 273) is a warning about the server, not something to act on now: not urgent, like white.
+        return ['pages' => $pages, 'urgent' => count(array_filter($pages, fn ($p) => !in_array($p['level'], ['white', 'yellow'], true))),
             'doubles' => (bool) array_filter($echoes, fn ($l) => $l['level'] !== 'red'), 'acked' => array_values($acked)];
+    }
+
+    /**
+     * Spec 273: one yellow site line when the server's average CPU steal in the last hour (CpuSteal, from the cache) is
+     * above steal_alert_percent; nothing when there are no samples (e.g. /proc/stat unreadable).
+     */
+    private function steal(): array
+    {
+        $avg = CpuSteal::hourAverage();
+        $limit = (float) config('services.gateway.auto_switch.steal_alert_percent');
+        if ($avg === null || $limit <= 0 || $avg <= $limit) return [];
+
+        return [self::line(self::SITE, 'yellow', 'Server CPU steal ' . number_format($avg, 1) . "% in the last hour (the hosting provider's machine is overloaded; replies and sends may slow down)", [])];
     }
 
     private function safely(callable $fn, mixed $fallback): mixed

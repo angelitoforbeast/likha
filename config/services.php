@@ -315,6 +315,26 @@ return [
             'unknown_min_sends' => (int) env('GATEWAY_SWITCH_UNKNOWN_MIN_SENDS', 10),
             'unknown_response_pct' => (int) env('GATEWAY_SWITCH_UNKNOWN_RESPONSE_PCT', 30),
             'unknown_update_pct' => (int) env('GATEWAY_SWITCH_UNKNOWN_UPDATE_PCT', 70),
+            // Spec 273: no-answer failures of one page within burst_window_seconds of the first one count as one strike
+            // (one stuck connection), and no_answer strikes must span no_answer_min_seconds before a switch. 0 = old way.
+            'burst_window_seconds' => (int) env('GATEWAY_SWITCH_BURST_WINDOW_SECONDS', 15),
+            'no_answer_min_seconds' => (int) env('GATEWAY_SWITCH_NO_ANSWER_MIN_SECONDS', 180),
+            // A send that failed before the request left (DNS, refused, connect timeout) is tried once more after this wait.
+            'connect_retry_ms' => (int) env('GATEWAY_SWITCH_CONNECT_RETRY_MS', 2000),
+            // Before switching: is our own server's network down? Botcake sends with no HTTP answer in the last
+            // server_side_minutes (at least server_side_min, or server_side_pct % of them), or the probe GET fails.
+            'server_side_min' => (int) env('GATEWAY_SWITCH_SERVER_SIDE_MIN', 5),
+            'server_side_pct' => (int) env('GATEWAY_SWITCH_SERVER_SIDE_PCT', 20),
+            'server_side_minutes' => (int) env('GATEWAY_SWITCH_SERVER_SIDE_MINUTES', 2),
+            'server_probe_url' => (string) env('GATEWAY_SWITCH_SERVER_PROBE_URL', 'https://botcake.io/'),
+            'server_probe_connect_seconds' => (int) env('GATEWAY_SWITCH_SERVER_PROBE_CONNECT_SECONDS', 5),
+            'server_probe_timeout_seconds' => (int) env('GATEWAY_SWITCH_SERVER_PROBE_TIMEOUT_SECONDS', 8),
+            // Before a no_answer switch, one live GET of the page on the gateway; when it answers, no switch and the
+            // strikes start over, at most this many times until a send gets through (so a stalled send path is still
+            // left). 0 = no live look.
+            'recheck_max_holds' => (int) env('GATEWAY_SWITCH_RECHECK_MAX_HOLDS', 1),
+            // The hosting machine is overloaded: the average CPU steal % of the last hour above this shows a yellow line.
+            'steal_alert_percent' => (float) env('GATEWAY_SWITCH_STEAL_ALERT_PERCENT', 5),
         ],
         // Ang echo (ChatEchoes): ilang minuto bago "hindi nasagot" ang mensahe ng customer, ilang customer na hindi nasagot
         // sa huling oras bago pula ang page, at ilang segundo ang layo ng dalawang app na "dobleng sagot".

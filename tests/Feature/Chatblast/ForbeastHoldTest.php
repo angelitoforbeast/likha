@@ -23,6 +23,8 @@ class ForbeastHoldTest extends ChatblastTestCase
     private const IXB = 'https://ixb.example.test';
     private const PSID = '6012345678901234';
     private const EVENTS_KEY = 'events-key-test-h0ld213';
+    /** A read timeout (the request had left): not retried (spec 273), so one send is one request as before. */
+    private const NO_ANSWER = 'cURL error 28: Operation timed out after 10000 milliseconds with 0 bytes received';
 
     /** Ang mga page ID na hindi sinasagot ng gateway (walang koneksyon), kada base URL. */
     private array $down = [self::GW => [], self::IXB => []];
@@ -55,8 +57,8 @@ class ForbeastHoldTest extends ChatblastTestCase
         Http::fake(function (HttpRequest $r) {
             $base = str_starts_with($r->url(), self::IXB) ? self::IXB : self::GW;
             if (!preg_match('#/v1/pages/(\d+)(/messages)?$#', $r->url(), $m)) return Http::response(['ok' => true]);
-            if (in_array($m[1], $this->down[$base], true)) return Http::failedConnection()($r);
-            if (isset($m[2]) && in_array($m[1], $this->sendsDown, true)) return Http::failedConnection()($r);
+            if (in_array($m[1], $this->down[$base], true)) return Http::failedConnection(self::NO_ANSWER)($r);
+            if (isset($m[2]) && in_array($m[1], $this->sendsDown, true)) return Http::failedConnection(self::NO_ANSWER)($r);
             if (isset($m[2]) && in_array($m[1], $this->refused, true)) return Http::response(['message' => 'Page is in receive mode.'], 422);
             $connected = !in_array($m[1], $this->notConnected, true);
 

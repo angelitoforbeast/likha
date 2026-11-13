@@ -34,7 +34,7 @@ class ProblemTabsTest extends ChatblastTestCase
         return ['level' => $level, 'text' => $text, 'links' => [['Inbox', '/chatbot/inbox?k=' . $kind]], 'kind' => $kind] + $extra;
     }
 
-    /** Red, orange and white lines on four pages, in panel() order, one line that came back after an ack, and one acknowledged line. */
+    /** (Spec 273 adds an empty yellow tab between orange and white.) Red, orange and white lines on four pages, in panel() order, one line that came back after an ack, and one acknowledged line. */
     private static function mixed(): array
     {
         return [
@@ -125,10 +125,10 @@ class ProblemTabsTest extends ChatblastTestCase
         $this->actingAs($this->user());
         foreach (self::URLS as $url) {
             $b = $this->banner($url);
-            $this->assertSame(['red', 'orange', 'white', 'all'], array_keys($b['tabs']), $url);
-            $this->assertSame(['🔴 Red (2)', '🟠 Orange (2)', '⚪ White (2)', 'All (6)'], array_column($b['tabs'], 'label'), $url);
-            $this->assertSame(['true', 'false', 'false', 'false'], array_column($b['tabs'], 'selected'), $url);
-            $this->assertSame([false, false, false, false], array_column($b['tabs'], 'disabled'), $url);
+            $this->assertSame(['red', 'orange', 'yellow', 'white', 'all'], array_keys($b['tabs']), $url);
+            $this->assertSame(['🔴 Red (2)', '🟠 Orange (2)', '🟡 Yellow (0)', '⚪ White (2)', 'All (6)'], array_column($b['tabs'], 'label'), $url);
+            $this->assertSame(['true', 'false', 'false', 'false', 'false'], array_column($b['tabs'], 'selected'), $url);
+            $this->assertSame([false, false, true, false, false], array_column($b['tabs'], 'disabled'), $url);
             $this->assertMatchesRegularExpression('#role="tablist"#', (string) $b['bar']);
             $this->assertMatchesRegularExpression('#\shidden\b#', (string) $b['bar'], 'collapsed: the tabs are hidden with the list');
             foreach ($b['tabs'] as $t) $this->assertStringContainsString('aria-controls="cb-problems-list"', $t['attrs']);
@@ -199,9 +199,9 @@ class ProblemTabsTest extends ChatblastTestCase
         $this->fake($orange);
         $this->actingAs($this->user());
         $b = $this->banner('/chatbot/inbox');
-        $this->assertSame(['🔴 Red (0)', '🟠 Orange (1)', '⚪ White (2)', 'All (3)'], array_column($b['tabs'], 'label'));
-        $this->assertSame([true, false, false, false], array_column($b['tabs'], 'disabled'));
-        $this->assertSame(['false', 'true', 'false', 'false'], array_column($b['tabs'], 'selected'));
+        $this->assertSame(['🔴 Red (0)', '🟠 Orange (1)', '🟡 Yellow (0)', '⚪ White (2)', 'All (3)'], array_column($b['tabs'], 'label'));
+        $this->assertSame([true, false, true, false, false], array_column($b['tabs'], 'disabled'));
+        $this->assertSame(['false', 'true', 'false', 'false', 'false'], array_column($b['tabs'], 'selected'));
         $this->assertSame([['Page Tres', ['🟠 Tres orange Inbox']]], self::shown($b));
     }
 
@@ -214,9 +214,9 @@ class ProblemTabsTest extends ChatblastTestCase
         $this->fake($white);
         $this->actingAs($this->user());
         $b = $this->banner('/chatbot/inbox');
-        $this->assertSame(['🔴 Red (0)', '🟠 Orange (0)', '⚪ White (1)', 'All (1)'], array_column($b['tabs'], 'label'));
-        $this->assertSame([true, true, false, false], array_column($b['tabs'], 'disabled'));
-        $this->assertSame(['false', 'false', 'true', 'false'], array_column($b['tabs'], 'selected'));
+        $this->assertSame(['🔴 Red (0)', '🟠 Orange (0)', '🟡 Yellow (0)', '⚪ White (1)', 'All (1)'], array_column($b['tabs'], 'label'));
+        $this->assertSame([true, true, true, false, false], array_column($b['tabs'], 'disabled'));
+        $this->assertSame(['false', 'false', 'false', 'true', 'false'], array_column($b['tabs'], 'selected'));
         $this->assertSame([['Page Kwatro', ['⚪ Kwatro white Inbox']]], self::shown($b));
     }
 
@@ -229,9 +229,9 @@ class ProblemTabsTest extends ChatblastTestCase
         $this->actingAs($this->user());
         $b = $this->banner('/chatbot/inbox');
         $this->assertSame('⚠ 0 pages with problems (0 urgent)', $b['line']);
-        $this->assertSame(['🔴 Red (0)', '🟠 Orange (0)', '⚪ White (0)', 'All (0)'], array_column($b['tabs'], 'label'));
-        $this->assertSame(['false', 'false', 'false', 'true'], array_column($b['tabs'], 'selected'));
-        $this->assertSame([true, true, true, false], array_column($b['tabs'], 'disabled'), 'the open tab is never disabled');
+        $this->assertSame(['🔴 Red (0)', '🟠 Orange (0)', '🟡 Yellow (0)', '⚪ White (0)', 'All (0)'], array_column($b['tabs'], 'label'));
+        $this->assertSame(['false', 'false', 'false', 'false', 'true'], array_column($b['tabs'], 'selected'));
+        $this->assertSame([true, true, true, true, false], array_column($b['tabs'], 'disabled'), 'the open tab is never disabled');
         $this->assertStringContainsString('Acknowledged and done (1)', $b['html']);
 
         $this->fake(null);

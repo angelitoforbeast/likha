@@ -21,6 +21,15 @@ abstract class ChatblastTestCase extends BotcakeApiTestCase
     protected function setUp(): void
     {
         parent::setUp();
+        // Spec 273: the gateway watcher's probe of our own network before a switch answers here (no real call); a test
+        // that wants it failing points server_probe_url elsewhere and fakes that (the first matching fake wins).
+        \Illuminate\Support\Facades\Http::fake([(string) config('services.gateway.auto_switch.server_probe_url') => \Illuminate\Support\Facades\Http::response('', 200)]);
+        // The connect-phase retry waits 2 s in production; the tests do not wait (the spec 273 tests check the wait).
+        // The older switch tests send their failures in the same second: they test other rules (burst hold, moves between
+        // gateways), so they keep counting every failure as a strike and take no live look before a no_answer switch.
+        // GatewaySwitchSteadierTest tests the spec 273 window and the live look.
+        config(['services.gateway.auto_switch.connect_retry_ms' => 0, 'services.gateway.auto_switch.burst_window_seconds' => 0,
+            'services.gateway.auto_switch.no_answer_min_seconds' => 0, 'services.gateway.auto_switch.recheck_max_holds' => 0]);
 
         Schema::table('macro_output', function (Blueprint $t) {
             $t->string('ITEM_NAME')->nullable();

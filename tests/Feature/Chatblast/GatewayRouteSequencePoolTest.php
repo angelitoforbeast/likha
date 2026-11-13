@@ -45,9 +45,18 @@ class GatewayRouteSequencePoolTest extends SequenceHandoffTestCase
         $this->assertSame(['incepxion.test', '/api/v1/pages/1002/messages'], [self::req($this->calls[0])['host'], self::req($this->calls[0])['path']]);
         $this->assertSame('v4', $this->options[0]['force_ip_resolve'] ?? null);
 
-        $this->calls[0]['p']->reject(new ConnectException('cURL error 7: Failed to connect', new PsrRequest('POST', (string) $this->calls[0]['req']->getUri()), null,
+        $refuse = fn (int $i) => $this->calls[$i]['p']->reject(new ConnectException('cURL error 7: Failed to connect', new PsrRequest('POST', (string) $this->calls[$i]['req']->getUri()), null,
             ['errno' => 7, 'error' => 'Failed to connect to incepxion.test port 443 after 3001 ms: Timeout was reached', 'connect_time' => 0.0, 'total_time' => 3.001]));
+        $refuse(0);
         $this->pool->tick(false);
+        $this->pool->tick(false);
+        // Spec 273: the request never left, so it is tried once more; the second failure is the result.
+        $this->assertCount(2, $this->calls);
+        $this->assertSame([], $this->replies('8001'));
+        $refuse(1);
+        $this->pool->tick(false);
+        $this->pool->tick(false);
+        $this->assertCount(2, $this->calls, 'one retry only');
         $this->resumes();
 
         $this->assertSame(['failed: Hi (Gateway did not answer (HTTP 0) · cURL error 7: Failed to connect to incepxion.test port 443 after 3001 ms: Timeout was reached · connect 0.00 s, total 3.00 s)'],

@@ -6,6 +6,7 @@ use App\Services\BotcakeClient;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Sleep;
 use Throwable;
 
 /**
@@ -14,7 +15,8 @@ use Throwable;
  * ang nag-aayos ng pagkakasunod kada PSID at ng rate kada page). Walang retry dito: ang parehong client_ref ay hindi
  * nadodoble sa gateway. Ang key ay ang token ng page sa gateway na iyon, o ang global key ng gateway (GATEWAY_KEY,
  * INCEPXIONBOT_KEY). Walang URL o key: failed, walang tawag. Ang request at ang pagbasa ng sagot ay pareho para sa
- * chatbot:sequence-pool (request, outcome).
+ * chatbot:sequence-pool (request, outcome). The one exception (spec 273): a failure before the request left
+ * (connectPhase) is tried once more, as nothing reached the gateway.
  */
 class GatewayProvider implements MessagingProvider
 {
@@ -99,6 +101,19 @@ class GatewayProvider implements MessagingProvider
         return $out;
     }
 
+    /**
+     * Spec 273: the failure happened before the request was sent (noAnswer detail): could not resolve the host (6), could
+     * not connect (7), or a connect-phase timeout (28 "Connection timed out" / "Resolving timed out" / "Failed to connect to …"). A read timeout
+     * ("Operation timed out after N ms with 0 bytes received") is false: the message may have arrived.
+     */
+    public static function connectPhase(array $d): bool
+    {
+        $errno = $d['curl_errno'] ?? null;
+        if ($errno === 6 || $errno === 7) return true;
+
+        return $errno === 28 && preg_match('/^((Connection|Resolving) timed out|Failed to connect to )/i', (string) ($d['curl_error'] ?? '')) === 1;
+    }
+
     /** Ang dagdag sa "Gateway did not answer (HTTP 0)": " · cURL error 28: … · connect 0.01 s, total 10.00 s"; '' kapag wala. */
     public static function noAnswerText(array $d): string
     {
@@ -123,7 +138,17 @@ class GatewayProvider implements MessagingProvider
 
         try {
             SequenceAttempt::beforeCall(); // ang padala ng sequence step: itinatala bago lumabas
-            $res = Http::withToken($q['key'])->acceptJson()->withOptions(Gateways::httpOptions())->connectTimeout(min(5, $q['timeout']))->timeout($q['timeout'])->post($q['url'], $q['body']);
+            for ($try = 1; ; $try++) {
+                try {
+                    $res = Http::withToken($q['key'])->acceptJson()->withOptions(Gateways::httpOptions())->connectTimeout(min(5, $q['timeout']))->timeout($q['timeout'])->post($q['url'], $q['body']);
+                    break;
+                } catch (ConnectionException $e) {
+                    // Spec 273: the request never left (DNS, refused, connect timeout), so one more try cannot double-send.
+                    if ($try > 1 || !self::connectPhase(self::noAnswer($e))) throw $e;
+                    self::logNoAnswer($pageName, $q, self::noAnswer($e) + ['retry' => true]);
+                    Sleep::for(max(0, (int) config('services.gateway.auto_switch.connect_retry_ms')))->milliseconds();
+                }
+            }
             $r = ['http' => $res->status(), 'body' => $res->json() ?? $res->body()];
         } catch (ConnectionException $e) {
             $r = ['http' => 0, 'body' => null, 'no_answer' => self::noAnswer($e)];

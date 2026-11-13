@@ -112,6 +112,11 @@ class ForbeastWatch
     private const UNKNOWN_SITE = 'forbeast-watch:unknown-site';
     private const UNKNOWN_UPDATES = 'forbeast-watch:unknown-updates';
     private const UNKNOWN_DAY = 'forbeast-watch:unknown-day:';
+    /** Spec 273: the per-minute Botcake send counts (botcakeSend), the probe verdict and how often a server-side hold is recorded. */
+    private const SERVER_BUCKET_TTL = 300;
+    private const PROBE = 'forbeast-watch:server-probe';
+    private const PROBE_TTL = 30;
+    private const HELD_TTL = 600;
 
     public function __construct(private PageSettings $settings)
     {
@@ -130,7 +135,7 @@ class ForbeastWatch
         $gw = $gateway ?? Gateways::active($page);
         if ($gw !== Gateways::active($page)) return;
         if ($outcome['status'] === 'sent') {
-            $this->reset($page, $gw, 'fails', 'no_answer');
+            $this->reset($page, $gw, 'fails', 'no_answer', 'recheck');
             $this->recovered($page, $gw, 'send');
             return;
         }
@@ -155,9 +160,15 @@ class ForbeastWatch
         }
 
         $noAnswer = $http === 0 || $http >= 500;
-        $fails = $this->bump($page, $gw, 'fails');
+        // Spec 273: one stuck connection fails every send of the page in the same second; those count as one strike, in the
+        // no-answer count and in the failed-send count, and the strikes must keep coming for minutes before a switch.
+        $strike = !$noAnswer || $this->newStrike($page, $gw);
+        $fails = $strike ? $this->bump($page, $gw, 'fails') : (int) Cache::get($this->counter($page, 'fails', $gw), 0);
         if ($noAnswer) {
-            $reached = $this->bump($page, $gw, 'no_answer') >= self::limit('no_answer');
+            $strikes = $strike ? $this->bump($page, $gw, 'no_answer') : (int) Cache::get($this->counter($page, 'no_answer', $gw), 0);
+            $since = (int) Cache::get($this->counter($page, 'no_answer_since', $gw), now()->getTimestamp());
+            $reached = $strikes >= self::limit('no_answer')
+                && now()->getTimestamp() - $since >= (int) config('services.gateway.auto_switch.no_answer_min_seconds');
             // Habang hold ang gateway (walang sagot sa maraming page nang sabay), ang walang sagot ay ebidensya ng daan, hindi
             // ng page: walang lipat dahil dito, pati sa bilang ng palyang padala.
             if ($this->burstHeld($page, $gw, $reached, $error)) return;
@@ -520,6 +531,7 @@ class ForbeastWatch
         foreach ($rows as $s) {
             $e = json_decode((string) $s->plainValue(), true);
             if (!is_array($e) || ($e['condition'] ?? null) !== 'no_answer' || ($e['gateway'] ?? null) !== $gw) continue;
+            if (isset($e['held'])) continue; // a hold of one page before its switch (spec 273), not a burst hold
             if (($e['result'] ?? null) === self::RECOVERED) return null;
             if (($e['result'] ?? null) !== self::HELD || $s->created_at === null) continue;
             $since = $s->created_at->getTimestamp();
@@ -591,21 +603,10 @@ class ForbeastWatch
     {
         $gw = $gateway ?? Gateways::active($page);
         $own = $gw === Gateways::active($page);
-        $url = Gateways::url($gw) !== '' ? Gateways::pageUrl($gw, $page) : ''; // ang address ng page
-        $pageId = trim((string) $this->settings->get($page, 'botcake', 'page_id'));
-        // Sariling token lang ng page: ang system key (GATEWAY_KEY, fbs_) ay 404 sa /v1/pages/{id}, kaya hindi ito sukatan.
-        $key = app(ForbeastPageSetup::class)->on($gw)->token($page);
-        if ($url === '' || $pageId === '' || $key === '') return;
+        [$possible, $res] = $this->pageCheck($page, $gw);
+        if (!$possible) return;
         $l = Gateways::label($gw);
 
-        try {
-            $res = Http::withToken($key)->acceptJson()->withOptions(Gateways::httpOptions())->connectTimeout(3)->timeout(5)->get($url . '/v1/pages/' . rawurlencode($pageId));
-        } catch (ConnectionException) {
-            $res = null;
-        } catch (Throwable $e) {
-            report($e);
-            $res = null;
-        }
         if ($res !== null && $res->successful()) {
             // Ang token ng page kada Meta app (Bot N sa "Replies via"): itinatabi kapag nagbago, para ang mga pili ay totoo.
             try {
@@ -647,6 +648,29 @@ class ForbeastWatch
         // ang sira ng daan ay hindi naglilipat ng lahat ng page sa ikatlong minuto bago matapos ang hold.
         if ($own && ($res === null || $res->status() >= 500) && $this->burstHeld($page, $gw, $reached, $error, 'health')) return;
         if ($reached && $own) $this->switch($page, 'health', $error, [], [], $gw);
+    }
+
+    /**
+     * Ang GET /v1/pages/{id} ng health check: [false, null] kapag hindi masukat (walang URL, page ID o sariling token),
+     * [true, null] kapag walang sagot. Also the live look at the gateway before a no_answer switch (spec 273).
+     * @return array{0: bool, 1: ?\Illuminate\Http\Client\Response}
+     */
+    private function pageCheck(string $page, string $gw): array
+    {
+        $url = Gateways::url($gw) !== '' ? Gateways::pageUrl($gw, $page) : ''; // ang address ng page
+        $pageId = trim((string) $this->settings->get($page, 'botcake', 'page_id'));
+        // Sariling token lang ng page: ang system key (GATEWAY_KEY, fbs_) ay 404 sa /v1/pages/{id}, kaya hindi ito sukatan.
+        $key = app(ForbeastPageSetup::class)->on($gw)->token($page);
+        if ($url === '' || $pageId === '' || $key === '') return [false, null];
+
+        try {
+            return [true, Http::withToken($key)->acceptJson()->withOptions(Gateways::httpOptions())->connectTimeout(3)->timeout(5)->get($url . '/v1/pages/' . rawurlencode($pageId))];
+        } catch (ConnectionException) {
+            return [true, null];
+        } catch (Throwable $e) {
+            report($e);
+            return [true, null];
+        }
     }
 
     /** Maayos ang huling health check ng page sa gateway (may sunod-sunod na maayos na hindi pa luma). */
@@ -873,6 +897,7 @@ class ForbeastWatch
             // ay hindi naglilipat ulit ng page mula sa bagong gateway.
             $from = $this->activeNow($page);
             if ($gateway !== null && $gateway !== $from) return;
+            if ($this->heldBeforeSwitch($page, $from, $condition, $error)) return;
             $chosen = $this->chosen($page, $from);
             $to = $condition === 'inbound' ? null : $this->target($page, $from);
             if ($to !== null) {
@@ -893,7 +918,7 @@ class ForbeastWatch
             // Ang ebidensya ng lipat (bilang at ID lang; ang error ay HTTP at Meta code lang, walang text ng mensahe).
             Log::warning('forbeast watch: switched', ['page' => $page, 'condition' => $condition, 'error' => $error, 'from' => $from, 'to' => $to ?? ChatbotProvider::BOTCAKE] + $evidence);
             // Ang maayos na health bago ang lipat ay hindi binibilang sa balik: nagsisimula ang bilang pagkatapos nito.
-            $this->reset($page, $from, 'fails', 'no_answer', 'health', 'healthy');
+            $this->reset($page, $from, 'fails', 'no_answer', 'health', 'healthy', 'recheck');
             Cache::forget('forbeast-watch:cannot:' . $hash);
             $this->runStandby($page);
             // Lipat sa kabilang gateway: ang customer na pumalya ang sagot (walang standby na kopya, hal. walang Botcake ang
@@ -1357,7 +1382,110 @@ class ForbeastWatch
 
     private function reset(string $page, string $gateway, string ...$what): void
     {
-        foreach ($what as $w) Cache::forget($this->counter($page, $w, $gateway));
+        foreach ($what as $w) {
+            Cache::forget($this->counter($page, $w, $gateway));
+            // The strike window and the first strike's time belong to the no-answer count (spec 273).
+            if ($w === 'no_answer') foreach (['no_answer_burst', 'no_answer_since'] as $x) Cache::forget($this->counter($page, $x, $gateway));
+        }
+    }
+
+    /**
+     * Spec 273: true when this no-answer failure starts a new strike, false when it lands within burst_window_seconds of
+     * the strike before (the same stuck connection). Cache::add is atomic, so workers failing in the same second agree.
+     * The first strike's time is kept for no_answer_min_seconds. A window of 0 makes every failure a strike (the old way).
+     */
+    private function newStrike(string $page, string $gw): bool
+    {
+        $window = (int) config('services.gateway.auto_switch.burst_window_seconds');
+        if ($window > 0 && !Cache::add($this->counter($page, 'no_answer_burst', $gw), 1, $window)) return false;
+        Cache::add($this->counter($page, 'no_answer_since', $gw), now()->getTimestamp(), self::COUNT_TTL);
+
+        return true;
+    }
+
+    /**
+     * Spec 273: every Botcake send result (BotcakeOutbox::outcome) is counted per minute, all sends and those with no HTTP
+     * answer, so the watcher can tell a gateway failure from our own server losing the network (serverSide).
+     */
+    public static function botcakeSend(int $http): void
+    {
+        $minute = intdiv(now()->getTimestamp(), 60);
+        foreach ($http === 0 ? ['t', 'n'] : ['t'] as $w) {
+            $key = 'forbeast-watch:botcake-sends:' . $w . ':' . $minute;
+            Cache::add($key, 0, self::SERVER_BUCKET_TTL);
+            Cache::increment($key);
+        }
+    }
+
+    /**
+     * Spec 273: why our own server's network looks down, or null. Botcake sends without an HTTP answer in the last
+     * server_side_minutes (at least server_side_min, or server_side_pct % of the Botcake sends), else one probe GET to
+     * server_probe_url; any HTTP answer there means the network works. The probe's verdict is kept PROBE_TTL seconds so a
+     * run of failing sends does not wait on the probe each time.
+     */
+    public function serverSide(): ?string
+    {
+        $c = (array) config('services.gateway.auto_switch');
+        $minutes = max(1, (int) ($c['server_side_minutes'] ?? 2));
+        $minute = intdiv(now()->getTimestamp(), 60);
+        $total = $none = 0;
+        for ($m = $minute - $minutes + 1; $m <= $minute; $m++) {
+            $total += (int) Cache::get('forbeast-watch:botcake-sends:t:' . $m, 0);
+            $none += (int) Cache::get('forbeast-watch:botcake-sends:n:' . $m, 0);
+        }
+        $pct = (int) ($c['server_side_pct'] ?? 0);
+        if ($none > 0 && ($none >= self::limit('server_side_min') || ($pct > 0 && $none * 100 >= $pct * $total))) {
+            return 'Botcake: ' . $none . ' of ' . $total . ' sends got no answer in ' . $minutes . ' min';
+        }
+        $url = trim((string) ($c['server_probe_url'] ?? ''));
+        if ($url === '') return null;
+        $host = parse_url($url, PHP_URL_HOST) ?: $url;
+        $verdict = Cache::get(self::PROBE);
+        if ($verdict === null) {
+            try {
+                Http::withOptions(Gateways::httpOptions())->connectTimeout(max(1, (int) ($c['server_probe_connect_seconds'] ?? 5)))
+                    ->timeout(max(1, (int) ($c['server_probe_timeout_seconds'] ?? 8)))->get($url);
+                $verdict = 'ok';
+            } catch (Throwable) {
+                $verdict = 'down';
+            }
+            Cache::put(self::PROBE, $verdict, self::PROBE_TTL);
+        }
+
+        return $verdict === 'down' ? $host . ' did not answer either' : null;
+    }
+
+    /**
+     * Spec 273: the checks right before a switch away from the gateway on no_answer, failed_sends or health. Our own
+     * server's network is down (serverSide): no switch, the problem is ours. A no_answer switch also takes one live look at
+     * the gateway (the same GET as health()); when it answers now, the strikes start over. Either way a "held" event with
+     * its reason (the server-side one at most once per HELD_TTL per page, as it repeats on every failing send).
+     */
+    private function heldBeforeSwitch(string $page, string $gw, string $condition, string $error): bool
+    {
+        if (!in_array($condition, ['no_answer', 'failed_sends', 'health'], true)) return false;
+        $l = Gateways::label($gw);
+        if (($why = $this->serverSide()) !== null) {
+            Log::warning('forbeast watch: held, server-side network problem', ['page' => $page, 'gateway' => $gw, 'condition' => $condition, 'why' => $why]);
+            if (Cache::add('forbeast-watch:held-server:' . sha1($this->settings->pageKey($page)), 1, self::HELD_TTL)) {
+                $this->event($page, self::HELD, null, $condition, 'Held: server-side network problem (' . $why . '); stayed on ' . $l . ' (' . $error . ')',
+                    ['gateway' => $gw, 'held' => 'server_side']);
+            }
+
+            return true;
+        }
+        // A gateway whose page GET answers while its sends stall would otherwise never be left: the live look holds a page
+        // at most recheck_max_holds times until a send gets through (0 = no live look).
+        $max = (int) config('services.gateway.auto_switch.recheck_max_holds');
+        if ($condition !== 'no_answer' || $max <= 0 || (int) Cache::get($this->counter($page, 'recheck', $gw), 0) >= $max) return false;
+        [$possible, $res] = $this->pageCheck($page, $gw);
+        if (!$possible || $res === null || !$res->successful() || $res->json('connected') === false || $res->json('can_send') === false) return false;
+        $this->bump($page, $gw, 'recheck');
+        $this->reset($page, $gw, 'no_answer', 'fails');
+        Log::warning('forbeast watch: held, gateway answered on re-check', ['page' => $page, 'gateway' => $gw]);
+        $this->event($page, self::HELD, null, $condition, 'Held: ' . $l . ' answered on re-check; stayed on ' . $l . ' (' . $error . ')', ['gateway' => $gw, 'held' => 'recheck']);
+
+        return true;
     }
 
     /** Ang bilang ng page sa isang gateway (ang sa forbeast ay ang dating susi, walang pangalan ng gateway). */

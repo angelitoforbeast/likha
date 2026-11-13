@@ -395,6 +395,15 @@ class SequenceSendPool extends TicketPool
                 }
                 $o = BotcakeOutbox::outcome(['http' => $status, 'body' => $body, 'attempts' => $job['attempt'] + 1], $job['secret']) + ['via' => ChatbotProvider::BOTCAKE];
             } else {
+                // Spec 273: the request never left (DNS, refused, connect timeout): one more try after a short wait, as
+                // nothing reached the gateway; a later failure counts as today.
+                if ($status === 0 && $job['attempt'] === 0 && $error !== null && GatewayProvider::connectPhase($d = GatewayProvider::noAnswer($error))) {
+                    GatewayProvider::logNoAnswer((string) $row->page_name, $job['req'], $d + ['retry' => true]);
+                    $this->jobs[$id]['attempt']++;
+                    $this->jobs[$id]['notBefore'] = $this->clock->now() + max(0, (int) config('services.gateway.auto_switch.connect_retry_ms')) / 1000;
+                    array_unshift($this->lanes[$job['lane']]['queue'], $id);
+                    return;
+                }
                 $r = ['http' => $status, 'body' => $body];
                 // Walang sagot: ang cURL error at mga oras, sa failure at sa log (gaya ng GatewayProvider::send).
                 if ($status === 0 && $error !== null) {

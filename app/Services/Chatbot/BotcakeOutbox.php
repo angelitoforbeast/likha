@@ -91,6 +91,12 @@ class BotcakeOutbox implements Outbox
      */
     public static function outcome(array $r, ?string $token = null): array
     {
+        // Spec 273: every Botcake send result is counted, so the gateway watcher can see when our own network is down.
+        try {
+            ForbeastWatch::botcakeSend((int) $r['http']);
+        } catch (Throwable $e) {
+            report($e);
+        }
         $body = is_array($r['body']) ? $r['body'] : [];
         if ($r['http'] >= 200 && $r['http'] < 300 && ($body['success'] ?? null) !== false) return ['status' => 'sent', 'error' => null, 'http' => $r['http']];
         $msg = BotcakeClient::messageText($body);

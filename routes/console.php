@@ -203,6 +203,12 @@ Schedule::command('chatbot:forbeast-watch')
     ->withoutOverlapping(10)
     ->runInBackground();
 
+// Spec 273: the CPU steal of this server every 5 minutes (two reads ~5 s apart), for the Problems panel's yellow line.
+Schedule::command('server:cpu-steal')
+    ->everyFiveMinutes()
+    ->withoutOverlapping(5)
+    ->runInBackground();
+
 // Ang usage ng chatbot AI papunta sa Forbeast ng bawat page (spec 210): kada minuto, isang job sa queue na "chatbot" (iisa
 // lang ang tumatakbo; ang hindi naipadala ay sa susunod). Ang load ng mga page (ChatbotAiLoad) ay sa chatbot:ai-load.
 Schedule::job(new \App\Jobs\SendChatbotAiUsage())
