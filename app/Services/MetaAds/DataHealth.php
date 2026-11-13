@@ -67,6 +67,8 @@ class DataHealth
         $ids    = array_values(array_unique(array_merge($apiIds, array_map('strval', array_keys($book)), array_map('strval', array_keys($upload)))));
         $names  = Connections::names(array_fill_keys(array_values(array_diff($ids, $apiIds, [''])), ''));
         $newFrom = $today->copy()->subDays(self::NEW_DAYS - 1)->format('Y-m-d');
+        // Incepxion: walang Meta Ads API connection (upload lang ang ads data), kaya walang "Not readable by API".
+        $apiOn   = $all !== [];
 
         $out = [];
         foreach ($ids as $id) {
@@ -80,7 +82,7 @@ class DataHealth
             // /ads_manager/ad_account).
             $status = match (true) {
                 !$hasY && ($u['prior'] ?? 0) > 0      => self::MISSING,
-                $hasY && !$inApi && $id !== ''        => self::NOT_READABLE,
+                $hasY && !$inApi && $id !== '' && $apiOn => self::NOT_READABLE,
                 $inApi && $first >= $newFrom          => self::NEW,
                 $hasY                                 => self::OK,
                 $inApi && !isset($selected[$id])      => self::UNTICKED,

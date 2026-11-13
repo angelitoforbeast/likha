@@ -70,6 +70,8 @@ class AdsDataHealthAfterUploadTest extends MetaAdsTestCase
 
     public function test_S_253_2_each_finished_upload_records_again_and_the_scheduled_run_still_records(): void
     {
+        // Incepxion: "Not readable by API" needs some API connection (none = upload only, see AdsDataHealthUploadOnlyTest).
+        $this->connect($this->user('Marketing', 'ben@example.test'), self::TOKEN_BEN, ['111'], ['connected_at' => '2026-10-01T09:00:00+08:00']);
         $this->upload([[self::YESTERDAY, 'u1', '333']]);
         $this->assertSame(1, DataHealth::last()['attention']);
 
