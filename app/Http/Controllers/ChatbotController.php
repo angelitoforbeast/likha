@@ -97,7 +97,7 @@ class ChatbotController extends Controller
         $pages = $this->pages();
 
         $byPage = PageSetting::where('active', true)->whereIn('provider', ['botcake', ChatbotFields::PROVIDER])
-            ->whereIn('key', array_merge(['page_id', \App\Services\ChatblastSetupCheck::CHECK_KEY, 'active', 'flow_id', 'provider', Gateways::KEY, ForbeastWatch::KEY], array_column($columns, 'key')))->orderBy('id')->get()
+            ->whereIn('key', array_merge(['page_id', \App\Services\ChatblastSetupCheck::CHECK_KEY, \App\Services\Chatbot\ImageFlow::CHECK_KEY, 'active', 'flow_id', 'provider', Gateways::KEY, ForbeastWatch::KEY], array_column($columns, 'key')))->orderBy('id')->get()
             ->groupBy(fn ($s) => $this->settings->pageKey($s->page_name));
         $stats = $this->chatStats();
         $flowNames = Schema::hasTable('chatbot_flows') ? \App\Models\ChatbotFlow::pluck('name', 'id') : collect();
@@ -130,10 +130,12 @@ class ChatbotController extends Controller
             $provider = ChatbotProvider::BOTCAKE;
             $providerRow = $autoSwitch = $gatewayRow = null;
             $forbeastBy = []; // botfield key => sino sa Forbeast ang huling sumulat ng kasalukuyang value
+            $imageFlow = null; // spec 274: the stored SEND IMAGE check as a badge (no Botcake call)
             $noShipping = null; // spec 271: ang kulang sa shipping status setup ayon sa huling check (naitala; walang tawag sa Botcake)
             foreach ($byPage[$this->settings->pageKey($page)] ?? [] as $s) {
                 if ($s->provider === 'botcake') {
                     if ($s->key === 'page_id') $pageId = (string) $s->plainValue();
+                    elseif ($s->key === \App\Services\Chatbot\ImageFlow::CHECK_KEY) $imageFlow = \App\Services\Chatbot\ImageFlow::badge((string) $s->plainValue());
                     elseif ($s->key === \App\Services\ChatblastSetupCheck::CHECK_KEY) {
                         $c = json_decode((string) $s->plainValue(), true);
                         $noShipping = is_array($c) && ($c['ok'] ?? null) === false ? (array_values(array_map('strval', (array) ($c['x'] ?? []))) ?: ['The setup check failed']) : null;
@@ -163,6 +165,8 @@ class ChatbotController extends Controller
                 'page' => $page, 'page_id' => $pageId, 'active' => $active, 'provider' => $provider, 'cells' => (object) $cells,
                 // Spec 271: ang mga dahilan kapag ok = false ang huling setup check (ang pulang "No shipping setup"); null kung hindi.
                 'no_shipping_setup' => $noShipping,
+                // Spec 274: how the bot sends images on this page (via flow or send_content, with the reasons); null = never checked.
+                'image_flow' => $imageFlow,
                 // Kusang lumipat sa Botcake, held o ibinalik sa Forbeast (ForbeastWatch), hanggang may magpalit nang mano-mano.
                 'auto_switched' => ForbeastWatch::note($autoSwitch, $providerRow, $provider, $gatewayRow),
                 // Aling gateway ang sumasagot kapag gateway ang provider, at ang mapipili (naka-set up at gumagana ang token ng page).

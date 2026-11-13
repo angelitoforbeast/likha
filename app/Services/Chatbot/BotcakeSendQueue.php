@@ -177,12 +177,15 @@ class BotcakeSendQueue
         else $q->where('status', 'pending');
         // Ang marka ng hindi maabot ay bago bitawan ang ticket: ang susunod na padala sa customer ay makikita na ito.
         if ($o['status'] === 'failed') CustomerReach::note($row->page_id, $row->psid, $o['error'], $o['raw'] ?? null);
+        // A send through the SEND IMAGE flow returns its messages with markers (ImageFlow::VIA): those are recorded.
+        $sent = isset($o['messages']) ? (array) $o['messages'] : null;
+        unset($o['messages']);
         $ok = $q->update(['status' => $o['status'] === 'failed' ? 'failed' : 'done', 'result' => json_encode($o, JSON_UNESCAPED_UNICODE),
             'error' => $o['error'] === null ? null : mb_substr($o['error'], 0, 255), 'http' => $o['http'], 'done_at' => now(), 'updated_at' => now()]);
         if ($ok !== 1) return false;
         $payload = (array) json_decode((string) $row->payload, true);
         BotcakeOutbox::record((int) $row->page_id, (int) $row->psid, $row->chat_id === null ? null : (int) $row->chat_id, $row->flow_id === null ? null : (int) $row->flow_id,
-            (string) $row->node_id, 'send', (array) ($payload['messages'] ?? []), $o['status'], $o['error'], $o['http'], $o['raw'] ?? null,
+            (string) $row->node_id, 'send', $sent ?? (array) ($payload['messages'] ?? []), $o['status'], $o['error'], $o['http'], $o['raw'] ?? null,
             is_array($payload['tags'] ?? null) ? $payload['tags'] : null, ChatbotProvider::BOTCAKE); // ang pool ay laging Botcake (send_content)
         ResumeChatbotSend::dispatch(self::ticket($row));
 
@@ -457,13 +460,15 @@ class BotcakeSendQueue
         if (!isset($o['route']) && isset($called['route'])) $o['route'] = $called['route'];
         // Gaya ng finishChatbot: ang marka bago bitawan ang ticket.
         if ($o['status'] === 'failed') CustomerReach::note($row->page_id, $row->psid, $o['error'], $o['raw'] ?? null);
+        $sent = isset($o['messages']) ? (array) $o['messages'] : null; // as in finishChatbot: the marked messages of a send by flow
+        unset($o['messages']);
         $ok = $q->update(['status' => $o['status'] === 'failed' ? 'failed' : 'done', 'result' => json_encode($o, JSON_UNESCAPED_UNICODE),
             'error' => $o['error'] === null ? null : mb_substr($o['error'], 0, 255), 'http' => $o['http'], 'done_at' => now(), 'updated_at' => now()]);
         if ($ok !== 1) return false;
         if (!isset($o['check'])) {
             $payload = (array) json_decode((string) $row->payload, true);
             BotcakeOutbox::record((int) $row->page_id, (int) $row->psid, null, $row->flow_id === null ? null : (int) $row->flow_id, (string) $row->node_id, 'send',
-                (array) ($payload['messages'] ?? []), $o['status'], $o['error'], $o['http'], $o['raw'] ?? null, is_array($payload['tags'] ?? null) ? $payload['tags'] : null,
+                $sent ?? (array) ($payload['messages'] ?? []), $o['status'], $o['error'], $o['http'], $o['raw'] ?? null, is_array($payload['tags'] ?? null) ? $payload['tags'] : null,
                 $o['via'], $o['ref'], $o['route'] ?? null);
         }
         ResumeChatbotSequenceSend::dispatch(self::sequenceTicket($row));

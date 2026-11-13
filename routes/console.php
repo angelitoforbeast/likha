@@ -150,6 +150,14 @@ Schedule::command('botcake:accounts-check')
     ->dailyAt('05:10')
     ->withoutOverlapping(30);
 
+// SEND IMAGE setup check (spec 274): once a day, early morning Manila, after the accounts check; one page after another
+// on each page's setup lane. Bot images go by the flow only on pages whose stored check is OK.
+Schedule::command('botcake:image-flow-check --all')
+    ->timezone('Asia/Manila')
+    ->dailyAt('05:20')
+    ->withoutOverlapping(60)
+    ->runInBackground();
+
 // J&T waybill labels kept after booking (spec 269): 14 days only. 04:30 Manila, after the 04:20 and 04:25 prunes.
 Schedule::command('jnt:prune-labels')
     ->timezone('Asia/Manila')

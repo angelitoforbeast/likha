@@ -450,6 +450,8 @@ Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('chatblast/page-setting
     Route::get('/setup/progress', [PageSettingController::class, 'setupProgress'])->name('setup.progress');
     Route::get('/history', [PageSettingController::class, 'history'])->name('history');
     Route::get('/page-check', [PageSettingController::class, 'pageCheck'])->middleware('throttle:30,1')->name('page-check');
+    // Spec 274: the SEND IMAGE setup check of one page (Check again).
+    Route::post('/image-check', [PageSettingController::class, 'imageCheck'])->middleware('throttle:20,1,page-settings-image-check')->name('image-check');
     Route::post('/{id}/deactivate', [PageSettingController::class, 'deactivate'])->whereNumber('id')->name('deactivate');
     Route::post('/test-token', [PageSettingController::class, 'testToken'])->middleware('throttle:20,1,page-settings-test-token')->name('test-token');
     Route::post('/test-token/one', [PageSettingController::class, 'testTokenJson'])->middleware('throttle:120,1,page-settings-test-one')->name('test-token-one');

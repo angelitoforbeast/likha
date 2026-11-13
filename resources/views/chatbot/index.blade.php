@@ -467,6 +467,26 @@
             el('ul', {class: 'mt-0.5 list-disc pl-4 text-red-700'}, b.reasons.map(t => el('li', {class: 'break-words', text: t}))),
         ]);
     }
+    // Spec 274: how the bot sends images on the page, from the stored SEND IMAGE check (no Botcake call on page load).
+    // image-badge:start
+    function imageBadge(f) {
+        if (!f || typeof f !== 'object') return null;
+        const reasons = Array.isArray(f.reasons) ? f.reasons.map(String) : [];
+        const at = f.at ? ' (checked ' + f.at + ')' : '';
+        return f.ok ? {text: 'Image: via flow', ok: true, title: 'Bot images go through the SEND IMAGE flow' + at, reasons}
+            : {text: 'Image: send_content', ok: false, title: 'Bot images go by send_content: ' + (reasons.join('; ') || 'not set up') + at, reasons};
+    }
+    // image-badge:end
+    function imageBadgeEl(r) {
+        const b = imageBadge(r ? r.image_flow : null);
+        if (!b) return null;
+        return el('details', {class: 'mt-0.5 text-xs font-normal', 'data-image-flow': b.ok ? 'flow' : 'send_content'}, [
+            el('summary', {class: 'inline-block cursor-pointer rounded px-1 text-[11px] font-semibold focus:outline-none focus-visible:ring-2 '
+                + (b.ok ? 'bg-green-600 text-white focus-visible:ring-green-400' : 'bg-slate-200 text-slate-700 focus-visible:ring-slate-400'), title: b.title, text: b.text}),
+            b.reasons.length ? el('ul', {class: 'mt-0.5 list-disc pl-4 text-slate-600'}, b.reasons.map(t => el('li', {class: 'break-words', text: t})))
+                : el('div', {class: 'mt-0.5 text-slate-500', text: b.title}),
+        ]);
+    }
     function fbAnchor(r) {
         const a = r ? fbLink(r.page_id, r.page) : null;
         if (!a) return '';
@@ -886,7 +906,7 @@
         // lang, ang pag-ayos ay sa Edit (Manage in Edit).
         const subs = subRowsOf(r);
         return [el('tr', {'data-page': r.page}, [
-            el('td', {class: 'stick-1 border-b border-slate-100 px-3 py-2 align-top font-medium break-words'}, [pickBox(r), r.page, fbAnchor(r), shippingBadgeEl(r), el('div', {class: 'font-mono text-xs text-slate-400', text: r.page_id || ''}),
+            el('td', {class: 'stick-1 border-b border-slate-100 px-3 py-2 align-top font-medium break-words'}, [pickBox(r), r.page, fbAnchor(r), shippingBadgeEl(r), imageBadgeEl(r), el('div', {class: 'font-mono text-xs text-slate-400', text: r.page_id || ''}),
                 el('div', {class: 'flex flex-wrap gap-1'}, [editButton(r), previewButton(r), url.connectionsUrl ? connectionsButton(r) : null]), replyControl(r)]),
             activeCell(r),
             cell(r, columns.find(c => c.key === 'flow'), 'stick-3'),
