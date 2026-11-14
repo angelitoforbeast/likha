@@ -2,7 +2,7 @@
 
 namespace App\Console\Commands;
 
-use App\Services\Chatbot\BotcakeSendPool;
+use App\Services\Chatbot\BotcakeReplyPool;
 use Illuminate\Console\Command;
 
 /**
