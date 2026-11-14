@@ -116,8 +116,18 @@ class CPPController extends Controller
 
         // 2) ORDERS (filtered; engine-specific)
         $driver = DB::connection()->getDriverName(); // mysql | pgsql | etc.
+        // macro_output.ts_date is the order's date (the same as the TIMESTAMP's, empty TIMESTAMP = null) and is indexed:
+        // filtering on it reads only the range. Parsing TIMESTAMP in the WHERE read all ~2M orders (67 s for 7 days, a 504).
+        $tsCol = $driver !== 'sqlite' && Schema::hasColumn('macro_output', 'ts_date');
 
-        if ($driver === 'mysql') {
+        if ($tsCol) {
+            $q = $driver === 'pgsql' ? '"' : '`';
+            $orderRows = MacroOutput::query()
+                ->selectRaw("{$q}ts_date{$q} AS ts_date, {$q}PAGE{$q}, {$q}ITEM_NAME{$q}, {$q}COD{$q}, {$q}STATUS{$q}" . ($orderAdCol ? ", {$q}botcake_ad_id{$q}" : '') . ($withFreshness ? ", {$q}TIMESTAMP{$q}" : ''))
+                ->whereBetween('ts_date', [$start, $end])
+                ->get()
+                ->each(function ($row) { $row->ts_date = substr((string) $row->ts_date, 0, 10); });
+        } elseif ($driver === 'mysql') {
             $orderRows = MacroOutput::query()
                 ->selectRaw("DATE(STR_TO_DATE(`TIMESTAMP`, '%H:%i %d-%m-%Y')) AS ts_date, `PAGE`, `ITEM_NAME`, `COD`, `STATUS`" . ($orderAdCol ? ', `botcake_ad_id`' : '') . ($withFreshness ? ', `TIMESTAMP`' : ''))
                 ->whereRaw("DATE(STR_TO_DATE(`TIMESTAMP`, '%H:%i %d-%m-%Y')) BETWEEN ? AND ?", [$start, $end])
@@ -588,9 +598,11 @@ class CPPController extends Controller
             $tsDate = "DATE(STR_TO_DATE(`TIMESTAMP`, '%H:%i %d-%m-%Y'))";
             $tsMins = "(HOUR(STR_TO_DATE(`TIMESTAMP`, '%H:%i %d-%m-%Y')) * 60 + MINUTE(STR_TO_DATE(`TIMESTAMP`, '%H:%i %d-%m-%Y')))";
 
+            // The range on the indexed ts_date (the same date as the TIMESTAMP's); the minute still comes from TIMESTAMP.
+            $byTs = Schema::hasColumn('macro_output', 'ts_date');
             $orderRows = DB::table('macro_output')
                 ->selectRaw("$tsDate AS ts_date, $moPageExpr AS pk, $tsMins AS ts_min, COUNT(*) AS n")
-                ->whereRaw("$tsDate BETWEEN ? AND ?", [$start, $end])
+                ->when($byTs, fn ($q) => $q->whereBetween('ts_date', [$start, $end]), fn ($q) => $q->whereRaw("$tsDate BETWEEN ? AND ?", [$start, $end]))
                 ->groupByRaw("$tsDate, $moPageExpr, $tsMins")
                 ->get();
         } elseif ($driver === 'pgsql') {
@@ -598,9 +610,10 @@ class CPPController extends Controller
             $tsDate = "$tsExpr::date";
             $tsMins = "(EXTRACT(HOUR FROM $tsExpr) * 60 + EXTRACT(MINUTE FROM $tsExpr))";
 
+            $byTs = Schema::hasColumn('macro_output', 'ts_date');
             $orderRows = DB::table('macro_output')
                 ->selectRaw("$tsDate AS ts_date, $moPageExpr AS pk, $tsMins AS ts_min, COUNT(*) AS n")
-                ->whereRaw("$tsDate BETWEEN ? AND ?", [$start, $end])
+                ->when($byTs, fn ($q) => $q->whereBetween('ts_date', [$start, $end]), fn ($q) => $q->whereRaw("$tsDate BETWEEN ? AND ?", [$start, $end]))
                 ->groupByRaw("$tsDate, $moPageExpr, $tsMins")
                 ->get();
         } else {

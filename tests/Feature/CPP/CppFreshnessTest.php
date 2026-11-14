@@ -267,7 +267,8 @@ class CppFreshnessTest extends ChatblastTestCase
             DB::setDefaultConnection('sqlite');
         }
 
-        $orders = array_values(array_filter($log, fn ($q) => stripos($q['query'], 'macro_output') !== false));
+        // Queries that read the table (the column check on the schema names it too, but reads no order).
+        $orders = array_values(array_filter($log, fn ($q) => preg_match('/from\s+[`"]?macro_output[`"]?/i', $q['query']) === 1));
         $this->assertCount(1, $orders, 'one query reads macro_output: ' . json_encode(array_column($log, 'query')));
         $this->assertStringNotContainsStringIgnoringCase('max(', $orders[0]['query']);
         $this->assertMatchesRegularExpression('/,\s*[`"]TIMESTAMP[`"]\s*(,|from)/i', $orders[0]['query'], 'the orders query selects TIMESTAMP as a column');
