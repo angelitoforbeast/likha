@@ -58,6 +58,16 @@ class BotcakeSendPool extends TicketPool
         return max(1, (int) config('services.botcake.send_concurrency', 100));
     }
 
+    /**
+     * Chatblast tickets at once (services.botcake.chatblast_in_flight, default 30, never above max()). An hourly Delivering
+     * run hands the pool thousands of three-call sends at once; with 100 of them in flight the bot's replies slowed on
+     * every page, so the rest of the pool stays for the replies.
+     */
+    public function blastMax(): int
+    {
+        return max(1, min($this->max(), (int) config('services.botcake.chatblast_in_flight', 30)));
+    }
+
     protected function nowMs(): int
     {
         return (int) round($this->clock->now() * 1000);
@@ -80,7 +90,7 @@ class BotcakeSendPool extends TicketPool
             // Ang sagot ng bot at ang chatblast ay may kanya-kanyang max() na puwesto: ang chatblast na puno ang pool ay hindi
             // humaharang sa pagkuha ng sagot (nauuna sila sa claim ayon sa priority).
             $bots = count(array_filter($this->jobs, fn (array $job) => self::bot($job['row'])));
-            $blasts = max(0, $this->max() - (count($this->jobs) - $bots));
+            $blasts = max(0, $this->blastMax() - (count($this->jobs) - $bots));
             $n = max(0, $this->max() - $bots) + $blasts;
             $started = count(BotcakeSendQueue::claim($this->owner, $n, fn (object $c) => $this->room($c), fn (object $row) => $this->take($row), $this->fullPages(false), $this->fullPages(true), $blasts === 0));
         }
@@ -117,7 +127,7 @@ class BotcakeSendPool extends TicketPool
             if ($job['lane'] === $lane) $held++;
         }
 
-        return $all < $this->max() && $held < $this->perPage();
+        return $all < ($bot ? $this->max() : $this->blastMax()) && $held < $this->perPage();
     }
 
     /** @return array<int, string> ang mga page na puno na ang lane para sa sagot ng bot ($bots) o sa chatblast */

@@ -158,6 +158,8 @@ return [
         'async_sends' => (bool) env('BOTCAKE_ASYNC_SENDS', true),
         // Ilang request sa Botcake nang sabay sa botcake:send-pool (lahat ng page), tig-isang ganito ang sagot ng bot at ang chatblast.
         'send_concurrency' => (int) env('BOTCAKE_SEND_CONCURRENCY', 100),
+        // Ilang chatblast ang sabay sa send pool (hindi lalampas sa send_concurrency): ang natitira ay laging para sa sagot ng bot.
+        'chatblast_in_flight' => (int) env('BOTCAKE_CHATBLAST_IN_FLIGHT', 30),
         // Ilang segundo ng padala kada page ang puwedeng hawak nang sabay (ticket = segundo × rate_per_page). Ang ticket ay
         // hawak hanggang sumagot ang Botcake: 10 s ay sapat kahit 7 s ang sagot ng Botcake sa peak.
         'lane_seconds' => (float) env('BOTCAKE_LANE_SECONDS', 3),

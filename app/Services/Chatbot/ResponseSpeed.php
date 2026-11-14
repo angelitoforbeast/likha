@@ -60,6 +60,9 @@ class ResponseSpeed
     /** Ang kahapon ay halos hindi na nagbabago: pinapainit ulit kapag ganito na katagal ang huling init nito. */
     public const YESTERDAY_WARM_SECONDS = 1200;
     public const WARM_STAMP_KEY = 'response-speed:warmed:';
+    /** The Sequences section is pre-warmed at most this often per day (and kept that long). */
+    public const SEQUENCES_WARM_SECONDS = 1800;
+    public const SEQUENCES_WARM_STAMP_KEY = 'response-speed:seq-warmed:';
 
     public function output(array $q): array
     {
@@ -207,8 +210,15 @@ class ResponseSpeed
             $ok = false;
         }
         // Ang error sa loob ng Sequences ay nagiging too_large (hindi isinusulat ng warm); ang try ay para sa pagsulat sa cache.
+        // The Sequences section is the heaviest read of the page (10-13 min a day on Incepxion): the pre-warm builds it at
+        // most once per SEQUENCES_WARM_SECONDS per day, also when it came out too large, and keeps it that long. Every
+        // 2 minutes it held the database the reply sends use.
+        $stamp = self::SEQUENCES_WARM_STAMP_KEY . $date;
+        $at = Cache::get($stamp);
+        if (is_int($at) && now()->getTimestamp() - $at < self::SEQUENCES_WARM_SECONDS) return $ok;
+        Cache::put($stamp, now()->getTimestamp(), self::SEQUENCES_WARM_SECONDS + self::WARM_GRACE_SECONDS);
         try {
-            $seq = $this->sequencesDay($f, $today, self::WARM_GRACE_SECONDS);
+            $seq = $this->sequencesDay($f, $today, self::SEQUENCES_WARM_SECONDS + self::WARM_GRACE_SECONDS);
             $out[empty($seq['too_large']) ? 'warmed' : 'too_large'][] = $date . ' sequences';
         } catch (\Throwable $e) {
             report($e);

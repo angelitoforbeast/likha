@@ -26,6 +26,8 @@ abstract class ChatblastTestCase extends BotcakeApiTestCase
         config(['services.botcake.chatblast_read_back' => true]);
         // These cases were written when a page held 3 seconds of sends; the 10 s default has its own test.
         config(['services.botcake.lane_seconds' => 3]);
+        // ... and when chatblast could fill the whole pool; the 30 default has its own test.
+        config(['services.botcake.chatblast_in_flight' => 100000]);
         // Spec 273: the gateway watcher's probe of our own network before a switch answers here (no real call); a test
         // that wants it failing points server_probe_url elsewhere and fakes that (the first matching fake wins).
         \Illuminate\Support\Facades\Http::fake([(string) config('services.gateway.auto_switch.server_probe_url') => \Illuminate\Support\Facades\Http::response('', 200)]);

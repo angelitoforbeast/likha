@@ -486,6 +486,23 @@ class BotcakeAsyncSendTest extends ChatblastTestCase
         $this->assertSame($continues ? 'yes' : null, (new CustomerFields(1001, 7001))->get('done'), 'a pause stops the run; the switch skips as before');
     }
 
+    public function test_chatblast_takes_at_most_chatblast_in_flight_tickets_and_a_reply_still_gets_in(): void
+    {
+        config(['services.botcake.chatblast_in_flight' => 3, 'services.botcake.lane_seconds' => 100]);
+        for ($i = 1; $i <= 20; $i++) $this->blast((string) (7100 + $i));
+        $this->echoFlow('Page Dos');
+        $this->says('hi', '8001', '1002', 'Page Dos');
+
+        $this->pool->tick();
+
+        $this->assertSame(3, DB::table(BotcakeSendQueue::TABLE)->where('kind', 'chatblast')->where('status', 'sending')->count(), 'only 3 chatblast at once');
+        $this->assertTrue(collect($this->calls)->contains(fn ($c) => self::req($c)['psid'] === '8001'), 'the reply goes out at once');
+        $this->assertSame(3, $this->pool->blastMax());
+
+        config(['services.botcake.chatblast_in_flight' => 500, 'services.botcake.send_concurrency' => 100]);
+        $this->assertSame(100, $this->pool->blastMax(), 'never above the pool');
+    }
+
     public function test_S_089_13_a_big_chatblast_on_one_page_never_holds_up_the_chatbot_on_other_pages(): void
     {
         for ($i = 1; $i <= 40; $i++) $this->blast((string) (7100 + $i));
