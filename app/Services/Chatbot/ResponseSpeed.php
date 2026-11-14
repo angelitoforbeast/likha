@@ -433,12 +433,15 @@ class ResponseSpeed
     private function volume(array $f, string $start, string $end, int $nowHour, array $hours, array $push, array $names): array
     {
         $hourOf = fn (object $r) => (int) $r->h;
+        // Sequence steps: one range read per sequence on the (sequence_id, sent_at) index, counted from the index alone (every
+        // step send, sent or not). Filtering status over the whole day read ~1.5M rows (325 s on Incepxion, every 2 minutes).
         $sequences = array_fill(0, 24, 0);
-        $q = DB::table('chatbot_replies')->where('kind', 'send')->whereIn('status', SendStatus::DELIVERED)->whereNotNull('sequence_id')
-            ->where('sent_at', '>=', $start)->where('sent_at', '<', $end)
-            ->when($f['page_id'] !== null, fn ($q) => $q->where('page_id', (int) $f['page_id']));
-        if (Schema::hasColumn('chatbot_replies', 'sequence_id')) {
-            foreach ($q->selectRaw('substr(sent_at, 12, 2) as h, count(*) as n')->groupByRaw('substr(sent_at, 12, 2)')->get() as $r) $sequences[$hourOf($r)] = (int) $r->n;
+        if (Schema::hasColumn('chatbot_replies', 'sequence_id') && Schema::hasTable('chatbot_sequences')) {
+            foreach (DB::table('chatbot_sequences')->pluck('id') as $seqId) {
+                foreach (DB::table('chatbot_replies')->where('sequence_id', $seqId)->where('sent_at', '>=', $start)->where('sent_at', '<', $end)
+                    ->when($f['page_id'] !== null, fn ($q) => $q->where('page_id', (int) $f['page_id']))
+                    ->selectRaw('substr(sent_at, 12, 2) as h, count(*) as n')->groupByRaw('substr(sent_at, 12, 2)')->get() as $r) $sequences[$hourOf($r)] += (int) $r->n;
+            }
         }
         $blast = [];
         if (Schema::hasTable('botcake_messages')) {

@@ -169,8 +169,8 @@ class SpeedNotSentTest extends ChatblastTestCase
         });
         $this->out();
         // Ngayon at ang naunang araw: 48 oras ng padala bawat isa (ang araw at ang 24 oras na hangganan), walang query kada mensahe,
-        // at isang bilang ng sequence steps kada araw para sa Volume.
-        $this->assertSame(98, $n);
+        // at ang Volume ay isang basa kada sequence (walang sequence ang fixture na ito).
+        $this->assertSame(96, $n);
     }
 
     public function test_S_201_9_the_not_sent_list_newest_first_with_page_bot_error_attempts_and_inbox_link(): void

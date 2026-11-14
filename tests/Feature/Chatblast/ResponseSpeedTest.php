@@ -135,6 +135,7 @@ class ResponseSpeedTest extends ChatblastTestCase
         $blast('Page Dos', 'in_transit', 'sent', '2026-10-21 10:43:00', true);  // a test send: not counted
         $blast('Page Dos', 'in_transit', 'sent', '2026-10-20 10:40:00');        // another day
 
+        DB::table('chatbot_sequences')->insert(['id' => 5, 'name' => 'Follow-up', 'active' => 1, 'created_at' => '2026-10-01 00:00:00', 'updated_at' => '2026-10-01 00:00:00']); // the step seeded at 10:30 belongs to it
         $v = $this->out()['volume'];
 
         // 10:00: four chats came in (three on the bot, one on Page Tres without a flow; the ignored and the standby copy
