@@ -59,7 +59,7 @@ class BotcakeSendPool extends TicketPool
     }
 
     /**
-     * Chatblast tickets at once (services.botcake.chatblast_in_flight, default 30, never above max()). An hourly Delivering
+     * Chatblast tickets at once (services.botcake.chatblast_in_flight, default 60, never above max()). An hourly Delivering
      * run hands the pool thousands of three-call sends at once; with 100 of them in flight the bot's replies slowed on
      * every page, so the rest of the pool stays for the replies.
      */
