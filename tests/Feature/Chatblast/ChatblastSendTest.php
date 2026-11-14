@@ -62,6 +62,18 @@ class ChatblastSendTest extends ChatblastTestCase
         return collect(Http::recorded())->map(fn ($r) => $r[0]->method() . ' ' . str_replace('/api/public_api/v1/pages/1001', '', parse_url($r[0]->url(), PHP_URL_PATH)))->all();
     }
 
+    public function test_by_default_a_real_send_writes_and_sends_without_reading_back_two_calls(): void
+    {
+        config(['services.botcake.chatblast_read_back' => false]);
+        $this->botcake();
+
+        $row = $this->send($this->row());
+
+        $this->assertSame(['POST /customer/psid-a/customer_fields', 'POST /flows/send_flow'], $this->calls());
+        $this->assertSame(['sent', 200], [$row->status, $row->last_http]);
+        $this->assertSame(['write', 'flow'], array_column($row->steps, 'step'));
+    }
+
     public function test_a_message_is_written_read_back_and_sent_and_every_step_is_recorded_without_the_token(): void
     {
         $this->botcake();

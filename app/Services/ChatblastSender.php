@@ -503,7 +503,10 @@ class ChatblastSender
         // 2. Basahin ulit: dapat eksaktong ang text ang laman, kung hindi ay walang padala.
         // A broadcast row skips the read-back: two calls per customer instead of three, so a page sends half again as
         // many per minute; the write's success:true is its check. In-transit and Delivering chatblast still read back.
-        if ($m->kind !== Broadcast::KIND) {
+        // A real in-transit or delivering send skips it too unless services.botcake.chatblast_read_back is on: every call
+        // counts against the page's Botcake rate shared with the bot's replies, and 2 of 450,856 sends ever failed the check.
+        // A test send still reads back: it is what proves a page's setup.
+        if ($m->kind !== Broadcast::KIND && ($m->is_test || config('services.botcake.chatblast_read_back', false))) {
             $r = yield from $step('read', 'GET', $field, []);
             if ($authFail($r)) { $this->tokenInvalid($m, $r['http'], $steps); return; }
             $value = $this->fieldValue($r['body'], $cfg['field.message']);

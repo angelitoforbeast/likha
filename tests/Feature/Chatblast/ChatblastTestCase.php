@@ -21,6 +21,9 @@ abstract class ChatblastTestCase extends BotcakeApiTestCase
     protected function setUp(): void
     {
         parent::setUp();
+        // These cases were written with the read-back before every send_flow; the default (off) has its own test in
+        // ChatblastSendTest.
+        config(['services.botcake.chatblast_read_back' => true]);
         // Spec 273: the gateway watcher's probe of our own network before a switch answers here (no real call); a test
         // that wants it failing points server_probe_url elsewhere and fakes that (the first matching fake wins).
         \Illuminate\Support\Facades\Http::fake([(string) config('services.gateway.auto_switch.server_probe_url') => \Illuminate\Support\Facades\Http::response('', 200)]);
