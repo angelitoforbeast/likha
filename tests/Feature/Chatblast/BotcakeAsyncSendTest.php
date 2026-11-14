@@ -486,6 +486,40 @@ class BotcakeAsyncSendTest extends ChatblastTestCase
         $this->assertSame($continues ? 'yes' : null, (new CustomerFields(1001, 7001))->get('done'), 'a pause stops the run; the switch skips as before');
     }
 
+    public function test_with_the_reply_pool_alive_replies_and_chatblast_go_through_separate_pools(): void
+    {
+        for ($i = 1; $i <= 5; $i++) $this->blast((string) (7100 + $i));
+        $this->echoFlow('Page Dos');
+        $this->says('hi', '8001', '1002', 'Page Dos');
+
+        $replies = new \App\Services\Chatbot\BotcakeReplyPool(function (RequestInterface $req, array $options) {
+            $p = new Promise();
+            $this->calls[] = ['req' => $req, 'p' => $p, 't' => $this->clock->now(), 'timeout' => $options['timeout'] ?? null];
+
+            return $p;
+        }, $this->clock);
+        $this->assertTrue($replies->start(), 'its own heartbeat: it starts beside botcake:send-pool');
+        $this->assertTrue(\App\Services\Chatbot\BotcakeReplyPool::alive());
+
+        $this->pool->tick();
+        $sending = fn (string $kind) => DB::table(BotcakeSendQueue::TABLE)->where('kind', $kind)->where('status', 'sending')->count();
+        $this->assertSame(0, $sending('chatbot'), 'the send pool leaves the reply to the reply pool');
+        $this->assertGreaterThan(0, $sending('chatblast'), 'the send pool takes the chatblast');
+
+        $replies->tick();
+        $this->assertSame(1, $sending('chatbot'), 'the reply pool takes the reply');
+        $this->assertTrue(collect($this->calls)->contains(fn ($c) => self::req($c)['psid'] === '8001'), 'and sends it');
+        $this->assertSame($sending('chatblast'), DB::table(BotcakeSendQueue::TABLE)->where('kind', 'chatblast')->where('status', 'sending')->where('claimed_by', '!=', null)->count());
+
+        // Without the reply pool the send pool takes the replies again.
+        $replies->stop();
+        $this->assertFalse(\App\Services\Chatbot\BotcakeReplyPool::alive());
+        $this->travel(2)->seconds();
+        $this->says('again', '8002', '1002', 'Page Dos');
+        $this->pool->tick();
+        $this->assertTrue(DB::table(BotcakeSendQueue::TABLE)->where('kind', 'chatbot')->where('psid', '8002')->where('status', 'sending')->exists(), 'the send pool takes 8002');
+    }
+
     public function test_chatblast_takes_at_most_chatblast_in_flight_tickets_and_a_reply_still_gets_in(): void
     {
         config(['services.botcake.chatblast_in_flight' => 3, 'services.botcake.lane_seconds' => 100]);

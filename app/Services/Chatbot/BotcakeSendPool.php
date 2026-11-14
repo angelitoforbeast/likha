@@ -87,13 +87,19 @@ class BotcakeSendPool extends TicketPool
     {
         $started = 0;
         $t0 = microtime(true);
-        if ($claim) {
+        if ($claim && $this->onlyReplies()) {
+            // botcake:reply-pool: the bot's replies only, in a loop that chatblast never weighs down.
+            $n = max(0, $this->max() - count($this->jobs));
+            $started = count(BotcakeSendQueue::claim($this->owner, $n, fn (object $c) => $this->room($c), fn (object $row) => $this->take($row), [], $this->fullPages(true), true));
+        } elseif ($claim) {
             // Ang sagot ng bot at ang chatblast ay may kanya-kanyang max() na puwesto: ang chatblast na puno ang pool ay hindi
-            // humaharang sa pagkuha ng sagot (nauuna sila sa claim ayon sa priority).
+            // humaharang sa pagkuha ng sagot (nauuna sila sa claim ayon sa priority). While botcake:reply-pool is alive it
+            // takes the replies and this pool only the chatblast; without it this pool takes both, as before.
+            $replyPool = $this->replyPoolAlive();
             $bots = count(array_filter($this->jobs, fn (array $job) => self::bot($job['row'])));
             $blasts = max(0, $this->blastMax() - (count($this->jobs) - $bots));
-            $n = max(0, $this->max() - $bots) + $blasts;
-            $started = count(BotcakeSendQueue::claim($this->owner, $n, fn (object $c) => $this->room($c), fn (object $row) => $this->take($row), $this->fullPages(false), $this->fullPages(true), $blasts === 0));
+            $n = ($replyPool ? 0 : max(0, $this->max() - $bots)) + $blasts;
+            $started = count(BotcakeSendQueue::claim($this->owner, $n, fn (object $c) => $this->room($c), fn (object $row) => $this->take($row), $this->fullPages(false), $this->fullPages(true), !$replyPool && $blasts === 0, false, $replyPool));
         }
         $t1 = microtime(true);
         $this->lanes();
@@ -104,6 +110,23 @@ class BotcakeSendPool extends TicketPool
         $this->clock($t1 - $t0, ($t2 - $t1) + (microtime(true) - $t3), $t3 - $t2);
 
         return $started;
+    }
+
+    /** true in botcake:reply-pool (BotcakeReplyPool): it claims the bot's replies only. */
+    protected function onlyReplies(): bool
+    {
+        return false;
+    }
+
+    private ?array $replyPoolSeen = null;
+
+    /** Is botcake:reply-pool alive (its heartbeat, read at most once a second)? */
+    private function replyPoolAlive(): bool
+    {
+        $now = now()->getPreciseTimestamp(3) / 1000;
+        if ($this->replyPoolSeen === null || abs($now - $this->replyPoolSeen[0]) >= 1) $this->replyPoolSeen = [$now, BotcakeReplyPool::alive()];
+
+        return $this->replyPoolSeen[1];
     }
 
     /** Loop timings since the last heartbeat (ms): where a slow round goes, read from the heartbeat (Cache BEAT). */

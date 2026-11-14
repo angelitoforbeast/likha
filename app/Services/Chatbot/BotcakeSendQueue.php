@@ -116,7 +116,7 @@ class BotcakeSendQueue
      * ng chatblast ang pool, kaya ang mga sagot lang ang hinahanap (hindi binabasa ang daan-daang chatblast kada ikot).
      * @return array<int, object>
      */
-    public static function claim(string $owner, int $n, ?callable $accept = null, ?callable $then = null, array $fullPages = [], array $fullForReplies = [], bool $repliesOnly = false, bool $sequence = false): array
+    public static function claim(string $owner, int $n, ?callable $accept = null, ?callable $then = null, array $fullPages = [], array $fullForReplies = [], bool $repliesOnly = false, bool $sequence = false, bool $blastsOnly = false): array
     {
         if ($n <= 0) return [];
         $t = self::TABLE;
@@ -127,6 +127,7 @@ class BotcakeSendQueue
             ->when($fullPages, fn ($q) => $q->where(fn ($w) => $w->where('t.priority', 0)->orWhereNotIn('t.page_name', $fullPages)))
             ->when($fullForReplies, fn ($q) => $q->where(fn ($w) => $w->where('t.priority', '>', 0)->orWhereNotIn('t.page_name', $fullForReplies)))
             ->when($repliesOnly, fn ($q) => $q->where('t.priority', 0))
+            ->when($blastsOnly, fn ($q) => $q->where('t.priority', '>', 0)) // the replies are botcake:reply-pool's
             // Ang sequence ticket ay sa chatbot:sequence-pool lang; ang botcake:send-pool ay hindi kailanman kumukuha nito.
             ->where('t.priority', $sequence ? '=' : '<', self::SEQUENCE_PRIORITY)
             ->whereNotExists(fn ($q) => $q->select(DB::raw(1))->from("$t as o")->whereColumn('o.customer', 't.customer')->whereColumn('o.id', '<', 't.id')
