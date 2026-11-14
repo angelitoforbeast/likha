@@ -86,6 +86,7 @@ class BotcakeSendPool extends TicketPool
     public function tick(bool $claim = true): int
     {
         $started = 0;
+        $t0 = microtime(true);
         if ($claim) {
             // Ang sagot ng bot at ang chatblast ay may kanya-kanyang max() na puwesto: ang chatblast na puno ang pool ay hindi
             // humaharang sa pagkuha ng sagot (nauuna sila sa claim ayon sa priority).
@@ -94,11 +95,29 @@ class BotcakeSendPool extends TicketPool
             $n = max(0, $this->max() - $bots) + $blasts;
             $started = count(BotcakeSendQueue::claim($this->owner, $n, fn (object $c) => $this->room($c), fn (object $row) => $this->take($row), $this->fullPages(false), $this->fullPages(true), $blasts === 0));
         }
+        $t1 = microtime(true);
         $this->lanes();
+        $t2 = microtime(true);
         $this->pump();
+        $t3 = microtime(true);
         $this->lanes();
+        $this->clock($t1 - $t0, ($t2 - $t1) + (microtime(true) - $t3), $t3 - $t2);
 
         return $started;
+    }
+
+    /** Loop timings since the last heartbeat (ms): where a slow round goes, read from the heartbeat (Cache BEAT). */
+    private array $timing = ['ticks' => 0, 'claim' => 0.0, 'claim_max' => 0.0, 'lanes' => 0.0, 'lanes_max' => 0.0, 'pump' => 0.0, 'pump_max' => 0.0];
+
+    private function clock(float $claim, float $lanes, float $pump): void
+    {
+        $t = &$this->timing;
+        $t['ticks']++;
+        foreach (['claim' => $claim, 'lanes' => $lanes, 'pump' => $pump] as $k => $s) {
+            $ms = $s * 1000;
+            $t[$k] += $ms;
+            if ($ms > $t[$k . '_max']) $t[$k . '_max'] = $ms;
+        }
     }
 
     /** Sagot ng bot (priority 0), hindi chatblast. */
@@ -509,7 +528,13 @@ class BotcakeSendPool extends TicketPool
     /** Ang bersyong ito ay hindi kumukuha ng sequence ticket (chatbot:sequence-pool ang nagpapadala nito). */
     protected function beatInfo(): array
     {
-        return ['excludes_sequence' => 1];
+        $t = $this->timing;
+        $n = max(1, $t['ticks']);
+        $this->timing = ['ticks' => 0, 'claim' => 0.0, 'claim_max' => 0.0, 'lanes' => 0.0, 'lanes_max' => 0.0, 'pump' => 0.0, 'pump_max' => 0.0];
+
+        return ['excludes_sequence' => 1, 'jobs' => count($this->jobs), 'ticks' => $t['ticks'],
+            'ms' => ['claim' => round($t['claim'] / $n, 1), 'claim_max' => round($t['claim_max']), 'lanes' => round($t['lanes'] / $n, 1),
+                'lanes_max' => round($t['lanes_max']), 'pump' => round($t['pump'] / $n, 1), 'pump_max' => round($t['pump_max'])]];
     }
 
     /** Patay ang pool, o buhay at iniiwan ang sequence ticket: ligtas ipasa ang sequence step sa chatbot:sequence-pool. */
