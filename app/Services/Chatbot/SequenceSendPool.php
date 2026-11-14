@@ -140,10 +140,10 @@ class SequenceSendPool extends TicketPool
         return $started;
     }
 
-    /** Ilang ticket ang hawak kada lane: sa Botcake, ang kayang ipadala sa mga 3 segundo sa rate ng page; sa gateway, ang setting. */
+    /** Ilang ticket ang hawak kada lane: sa Botcake, gaya ng send pool (BotcakeSendPool::laneTickets); sa gateway, ang setting. */
     public function cap(bool $botcake): int
     {
-        return $botcake ? max(2, (int) ceil(3 / BotcakeClient::interval())) : max(1, (int) config('services.chatbot.sequence_gateway_per_page', 30));
+        return $botcake ? BotcakeSendPool::laneTickets() : max(1, (int) config('services.chatbot.sequence_gateway_per_page', 30));
     }
 
     /** Ang lane ng page: [key, botcake?]; ang key ng Botcake ay ang sha1 ng token (kahati ng lahat ng padala sa page). */

@@ -136,10 +136,20 @@ class BotcakeSendPool extends TicketPool
         return $full;
     }
 
-    /** Ilang ticket kada page ang hawak: ang kayang ipadala sa mga 3 segundo (ang chatblast ay tatlong tawag bawat isa). */
+    /**
+     * Ilang ticket kada page ang hawak: ang kayang ipadala sa services.botcake.lane_seconds (default 10) sa rate ng page.
+     * Ang ticket ay hawak hanggang sumagot ang Botcake, kaya ito ang hangganan kada page: ticket ÷ bilis ng sagot. Sa 3 s
+     * (ang dati) at Botcake na 5–7 s, 4–6 tawag kada segundo lang ang kaya ng isang page at pumipila ang mga sagot ng bot.
+     */
     public function perPage(): int
     {
-        return max(2, (int) ceil(3 / BotcakeClient::interval()));
+        return self::laneTickets();
+    }
+
+    /** Ang ticket kada page ng Botcake lane (kahati ng send pool at sequence pool ang paraan ng pagbilang). */
+    public static function laneTickets(): int
+    {
+        return max(2, (int) ceil(max(1.0, (float) config('services.botcake.lane_seconds', 10)) / BotcakeClient::interval()));
     }
 
     /** Ang bahagi ng rate ng page na puwedeng gamitin ng chatblast habang may ginagawa ang bot (0.5 = 1 sa 2 request). */
