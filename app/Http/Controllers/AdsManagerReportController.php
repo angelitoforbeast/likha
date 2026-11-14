@@ -7,9 +7,13 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Log;
 use App\Models\UploadLog;
 use App\Jobs\ProcessAdsManagerReportsUpload;
+use App\Services\MetaAds\Sync;
 
 class AdsManagerReportController extends Controller
 {
+    /** Ang mga log sa "Upload Logs" table: ang mga upload at ang mga Meta API sync (walang file ang huli). */
+    public const LOG_TYPES = ['ads_manager_reports', Sync::LOG_TYPE];
+
     /**
      * Extract the SOURCE FILE's internal created/modified dates from an XLSX
      * (or .xlsm) file by reading docProps/core.xml inside the zip wrapper.
@@ -69,7 +73,7 @@ class AdsManagerReportController extends Controller
 
     public function index()
     {
-        $logs = UploadLog::where('type', 'ads_manager_reports')
+        $logs = UploadLog::whereIn('type', self::LOG_TYPES)
             ->orderByDesc('id')
             ->limit(50)
             ->get();
@@ -147,11 +151,11 @@ class AdsManagerReportController extends Controller
     // JSON status for front-end polling (returns latest logs)
     public function status()
     {
-        $logs = UploadLog::where('type', 'ads_manager_reports')
+        $logs = UploadLog::whereIn('type', self::LOG_TYPES)
             ->orderByDesc('id')
             ->limit(50)
             ->get([
-                'id','status','original_name','processed_rows','inserted','updated','skipped','error_rows',
+                'id','type','status','original_name','processed_rows','inserted','updated','skipped','error_rows',
                 'error_message','started_at','finished_at','created_at',
                 'file_created_at','file_modified_at','protected_details',
             ]);
@@ -159,7 +163,8 @@ class AdsManagerReportController extends Controller
         return response()->json([
             'logs' => $logs->map(fn($l) => [
                 'id'                 => (int) $l->id,
-                'status'             => (string) ($l->status ?? 'idle'),
+                'source'             => $l->type === Sync::LOG_TYPE ? 'api' : 'upload', // api: Meta API sync, walang file
+                'status'            => (string) ($l->status ?? 'idle'),
                 'original_name'      => (string) ($l->original_name ?? ''),
                 'processed_rows'     => (int) ($l->processed_rows ?? 0),
                 'inserted'           => (int) ($l->inserted ?? 0),
@@ -170,8 +175,8 @@ class AdsManagerReportController extends Controller
                 'started_at'         => $l->started_at?->toDateTimeString(),
                 'finished_at'        => $l->finished_at?->toDateTimeString(),
                 'created_at'         => $l->created_at?->toDateTimeString(),
-                'file_created_at'    => $l->file_created_at?->setTimezone('Asia/Manila')->format('M j, Y g:i A'),
-                'file_modified_at'   => $l->file_modified_at?->setTimezone('Asia/Manila')->format('M j, Y g:i A'),
+                'file_created_at'    => $l->type === Sync::LOG_TYPE ? null : $l->file_created_at?->setTimezone('Asia/Manila')->format('M j, Y g:i A'),
+                'file_modified_at'   => $l->type === Sync::LOG_TYPE ? null : $l->file_modified_at?->setTimezone('Asia/Manila')->format('M j, Y g:i A'),
                 'protected_details'  => $l->protected_details ?? null, // array of {column: count}
             ]),
         ]);

@@ -134,16 +134,17 @@
                 ][$s] ?? 'bg-gray-100 text-gray-800';
               @endphp
 
-              <tr class="border-t" data-log-id="{{ $log->id }}">
+              @php $isApi = $log->type === \App\Services\MetaAds\Sync::LOG_TYPE; @endphp
+              <tr class="border-t" data-log-id="{{ $log->id }}"@if($isApi) data-source="api"@endif>
                 <td class="p-2 font-mono">#{{ $log->id }}</td>
-                <td class="p-2" data-col="original_name">{{ $log->original_name }}</td>
+                <td class="p-2" data-col="original_name">{{ $log->original_name }}@if($isApi) <span data-col="source_badge" class="ml-1 px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-800 text-[10px] font-medium whitespace-nowrap" title="Meta Ads API sync — walang file">Meta API</span>@endif</td>
 
-                {{-- File metadata dates — both null for non-XLSX uploads. --}}
+                {{-- File metadata dates — both null for non-XLSX uploads; a Meta API sync has no file. --}}
                 <td class="p-2 font-mono text-xs" data-col="file_created_at">
-                  {{ $log->file_created_at?->setTimezone('Asia/Manila')->format('M j, Y g:i A') ?? '—' }}
+                  {{ $isApi ? '—' : ($log->file_created_at?->setTimezone('Asia/Manila')->format('M j, Y g:i A') ?? '—') }}
                 </td>
                 <td class="p-2 font-mono text-xs" data-col="file_modified_at">
-                  {{ $log->file_modified_at?->setTimezone('Asia/Manila')->format('M j, Y g:i A') ?? '—' }}
+                  {{ $isApi ? '—' : ($log->file_modified_at?->setTimezone('Asia/Manila')->format('M j, Y g:i A') ?? '—') }}
                 </td>
 
                 <td class="p-2">
@@ -161,7 +162,8 @@
                 {{-- Protected column — shows per-field rejection counts. Color-coded
                      amber when may protections, gray dash when wala. Tooltip lists all. --}}
                 @php
-                  $protections = $log->protected_details ?? null;
+                  // Column => count lang ang binibilang (null-safe sa log na walang protected_details).
+                  $protections = is_array($log->protected_details) ? array_filter($log->protected_details, 'is_numeric') : null;
                   $totalProtected = is_array($protections) ? array_sum($protections) : 0;
                   $protectedTitle = '';
                   if (is_array($protections) && !empty($protections)) {
