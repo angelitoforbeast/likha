@@ -349,7 +349,8 @@ class ImageFlow
                 $why = 'The image_url field was not written ('.self::said($w).')';
             } else {
                 $f = yield ['step' => 'image_flow', 'method' => 'POST', 'path' => $base.'/flows/send_flow',
-                    'data' => ['psid' => $psid, 'flow_id' => $cfg['flow_id']], 'onlyRateLimit' => true];
+                    // Botcake refuses a string here ("flow_id must be an integer", HTTP 200), as chatblast's send_flow knows.
+                    'data' => ['psid' => $psid, 'flow_id' => (int) $cfg['flow_id']], 'onlyRateLimit' => true];
                 if (self::ok($f)) {
                     $messages[$at][self::VIA] = 'flow';
                     $last = ['status' => 'sent', 'error' => null, 'http' => $f['http']];

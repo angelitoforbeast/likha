@@ -181,7 +181,7 @@ class ImageViaFlowTest extends ChatblastTestCase
         $this->assertSame([
             ['path' => '/pages/1001/flows/send_content', 'body' => ['psid' => '7001', 'data' => ['version' => 'v2', 'content' => ['messages' => [['type' => 'text', 'text' => 'Here is the photo']]]]]],
             ['path' => '/pages/1001/customer/7001/customer_fields', 'body' => ['data' => [['id' => '77', 'value' => self::IMG_A]]]],
-            ['path' => '/pages/1001/flows/send_flow', 'body' => ['psid' => '7001', 'flow_id' => '501']],
+            ['path' => '/pages/1001/flows/send_flow', 'body' => ['psid' => '7001', 'flow_id' => 501]],
         ], $this->sends());
         $this->assertSame('flow', $o['messages'][1][ImageFlow::VIA], 'recorded as sent via flow');
         $this->assertArrayNotHasKey(ImageFlow::VIA, $o['messages'][0]);
@@ -319,9 +319,9 @@ class ImageViaFlowTest extends ChatblastTestCase
         $this->assertSame([
             ['send_content', ['psid' => '7001', 'data' => ['version' => 'v2', 'content' => ['messages' => [['type' => 'text', 'text' => 'Photos:']]]]]],
             ['customer_fields', ['data' => [['id' => '77', 'value' => self::IMG_A]]]],
-            ['send_flow', ['psid' => '7001', 'flow_id' => '501']],
+            ['send_flow', ['psid' => '7001', 'flow_id' => 501]],
             ['customer_fields', ['data' => [['id' => '77', 'value' => self::IMG_B]]]],
-            ['send_flow', ['psid' => '7001', 'flow_id' => '501']],
+            ['send_flow', ['psid' => '7001', 'flow_id' => 501]],
         ], array_map([self::class, 'poolCall'], $this->calls));
         $row = DB::table('chatbot_replies')->where('psid', 7001)->first();
         $this->assertSame('sent', $row->status);
