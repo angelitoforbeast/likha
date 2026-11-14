@@ -157,10 +157,10 @@ return [
         // true = ang padala ng chatbot at chatblast ay ipinapasa sa botcake:send-pool (kapag buhay ito); false = naghihintay ang worker (ang dati).
         'async_sends' => (bool) env('BOTCAKE_ASYNC_SENDS', true),
         // Ilang request sa Botcake nang sabay sa botcake:send-pool (lahat ng page), tig-isang ganito ang sagot ng bot at ang chatblast.
-        'send_concurrency' => (int) env('BOTCAKE_SEND_CONCURRENCY', 300),
+        'send_concurrency' => (int) env('BOTCAKE_SEND_CONCURRENCY', 100),
         // Ilang segundo ng padala kada page ang puwedeng hawak nang sabay (ticket = segundo × rate_per_page). Ang ticket ay
         // hawak hanggang sumagot ang Botcake: 10 s ay sapat kahit 7 s ang sagot ng Botcake sa peak.
-        'lane_seconds' => (float) env('BOTCAKE_LANE_SECONDS', 10),
+        'lane_seconds' => (float) env('BOTCAKE_LANE_SECONDS', 3),
         // Ilang ticket ng sequence nang sabay sa chatbot:sequence-pool (sariling proseso, hiwalay sa mga sagot at chatblast).
         'sequence_concurrency' => (int) env('BOTCAKE_SEQUENCE_CONCURRENCY', 100),
         // Ilang segundo hinihintay ang Botcake sa sagot ng chatbot (send_content); ang unang mensahe na may larawan ay inaabot nang 8-15 s.
