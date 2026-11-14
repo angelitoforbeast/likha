@@ -416,7 +416,8 @@ class SpeedPrewarmTest extends ChatblastTestCase
             $this->assertGreaterThan(0, $old['sequences']['total']['due'] + $old['total']['messages'], "$name has data");
             Cache::flush();
             // Lahat ng numero maliban sa bagong Not sent (ang fixture ay walang pumalyang padala ng Main Flow o AI).
-            $page = self::plain(self::withoutNotSent(app(ResponseSpeed::class)->output($q)));
+            // The volume section is newer than the snapshot; ResponseSpeedTest covers it.
+            $page = self::plain(self::withoutNotSent(array_diff_key(app(ResponseSpeed::class)->output($q), ['volume' => 1])));
             $wantPage = $old;
             unset($wantPage['sequences'], $wantPage['charts']['seq']);
             $this->assertSame($wantPage, $page, "$name: page");

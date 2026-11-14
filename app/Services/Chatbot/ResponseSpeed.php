@@ -46,7 +46,7 @@ class ResponseSpeed
      * Ang dalawang cache: ang mga numero ng page (walang Sequences) at ang Sequences. Ang bersyon sa key ay pinapalitan
      * kapag nagbago ang hugis ng laman, para hindi mabasa ng bagong code ang lumang entry pagkatapos ng deploy.
      */
-    public const PAGE_KEY = 'response-speed:v3:';
+    public const PAGE_KEY = 'response-speed:v4:';
     public const SEQUENCES_KEY = 'response-speed-seq:v1:';
     /** Ang listahan ng "Not sent" ng isang araw at filter: isinusulat kasabay ng entry ng page (iisang kuwenta). */
     public const NOT_SENT_KEY = 'response-speed-not-sent:v1:';
@@ -417,8 +417,55 @@ class ResponseSpeed
             'by_bot' => array_map(fn ($x) => self::row($x), $byBot),
             'push' => ['hours' => array_map(fn ($h) => $h > $nowHour ? null : ['hour' => $h] + self::pushRow($push['hours'][$h]), range(0, 23)),
                 'total' => self::pushRow($push['total'])],
+            'volume' => $this->volume($f, $start, $end, $nowHour, $hours, $push, $names),
             'not_sent_list' => $list,
         ];
+    }
+
+    /**
+     * Volume by hour: what came in and what went out, so a slow hour can be read against how busy it was. Chats received
+     * (the same chats the speed table counts, on the bot or not), the bot's replies sent (Botcake and Forbeast, from the
+     * same read as "pushed"), the sequence steps sent, and the chatblast messages sent per kind. Chats and replies follow
+     * the bot filter like the rest of the page; sequences and chatblast count every bot (they share the page's Botcake
+     * rate either way). The page filter applies to all. Counts only, grouped in SQL.
+     * @return array{hours: array<int, ?array>, total: array, kinds: string[]}
+     */
+    private function volume(array $f, string $start, string $end, int $nowHour, array $hours, array $push, array $names): array
+    {
+        $hourOf = fn (object $r) => (int) $r->h;
+        $sequences = array_fill(0, 24, 0);
+        $q = DB::table('chatbot_replies')->where('kind', 'send')->whereIn('status', SendStatus::DELIVERED)->whereNotNull('sequence_id')
+            ->where('sent_at', '>=', $start)->where('sent_at', '<', $end)
+            ->when($f['page_id'] !== null, fn ($q) => $q->where('page_id', (int) $f['page_id']));
+        if (Schema::hasColumn('chatbot_replies', 'sequence_id')) {
+            foreach ($q->selectRaw('substr(sent_at, 12, 2) as h, count(*) as n')->groupByRaw('substr(sent_at, 12, 2)')->get() as $r) $sequences[$hourOf($r)] = (int) $r->n;
+        }
+        $blast = [];
+        if (Schema::hasTable('botcake_messages')) {
+            $page = $f['page_id'] !== null ? ($names[(string) $f['page_id']] ?? '') : null;
+            foreach (DB::table('botcake_messages')->where('is_test', false)->where('status', 'sent')->where('sent_at', '>=', $start)->where('sent_at', '<', $end)
+                ->when($page !== null, fn ($q) => $q->where('page_name', $page))
+                ->selectRaw('substr(sent_at, 12, 2) as h, kind, count(*) as n')->groupByRaw('substr(sent_at, 12, 2), kind')->get() as $r) {
+                $blast[(string) $r->kind][$hourOf($r)] = (int) $r->n;
+            }
+        }
+        $kinds = array_keys($blast);
+        sort($kinds);
+        $row = function (?int $h) use ($hours, $push, $sequences, $blast, $kinds): array {
+            $pick = fn (array $byHour) => $h === null ? array_sum($byHour) : ($byHour[$h] ?? 0);
+            $b = $h === null ? null : $hours[$h];
+            $received = $h === null ? array_sum(array_map(fn ($x) => $x['n'] + $x['off'], $hours)) : $b['n'] + $b['off'];
+            $p = $h === null ? $push['total'] : $push['hours'][$h];
+            $chatblast = [];
+            foreach ($kinds as $k) $chatblast[$k] = $pick($blast[$k]);
+            $replies = $p['pushed'] + $p['botcake'];
+            $seq = $pick($sequences);
+
+            return ['received' => $received, 'replies' => $replies, 'sequences' => $seq, 'chatblast' => $chatblast,
+                'sent' => $replies + $seq + array_sum($chatblast)];
+        };
+
+        return ['kinds' => $kinds, 'hours' => array_map(fn ($h) => $h > $nowHour ? null : ['hour' => $h] + $row($h), range(0, 23)), 'total' => $row(null)];
     }
 
     /**

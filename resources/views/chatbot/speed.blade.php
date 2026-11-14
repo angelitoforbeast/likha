@@ -129,6 +129,43 @@
         </details>
     </section>
 
+    @php($vol = $volume ?? null)
+    @if($vol)
+    @php($kindLabel = fn ($k) => ucwords(str_replace('_', ' ', $k)))
+    <section aria-labelledby="h-volume">
+        <h2 id="h-volume" class="mb-1 text-base font-semibold">Volume by hour: chats in, messages out</h2>
+        @php($vt = $vol['total'])
+        <p class="text-sm tabular-nums text-slate-600" data-sp-summary="volume">Day: {{ number_format($vt['received']) }} chats received · {{ number_format($vt['replies']) }} bot replies · {{ number_format($vt['sequences']) }} sequence steps @foreach($vt['chatblast'] as $k => $n)· {{ number_format($n) }} {{ $kindLabel($k) }} @endforeach· {{ number_format($vt['sent']) }} sent in all</p>
+        <details class="sp-table mt-3" data-sp-table="volume">
+            <summary class="cursor-pointer select-none py-1 text-sm font-medium text-blue-700"><span class="sp-show">Show table</span><span class="sp-hide">Hide table</span></summary>
+        <div class="cb-card overflow-x-auto">
+            <table class="cb-table min-w-[44rem]" data-table="volume">
+                <thead><tr><th>Hour</th><th class="!text-right">Reply time (avg)</th><th class="!text-right">Chats received</th><th class="!text-right">Bot replies</th><th class="!text-right">Sequence steps</th>@foreach($vol['kinds'] as $k)<th class="!text-right">{{ $kindLabel($k) }}</th>@endforeach<th class="!text-right">Sent in all</th></tr></thead>
+                <tbody>
+                @foreach($vol['hours'] as $h => $r)
+                    <tr data-hour="{{ $h }}">
+                        <td class="tabular-nums">{{ str_pad($h, 2, '0', STR_PAD_LEFT) }}:00</td>
+                        @if($r === null)
+                            @for($i = 0; $i < 5 + count($vol['kinds']); $i++)<td></td>@endfor
+                        @else
+                            <td class="text-right tabular-nums">{{ $sec($hours[$h]['avg'] ?? null) }}</td>
+                            <td class="text-right tabular-nums">{{ number_format($r['received']) }}</td>
+                            <td class="text-right tabular-nums">{{ number_format($r['replies']) }}</td>
+                            <td class="text-right tabular-nums">{{ number_format($r['sequences']) }}</td>
+                            @foreach($vol['kinds'] as $k)<td class="text-right tabular-nums">{{ number_format($r['chatblast'][$k] ?? 0) }}</td>@endforeach
+                            <td class="text-right font-medium tabular-nums">{{ number_format($r['sent']) }}</td>
+                        @endif
+                    </tr>
+                @endforeach
+                </tbody>
+                <tfoot><tr class="font-semibold" data-row="total"><td>Day</td><td class="text-right tabular-nums">{{ $sec($total['avg']) }}</td><td class="text-right tabular-nums">{{ number_format($vt['received']) }}</td><td class="text-right tabular-nums">{{ number_format($vt['replies']) }}</td><td class="text-right tabular-nums">{{ number_format($vt['sequences']) }}</td>@foreach($vol['kinds'] as $k)<td class="text-right tabular-nums">{{ number_format($vt['chatblast'][$k] ?? 0) }}</td>@endforeach<td class="text-right tabular-nums">{{ number_format($vt['sent']) }}</td></tr></tfoot>
+            </table>
+        </div>
+        </details>
+        <p class="mt-2 text-xs text-slate-500">Hour = Manila. Chats received = customer messages that came in (on the bot or not). Bot replies = Main Flow and AI replies sent (Botcake and Forbeast). Sequence steps = sequence messages sent. The chatblast columns = chatblast messages sent, per campaign. Every one of these goes through the same page's Botcake limit, so a busy hour here can slow the reply time beside it. Chats and replies follow the Bot filter; sequences and chatblast count every bot.</p>
+    </section>
+    @endif
+
     <section aria-labelledby="h-ai">
         <h2 id="h-ai" class="mb-1 text-base font-semibold">With AI vs no AI, by hour</h2>
         <p class="text-sm tabular-nums text-slate-600" data-sp-summary="ai">Day: @foreach(['with_ai' => 'with AI', 'no_ai' => 'no AI'] as $g => $gl){{ $gl }} {{ number_format($total[$g]['n']) }} answered · avg {{ $sec($total[$g]['avg']) }} · median {{ $sec($total[$g]['median']) }} · p90 {{ $sec($total[$g]['p90']) }} · max {{ $sec($total[$g]['max']) }}; @endforeach AI time avg {{ $sec($total['ai_time']['avg']) }} · p90 {{ $sec($total['ai_time']['p90']) }} · max {{ $sec($total['ai_time']['max']) }}</p>

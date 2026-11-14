@@ -122,6 +122,40 @@ class ResponseSpeedTest extends ChatblastTestCase
         $this->assertSame(1, $h['unconfirmed']);
     }
 
+    public function test_volume_by_hour_counts_chats_in_replies_sequence_steps_and_chatblast_out(): void
+    {
+        Artisan::call('migrate', ['--path' => ['database/migrations/2026_10_18_300000_create_botcake_messages_table.php']]);
+        $blast = fn (string $page, string $kind, string $status, ?string $sentAt, bool $test = false) => DB::table('botcake_messages')->insert([
+            'page_name' => $page, 'waybill' => uniqid('WB'), 'kind' => $kind, 'status' => $status, 'is_test' => $test, 'sent_at' => $sentAt,
+            'created_at' => '2026-10-21 09:00:00', 'updated_at' => '2026-10-21 09:00:00']);
+        $blast('Page Dos', 'in_transit', 'sent', '2026-10-21 10:40:00');
+        $blast('Page Dos', 'in_transit', 'sent', '2026-10-21 10:41:00');
+        $blast('Page Uno', 'delivering', 'sent', '2026-10-21 11:10:00');
+        $blast('Page Dos', 'in_transit', 'failed', '2026-10-21 10:42:00');      // not sent: not counted
+        $blast('Page Dos', 'in_transit', 'sent', '2026-10-21 10:43:00', true);  // a test send: not counted
+        $blast('Page Dos', 'in_transit', 'sent', '2026-10-20 10:40:00');        // another day
+
+        $v = $this->out()['volume'];
+
+        // 10:00: four chats came in (three on the bot, one on Page Tres without a flow; the ignored and the standby copy
+        // are not chats), three replies went out (the test and the failed send are not), one sequence step, two in-transit.
+        $this->assertSame(['delivering', 'in_transit'], $v['kinds']);
+        $ten = $v['hours'][10];
+        $this->assertSame([4, 3, 1, ['delivering' => 0, 'in_transit' => 2], 6], [$ten['received'], $ten['replies'], $ten['sequences'], $ten['chatblast'], $ten['sent']]);
+        $this->assertSame(['delivering' => 1, 'in_transit' => 0], $v['hours'][11]['chatblast']);
+        $this->assertNull($v['hours'][13], 'an hour after now is blank');
+        $this->assertSame([5, 4, 1, ['delivering' => 1, 'in_transit' => 2]], [$v['total']['received'], $v['total']['replies'], $v['total']['sequences'], $v['total']['chatblast']]);
+
+        // The page filter applies to every column.
+        $uno = $this->out(['page_id' => '1001'])['volume'];
+        $this->assertSame([2, 1, 1, ['delivering' => 0]], [$uno['hours'][10]['received'], $uno['hours'][10]['replies'], $uno['hours'][10]['sequences'], $uno['hours'][10]['chatblast']]);
+
+        $html = $this->actingAs($this->user('CEO', 'ceo@example.test'))->speedPage();
+        $this->assertStringContainsString('data-table="volume"', $html);
+        $this->assertStringContainsString('data-sp-summary="volume"', $html);
+        $this->assertStringContainsString('>In Transit<', $html);
+    }
+
     public function test_S_182_2_yesterday_and_the_day_arrows_move_by_one_day(): void
     {
         $this->actingAs($this->user('CEO', 'ceo@example.test'));
@@ -608,7 +642,7 @@ class ResponseSpeedTest extends ChatblastTestCase
         $html = $this->actingAs($this->user('CEO', 'ceo@example.test'))->speedPage();
         $d = self::details($html);
 
-        $this->assertSame(['hours', 'ai', 'push', 'sequences', 'sequence-slowest'], array_keys($d));
+        $this->assertSame(['hours', 'volume', 'ai', 'push', 'sequences', 'sequence-slowest'], array_keys($d));
         foreach ($d as $key => [$tag, $body]) {
             $this->assertDoesNotMatchRegularExpression('#\sopen\b#', $tag, "$key is closed by default");
             $this->assertStringContainsString('data-table="' . $key . '"', $body, "$key table is inside its details");
