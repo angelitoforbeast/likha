@@ -277,7 +277,9 @@ class BotcakeSendQueue
         if (!Schema::hasTable(self::TABLE)) return $out;
         if (!BotcakeSendPool::alive(self::DEAD_POOL_SECONDS)) self::recover(null);
 
-        foreach (DB::table(self::TABLE)->where('status', 'pending')->where('kind', '!=', self::SEQUENCE)->where('deadline_at', '<=', now())->orderBy('id')->limit(500)->get() as $row) {
+        // Sa index (status, priority, id): ang pending na hindi sequence lang ang binabasa, hindi ang buong table.
+        foreach (DB::table(self::TABLE)->useIndex('botcake_send_requests_status_priority_id_index')->where('status', 'pending')->where('priority', '<', self::SEQUENCE_PRIORITY)
+            ->where('kind', '!=', self::SEQUENCE)->where('deadline_at', '<=', now())->orderBy('id')->limit(500)->get() as $row) {
             if ($row->kind === 'chatblast') {
                 if (DB::table(self::TABLE)->where('id', $row->id)->where('status', 'pending')->update(['status' => 'failed', 'error' => 'Not sent in time; queued again', 'done_at' => now(), 'updated_at' => now()]) !== 1) continue;
                 BotcakeMessage::whereKey($row->message_id)->where('status', 'sending')->update(['status' => 'queued']);

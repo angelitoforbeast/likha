@@ -101,6 +101,52 @@ class SendQueueSweepIndexTest extends TestCase
         $this->assertStringContainsString('USING INDEX ' . self::INDEX . ' (kind=? AND status=? AND updated_at<?)', $plan);
     }
 
+    public function test_the_late_sweep_fails_exactly_the_late_pending_chatbot_rows_and_reads_the_status_priority_id_index(): void
+    {
+        // The tables a failed chatbot send writes to (the outbox reply).
+        Artisan::call('migrate', ['--path' => [
+            'database/migrations/2026_10_20_100000_create_botcake_chats_table.php',
+            'database/migrations/2026_10_23_100000_create_chatbot_tables.php',
+            'database/migrations/2026_10_24_100000_add_draft_to_chatbot_flows.php',
+            'database/migrations/2026_10_24_100100_create_chatbot_events_and_reply_user.php',
+        ]]);
+        // Mostly old resumed rows, as on a busy site: none of them is touched.
+        $this->rows(array_merge(array_fill(0, 600, [BotcakeSendQueue::SEQUENCE, 'resumed', 3600]), array_fill(0, 300, ['chatbot', 'resumed', 3600])));
+        // deadline_at is 10 minutes after the row: 900 s ago is late, 120 s ago is not.
+        $late = $this->rows([['chatbot', 'pending', 900], ['chatbot', 'pending', 700]]);
+        $kept = $this->rows([
+            ['chatbot', 'pending', 120],                  // not late yet
+            [BotcakeSendQueue::SEQUENCE, 'pending', 900], // a sequence ticket is never failed for being late (sweepSequence)
+        ]);
+        $hints = [];
+        $connection = DB::connection();
+        $grammar = $connection->getQueryGrammar();
+        $connection->setQueryGrammar(new class($connection, $hints) extends \Illuminate\Database\Query\Grammars\SQLiteGrammar {
+            public function __construct($connection, private array &$hints) { parent::__construct($connection); }
+            protected function compileIndexHint(\Illuminate\Database\Query\Builder $query, $indexHint)
+            {
+                $this->hints[] = (new \Illuminate\Database\Query\Grammars\MySqlGrammar($this->connection))->compileSelect($query);
+                return parent::compileIndexHint($query, $indexHint);
+            }
+        });
+
+        try {
+            $out = BotcakeSendQueue::sweep();
+        } finally {
+            $connection->setQueryGrammar($grammar);
+        }
+
+        $this->assertSame(2, $out['failed']);
+        $this->assertSame(0, $out['requeued']);
+        $this->assertSame(['failed', 'failed'], DB::table(BotcakeSendQueue::TABLE)->whereIn('id', $late)->orderBy('id')->pluck('status')->all());
+        $this->assertSame(['pending', 'pending'], DB::table(BotcakeSendQueue::TABLE)->whereIn('id', $kept)->orderBy('id')->pluck('status')->all());
+        $this->assertSame(900, DB::table(BotcakeSendQueue::TABLE)->where('status', 'resumed')->count(), 'the resumed rows stay as they are');
+        $this->assertCount(2, Queue::pushed(ResumeChatbotSend::class), 'each failed chatbot send goes on to its resume job');
+
+        $this->assertCount(1, $hints, 'only the late query carries an index hint');
+        $this->assertStringContainsString('from `botcake_send_requests` use index (botcake_send_requests_status_priority_id_index) where `status` = ? and `priority` < ?', $hints[0]);
+    }
+
     public function test_the_migration_adds_the_index_once_and_down_removes_it(): void
     {
         $this->assertTrue(Schema::hasIndex(BotcakeSendQueue::TABLE, self::INDEX));
