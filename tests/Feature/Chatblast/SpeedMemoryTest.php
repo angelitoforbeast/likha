@@ -247,10 +247,13 @@ class SpeedMemoryTest extends ChatblastTestCase
             $this->assertSame([], array_filter($this->speedSequences('date=' . self::DAY, true)['seq']['series']['avg'], fn ($v) => $v !== null));
         }
 
-        // Hindi naka-cache nang 30 minuto ang kulang na sagot ng lumang araw: pagkalipas ng 2 minuto ay kinukuwenta ulit.
+        // Spec 277: ang default na view ng kahapon ay galing sa warm. Ang kulang na sagot ay nakikita (hindi "building") hanggang
+        // sa susunod na subok ng warm, pagkalipas ng SEQUENCES_WARM_SECONDS; ang endpoint ay hindi ito kinukuwenta.
         $mode = 'normal';
         $this->assertTrue($this->speedSequences('date=' . self::DAY)['sequences']['too_large']);
-        $this->travel(121)->seconds();
+        $this->travel(ResponseSpeed::SEQUENCES_WARM_SECONDS)->seconds();
+        $this->assertTrue($this->speedSequences('date=' . self::DAY)['sequences']['too_large'], 'the endpoint does not compute the default view');
+        Artisan::call('chatbot:speed-warm');
         $seq = $this->speedSequences('date=' . self::DAY);
         $this->assertStringNotContainsString('Sequences section too large', $seq['html']);
         $this->assertSame(3, $seq['sequences']['total']['sent']);

@@ -163,7 +163,7 @@ class SpeedPrewarmTest extends ChatblastTestCase
 
         // Ang endpoint: ang HTML ng section (gaya ng dati) at ang mga numero; ang chart ay hiwalay na tawag.
         $s = $this->getJson('/chatbot/speed/sequences?page_id=1001&bot=Forbeast&date=2026-10-20')->assertOk()->json();
-        $this->assertSame(['filters', 'sequences', 'html'], array_keys($s));
+        $this->assertSame(['filters', 'sequences', 'built_at', 'html'], array_keys($s));
         $this->assertSame(['date' => '2026-10-20', 'page_id' => '1001', 'bot' => 'Forbeast'], $s['filters']);
         foreach (['data-sp-summary="sequences"', '<canvas id="sp-chart-seq"', 'data-table="sequences"', 'data-table="sequence-slowest"', 'dotted = 2026-10-19'] as $part) {
             $this->assertStringContainsString($part, $s['html']);
@@ -182,7 +182,7 @@ class SpeedPrewarmTest extends ChatblastTestCase
             $this->assertSame(['date' => '2026-10-21', 'page_id' => null, 'bot' => null], $this->getJson('/chatbot/speed/sequences?' . $q)->assertOk()->json('filters'), $q);
             $this->getJson('/chatbot/speed/sequences?part=chart&' . $q)->assertOk()->assertJsonPath('date', '2026-10-21');
         }
-        $this->get('/chatbot/speed/sequences?part=other')->assertOk()->assertJsonStructure(['filters', 'sequences', 'html']);
+        $this->get('/chatbot/speed/sequences?part=other')->assertOk()->assertJsonStructure(['filters', 'sequences', 'built_at', 'html']);
         auth()->logout();
         $this->get('/chatbot/speed/sequences')->assertRedirect();
     }
@@ -202,11 +202,11 @@ class SpeedPrewarmTest extends ChatblastTestCase
             return array_keys($out);
         };
         // Ang section: ang araw lang (hanggang 06:00 ng susunod na araw, ang late na step). Ang chart: ang naunang araw lang
-        // (ang araw ay naka-cache na). Ang ulit: walang basa.
-        $this->assertSame(['2026-10-20', '2026-10-21'], $days('/chatbot/speed/sequences?date=2026-10-20'));
-        $this->assertSame(['2026-10-19', '2026-10-20'], $days('/chatbot/speed/sequences?date=2026-10-20&part=chart'));
-        $this->assertSame([], $days('/chatbot/speed/sequences?date=2026-10-20'));
-        $this->assertSame([], $days('/chatbot/speed/sequences?date=2026-10-20&part=chart'));
+        // (ang araw ay naka-cache na). Ang ulit: walang basa. May page (ang default na view ay galing sa warm, spec 277).
+        $this->assertSame(['2026-10-20', '2026-10-21'], $days('/chatbot/speed/sequences?page_id=1002&date=2026-10-20'));
+        $this->assertSame(['2026-10-19', '2026-10-20'], $days('/chatbot/speed/sequences?page_id=1002&date=2026-10-20&part=chart'));
+        $this->assertSame([], $days('/chatbot/speed/sequences?page_id=1002&date=2026-10-20'));
+        $this->assertSame([], $days('/chatbot/speed/sequences?page_id=1002&date=2026-10-20&part=chart'));
     }
 
     /**
@@ -252,17 +252,23 @@ class SpeedPrewarmTest extends ChatblastTestCase
         $y = ResponseSpeed::filters(['date' => '2026-10-20']);
         $this->assertNotNull(Cache::get(ResponseSpeed::PAGE_KEY . md5(json_encode($y))));
         $this->assertNotNull(Cache::get(ResponseSpeed::SEQUENCES_KEY . md5(json_encode($y))));
-        // Ang mga numero ay ang sa page na kinuwenta nang walang init.
+        // Ang mga numero ay ang sa page na kinuwenta nang walang init (ang Sequences ng default na view ay kinukuwenta ng
+        // service mismo: ang endpoint ay "building" lang kapag wala pa ang entry, spec 277).
         $warm = self::plain([$open['seq']['sequences'], $open['chart'], $open['page']->viewData('charts')]);
         Cache::flush();
         $cold = $this->openDefault();
-        $this->assertSame($warm, self::plain([$cold['seq']['sequences'], $cold['chart'], $cold['page']->viewData('charts')]));
+        $this->assertTrue($cold['seq']['sequences']['building']);
+        $speed = app(ResponseSpeed::class);
+        $this->assertSame($warm, self::plain([$speed->sequencesOutput(['date' => '2026-10-21'])['sequences'], $speed->sequencesOutput(['date' => '2026-10-21'], true), $cold['page']->viewData('charts')]));
 
-        // Lampas sa 2 minuto ng page pero bago ang susunod na takbo (na hindi dumating): galing pa rin sa cache.
+        // Lampas sa 2 minuto ng page pero bago ang susunod na takbo (na hindi dumating, o mabagal): galing pa rin sa cache,
+        // hanggang 14 minuto (spec 277: ang entry ay mas matagal kaysa sa isang mabagal na takbo).
         Cache::flush();
         Artisan::call('chatbot:speed-warm');
         $this->travel(4)->minutes();
         $this->assertSame([], $this->openDefault()['reads'], 'the entry outlives the 2-minute interval');
+        $this->travel(10)->minutes();
+        $this->assertSame([], $this->openDefault()['reads'], 'the entry outlives a slow run');
     }
 
     public function test_S_201_1_today_is_rebuilt_every_run_and_yesterday_only_when_due(): void
@@ -333,7 +339,7 @@ class SpeedPrewarmTest extends ChatblastTestCase
         $lines = $this->warmLog(fn () => $this->assertSame(0, Artisan::call('chatbot:speed-warm')));
         $this->assertCount(1, $lines);
         $this->assertSame('info', $lines[0][0]);
-        $this->assertMatchesRegularExpression('#^chatbot:speed-warm warmed 2026-10-20, 2026-10-20 sequences, 2026-10-21, 2026-10-21 sequences in \d+\.\d s$#', $lines[0][1]);
+        $this->assertMatchesRegularExpression('#^chatbot:speed-warm warmed 2026-10-20 \(\d+\.\d s\), 2026-10-21 \(\d+\.\d s\), 2026-10-20 sequences \(\d+\.\d s\), 2026-10-21 sequences \(\d+\.\d s\) in \d+\.\d s$#', $lines[0][1]);
         // Ang lock ay pinakawalan: ang susunod na takbo ay tumatakbo.
         $this->assertTrue(Cache::lock(\App\Console\Commands\ChatbotSpeedWarm::LOCK, 1)->get());
     }
@@ -354,17 +360,18 @@ class SpeedPrewarmTest extends ChatblastTestCase
         $this->assertNotNull(Cache::get(ResponseSpeed::SEQUENCES_KEY . md5(json_encode($today))), 'the other part is still warm');
         $this->assertCount(1, $lines);
         $this->assertSame('warning', $lines[0][0]);
-        $this->assertMatchesRegularExpression('#^chatbot:speed-warm warmed 2026-10-20, 2026-10-20 sequences, 2026-10-21 sequences; failed 2026-10-21 in \d+\.\d s$#', $lines[0][1]);
+        $this->assertMatchesRegularExpression('#^chatbot:speed-warm warmed 2026-10-20 \(\d+\.\d s\), 2026-10-20 sequences \(\d+\.\d s\), 2026-10-21 sequences \(\d+\.\d s\); failed 2026-10-21 \(\d+\.\d s\) in \d+\.\d s$#', $lines[0][1]);
         // Ang page ay gumagana: kinukuwenta ang ngayon on demand.
         $this->ceo();
         $this->assertGreaterThan(0, $this->get('/chatbot/speed')->assertOk()->viewData('total')['messages']);
         $this->assertNotNull(Cache::get(ResponseSpeed::PAGE_KEY . md5(json_encode($today))));
     }
 
-    public function test_S_201_5_a_sequences_answer_over_the_budget_is_not_written_by_the_warm_run(): void
+    public function test_S_201_5_a_sequences_answer_over_the_budget_is_shown_as_too_large_and_does_not_replace_a_full_one(): void
     {
-        // Ang Sequences ay lampas sa badyet sa takbo ng warm (hal. mas maliit ang memory_limit ng CLI): hindi ito isinusulat,
-        // kaya ang endpoint ang kukuwenta nito (sa sariling badyet nito); ang page part ay naisulat, at ang kahapon ay may tala.
+        // Ang Sequences ay lampas sa badyet sa takbo ng warm: kapag wala pang entry, ang tala na too_large ang isinusulat (ang
+        // endpoint ay hindi kumukuwenta ng default na view, spec 277, kaya "too large" at hindi "building" nang walang hanggan);
+        // ang page part ay naisulat, at ang kahapon ay may tala.
         Cache::flush();
         $this->app->instance(ResponseSpeed::class, new class extends ResponseSpeed {
             protected function sequenceBudget(): int
@@ -376,13 +383,31 @@ class SpeedPrewarmTest extends ChatblastTestCase
 
         foreach (['2026-10-20', '2026-10-21'] as $d) {
             $f = ResponseSpeed::filters(['date' => $d]);
-            $this->assertNull(Cache::get(ResponseSpeed::SEQUENCES_KEY . md5(json_encode($f))), "$d sequences not written");
+            $this->assertTrue(Cache::get(ResponseSpeed::SEQUENCES_KEY . md5(json_encode($f)))['sequences']['too_large'], "$d sequences written as too large");
             $this->assertNotNull(Cache::get(ResponseSpeed::PAGE_KEY . md5(json_encode($f))), "$d page written");
         }
         $this->assertIsInt(Cache::get(ResponseSpeed::WARM_STAMP_KEY . '2026-10-20'));
         $this->assertCount(1, $lines);
         $this->assertSame('warning', $lines[0][0]);
-        $this->assertMatchesRegularExpression('#^chatbot:speed-warm warmed 2026-10-20, 2026-10-21; too large 2026-10-20 sequences, 2026-10-21 sequences in \d+\.\d s$#', $lines[0][1]);
+        $this->assertMatchesRegularExpression('#^chatbot:speed-warm warmed 2026-10-20 \(\d+\.\d s\), 2026-10-21 \(\d+\.\d s\); too large 2026-10-20 sequences \(\d+\.\d s\), 2026-10-21 sequences \(\d+\.\d s\) in \d+\.\d s$#', $lines[0][1]);
+        $this->ceo();
+        $this->assertStringContainsString('Sequences section too large to compute now', $this->getJson('/chatbot/speed/sequences')->assertOk()->json('html'));
+
+        // Ang buong sagot na naisulat na ay hindi pinapalitan ng susunod na too_large.
+        $this->app->forgetInstance(ResponseSpeed::class);
+        Cache::flush();
+        Artisan::call('chatbot:speed-warm');
+        $this->travel(ResponseSpeed::SEQUENCES_WARM_SECONDS)->seconds();
+        $this->app->instance(ResponseSpeed::class, new class extends ResponseSpeed {
+            protected function sequenceBudget(): int
+            {
+                return 0;
+            }
+        });
+        Artisan::call('chatbot:speed-warm');
+        $today = Cache::get(ResponseSpeed::SEQUENCES_KEY . md5(json_encode(ResponseSpeed::filters([]))));
+        $this->assertArrayNotHasKey('too_large', $today['sequences']);
+        $this->assertGreaterThan(0, $today['sequences']['total']['due']);
     }
 
     public function test_S_201_3_a_sequences_call_over_its_time_budget_answers_too_large_in_time(): void
@@ -398,12 +423,13 @@ class SpeedPrewarmTest extends ChatblastTestCase
         });
         $this->ceo();
         Cache::flush();
-        $page = $this->get('/chatbot/speed?date=2026-10-20')->assertOk();
+        // May page: ang may filter ay kinukuwenta sa request (ang default na view ay galing sa warm, spec 277).
+        $page = $this->get('/chatbot/speed?date=2026-10-20&page_id=1002')->assertOk();
         $this->assertGreaterThan(0, $page->viewData('total')['messages']);
-        $s = $this->getJson('/chatbot/speed/sequences?date=2026-10-20')->assertOk()->json();
+        $s = $this->getJson('/chatbot/speed/sequences?date=2026-10-20&page_id=1002')->assertOk()->json();
         $this->assertTrue($s['sequences']['too_large']);
         $this->assertStringContainsString('Sequences section too large to compute now', $s['html']);
-        $this->getJson('/chatbot/speed/sequences?date=2026-10-20&part=chart')->assertOk()->assertJsonPath('seq.series.avg.10', null);
+        $this->getJson('/chatbot/speed/sequences?date=2026-10-20&page_id=1002&part=chart')->assertOk()->assertJsonPath('seq.series.avg.10', null);
     }
 
     public function test_S_201_4_the_page_and_the_sequences_endpoint_give_the_numbers_of_the_old_screen(): void
@@ -416,18 +442,227 @@ class SpeedPrewarmTest extends ChatblastTestCase
             $this->assertGreaterThan(0, $old['sequences']['total']['due'] + $old['total']['messages'], "$name has data");
             Cache::flush();
             // Lahat ng numero maliban sa bagong Not sent (ang fixture ay walang pumalyang padala ng Main Flow o AI).
-            // The volume section is newer than the snapshot; ResponseSpeedTest covers it.
-            $page = self::plain(self::withoutNotSent(array_diff_key(app(ResponseSpeed::class)->output($q), ['volume' => 1])));
+            // The volume section is newer than the snapshot; ResponseSpeedTest covers it. Ang built_at at final ay bago rin (spec 277).
+            $page = self::plain(self::withoutNotSent(array_diff_key(app(ResponseSpeed::class)->output($q), ['volume' => 1, 'built_at' => 1, 'final' => 1])));
             $wantPage = $old;
             unset($wantPage['sequences'], $wantPage['charts']['seq']);
             $this->assertSame($wantPage, $page, "$name: page");
 
-            $qs = http_build_query($q);
-            $section = $this->getJson('/chatbot/speed/sequences' . ($qs !== '' ? '?' . $qs : ''))->assertOk()->json();
+            // Ang default na view ng ngayon at kahapon ay galing sa warm: ang speedSequences ay nagpapatakbo nito kapag "building".
+            $section = $this->speedSequences(http_build_query($q));
             $this->assertSame($old['sequences'], $section['sequences'], "$name: sequences");
             $this->assertSame($old['filters'], $section['filters'], "$name: filters");
-            $chart = $this->getJson('/chatbot/speed/sequences?' . http_build_query($q + ['part' => 'chart']))->assertOk()->json();
+            $chart = $this->speedSequences(http_build_query($q), true);
             $this->assertSame(['date' => $old['charts']['date'], 'prev_date' => $old['charts']['prev_date'], 'seq' => $old['charts']['seq']], $chart, "$name: chart");
+        }
+    }
+
+    // ── spec 277: ang warm na gumagana, ang tapos nang araw, ang page na hindi naghihintay ───────────────────────────
+
+    /** Ang mga araw na binasa sa $table habang tumatakbo ang $run (ang petsa ng bawat binding na oras). */
+    private function readDays(string $table, callable $run): array
+    {
+        $out = [];
+        foreach ($this->bigReads($run)[$table] ?? [] as $b) {
+            foreach ($b as $v) if (is_string($v) && preg_match('/^\d{4}-\d{2}-\d{2} /', $v)) $out[substr($v, 0, 10)] = true;
+        }
+        ksort($out);
+
+        return array_keys($out);
+    }
+
+    /** Ang mga araw na binasa ng isang takbo ng warm: [botcake_chats, chatbot_events]. */
+    private function warmReads(): array
+    {
+        $events = [];
+        $chats = $this->readDays('botcake_chats', function () use (&$events): void {
+            $events = $this->readDays('chatbot_events', fn () => Artisan::call('chatbot:speed-warm'));
+        });
+
+        return [$chats, $events];
+    }
+
+    public function test_S_277_1_a_stamp_stored_as_a_numeric_string_is_respected(): void
+    {
+        // Ang Redis ay nagbabalik ng numero bilang string: ang tala ng init ay hindi dapat "wala" dahil dito.
+        Cache::flush();
+        Artisan::call('chatbot:speed-warm');
+        $now = (string) now()->getTimestamp();
+        Cache::put(ResponseSpeed::WARM_STAMP_KEY . '2026-10-20', $now, 3600);
+        foreach (['2026-10-20', '2026-10-21'] as $d) Cache::put(ResponseSpeed::SEQUENCES_WARM_STAMP_KEY . $d, $now, 3600);
+        $this->assertIsString(Cache::get(ResponseSpeed::WARM_STAMP_KEY . '2026-10-20'));
+        $this->travel(2)->minutes();
+
+        // Ang ngayon lang ang page na kinukuwenta; walang Sequences (wala pang 30 minuto ang tala).
+        [$chats, $events] = $this->warmReads();
+        $this->assertSame(['2026-10-21', '2026-10-22'], $chats);
+        $this->assertSame([], $events, 'no sequences rebuilt within the period');
+
+        // Ang lumang tala (string din) ay lumipas na: kinukuwenta ulit.
+        $old = (string) (now()->getTimestamp() - ResponseSpeed::SEQUENCES_WARM_SECONDS);
+        Cache::put(ResponseSpeed::WARM_STAMP_KEY . '2026-10-20', $old, 3600);
+        Cache::put(ResponseSpeed::SEQUENCES_WARM_STAMP_KEY . '2026-10-21', $old, 3600);
+        [$chats, $events] = $this->warmReads();
+        $this->assertSame(['2026-10-20', '2026-10-21', '2026-10-22'], $chats);
+        $this->assertSame(['2026-10-21', '2026-10-22'], $events, 'today\'s sequences only');
+    }
+
+    public function test_S_277_2_the_warm_runs_with_a_1024M_memory_limit_and_gives_the_old_one_back(): void
+    {
+        $seen = [];
+        $this->app->instance(ResponseSpeed::class, new class ($seen) extends ResponseSpeed {
+            public function __construct(private array &$seen)
+            {
+            }
+
+            public function warmDefault(): array
+            {
+                $this->seen[] = [ini_get('memory_limit'), $this->sequenceBudget()];
+
+                return ['warmed' => [], 'failed' => [], 'too_large' => [], 'secs' => []];
+            }
+        });
+        $was = ini_get('memory_limit');
+        // Ang "mas mababa" ay higit sa nagamit na ng proseso (sa buong suite ay malaki na ito), pero mas mababa sa 1024M.
+        $low = max(512, intdiv(memory_get_usage(true), 1048576) + 64);
+        if ($low >= 1024) $this->markTestSkipped("the process already uses about {$low}M");
+        try {
+            foreach (['-1', $low . 'M', '2048M'] as $limit) {
+                ini_set('memory_limit', $limit);
+                Artisan::call('chatbot:speed-warm');
+                $this->assertSame($limit, ini_get('memory_limit'), "$limit given back");
+            }
+        } finally {
+            ini_set('memory_limit', $was);
+        }
+        // Mas mababa o walang hangganan: 1024M (badyet 768M); mas mataas: hindi ibinababa.
+        $this->assertSame([['1024M', 768 * 1048576], ['1024M', 768 * 1048576], ['2048M', 1536 * 1048576]], $seen);
+    }
+
+    public function test_S_277_4_final_sequences_of_yesterday_are_built_once_and_kept_for_a_week(): void
+    {
+        // 07:00: ang Sequences ng kahapon ay tapos na (lampas na ang 06:00 ng huling step); ang page ng kahapon ay hindi pa
+        // (24 oras ng sagot), kaya ito ay kada YESTERDAY_WARM_SECONDS pa rin.
+        $this->travelTo('2026-10-21 07:00:00');
+        Cache::flush();
+        $this->assertSame(['2026-10-20', '2026-10-21', '2026-10-22'], $this->readDays('chatbot_events', fn () => Artisan::call('chatbot:speed-warm')));
+        $key = ResponseSpeed::SEQUENCES_KEY . md5(json_encode(ResponseSpeed::filters(['date' => '2026-10-20'])));
+        $entry = Cache::get($key);
+        $this->assertTrue($entry['final']);
+        $this->assertFalse(Cache::get(ResponseSpeed::PAGE_KEY . md5(json_encode(ResponseSpeed::filters(['date' => '2026-10-20']))))['final']);
+
+        // Lampas sa SEQUENCES_WARM_SECONDS at sa YESTERDAY_WARM_SECONDS: ang Sequences ng ngayon at ang page ng kahapon ay
+        // kinukuwenta ulit, ang tapos nang Sequences ng kahapon ay hindi.
+        $this->travel(ResponseSpeed::SEQUENCES_WARM_SECONDS)->seconds();
+        [$chats, $events] = $this->warmReads();
+        $this->assertSame(['2026-10-21', '2026-10-22'], $events, 'yesterday\'s final sequences are not rebuilt');
+        $this->assertSame(['2026-10-20', '2026-10-21', '2026-10-22'], $chats);
+        $this->assertSame($entry, Cache::get($key));
+
+        // Itinatago nang 7 araw: anim na araw mula ngayon ay nandoon pa (ang endpoint ng araw na iyon ay galing dito).
+        $this->travel(6)->days();
+        $this->assertSame($entry, Cache::get($key));
+        $this->ceo();
+        $this->assertSame([], $this->readDays('chatbot_events', fn () => $this->getJson('/chatbot/speed/sequences?date=2026-10-20')->assertOk()));
+        $this->travel(2)->days();
+        $this->assertNull(Cache::get($key));
+    }
+
+    public function test_S_277_4_a_final_past_day_opened_on_the_page_is_kept_for_a_week(): void
+    {
+        $this->ceo();
+        Cache::flush();
+        // Ang 2026-10-19 ay tapos na (lampas na ang 24 oras ng sagot): ang default na view nito ay kinukuwenta nang isang beses.
+        $this->get('/chatbot/speed?date=2026-10-19')->assertOk();
+        $key = ResponseSpeed::PAGE_KEY . md5(json_encode(ResponseSpeed::filters(['date' => '2026-10-19'])));
+        $entry = Cache::get($key);
+        $this->assertTrue($entry['final']);
+        $this->travel(5)->days();
+        $res = $this->get('/chatbot/speed?date=2026-10-19')->assertOk();
+        $this->assertSame($entry['built_at'], $res->viewData('built_at'), 'served from the kept copy');
+        $this->assertSame($entry, Cache::get($key));
+        // Ang may filter ay 30 minuto pa rin.
+        $this->get('/chatbot/speed?date=2026-10-19&page_id=1001')->assertOk();
+        $this->travel(ResponseSpeed::PAST_CACHE_SECONDS + 1)->seconds();
+        $this->assertNotSame([], $this->readDays('botcake_chats', fn () => $this->get('/chatbot/speed?date=2026-10-19&page_id=1001')->assertOk()));
+    }
+
+    public function test_S_277_4_yesterday_not_final_yet_is_rebuilt_on_schedule(): void
+    {
+        // 03:00: ang mga step ng kahapon ay puwede pang tumakbo hanggang 06:00, kaya ang Sequences nito ay kada 30 minuto.
+        $this->travelTo('2026-10-21 03:00:00');
+        Cache::flush();
+        Artisan::call('chatbot:speed-warm');
+        $key = ResponseSpeed::SEQUENCES_KEY . md5(json_encode(ResponseSpeed::filters(['date' => '2026-10-20'])));
+        $this->assertFalse(Cache::get($key)['final']);
+        $this->travel(ResponseSpeed::SEQUENCES_WARM_SECONDS - 60)->seconds();
+        $this->assertSame([], $this->readDays('chatbot_events', fn () => Artisan::call('chatbot:speed-warm')));
+        $this->travel(60)->seconds();
+        $this->assertSame(['2026-10-20', '2026-10-21', '2026-10-22'], $this->readDays('chatbot_events', fn () => Artisan::call('chatbot:speed-warm')));
+        $this->assertFalse(Cache::get($key)['final'], 'still not final at 03:30');
+    }
+
+    public function test_S_277_5_the_default_page_comes_from_the_warm_entry_and_shows_when_it_was_built(): void
+    {
+        Cache::flush();
+        Artisan::call('chatbot:speed-warm');
+        $this->ceo();
+        // Ilang minuto pagkatapos (ang susunod na takbo ay mabagal pa): walang basa, ang oras ng entry ang nakikita. Ang
+        // banner ng mga problema ng layout (sariling cache) ay inihahanda muna.
+        $this->travel(9)->minutes();
+        app(\App\Services\Chatbot\ProblemsPanel::class)->panel();
+        $res = null;
+        $this->assertSame([], $this->bigReads(function () use (&$res): void {
+            $res = $this->get('/chatbot/speed')->assertOk();
+        }));
+        $this->assertSame(strtotime('2026-10-21 12:30:00'), $res->viewData('built_at'));
+        $this->assertStringContainsString('data-sp-asof="page">Numbers as of 12:30</p>', $res->getContent());
+        $s = $this->getJson('/chatbot/speed/sequences')->assertOk()->json();
+        $this->assertSame(strtotime('2026-10-21 12:30:00'), $s['built_at']);
+        $this->assertStringContainsString('data-sp-asof="sequences">As of 12:30</p>', $s['html']);
+    }
+
+    public function test_S_277_5_a_missing_default_sequences_entry_answers_building_at_once(): void
+    {
+        $this->ceo();
+        Cache::flush();
+        foreach (['', '?date=2026-10-20'] as $q) {
+            $s = null;
+            $c = null;
+            $reads = $this->bigReads(function () use (&$s, $q): void {
+                $s = $this->getJson('/chatbot/speed/sequences' . $q)->assertOk()->json();
+            });
+            $this->assertArrayNotHasKey('chatbot_events', $reads, "$q: nothing computed");
+            // Ang chart: ang araw ay walang punto; ang naunang araw ng kahapon (hindi pinapainit) ay kinukuwenta gaya ng dati.
+            $c = $this->getJson('/chatbot/speed/sequences' . ($q === '' ? '?' : $q . '&') . 'part=chart')->assertOk()->json();
+            $this->assertTrue($s['sequences']['building']);
+            $this->assertNull($s['built_at']);
+            $this->assertStringContainsString('Binubuo pa ang Sequences; lalabas sa loob ng ilang minuto', $s['html']);
+            $this->assertStringNotContainsString('sp-chart-seq', $s['html']);
+            $this->assertSame([], array_filter($c['seq']['series']['avg'], fn ($v) => $v !== null));
+            $this->assertNull(Cache::get(ResponseSpeed::SEQUENCES_KEY . md5(json_encode(ResponseSpeed::filters(['date' => $s['filters']['date']])))), 'not written');
+        }
+        // Ang page ay may retry ng section kapag building.
+        $this->assertStringContainsString('s.sequences.building', $this->get('/chatbot/speed')->getContent());
+        // Ang susunod na takbo ng warm ang gumagawa nito.
+        Artisan::call('chatbot:speed-warm');
+        $s = $this->getJson('/chatbot/speed/sequences')->assertOk()->json();
+        $this->assertArrayNotHasKey('building', $s['sequences']);
+        $this->assertGreaterThan(0, $s['sequences']['total']['due']);
+    }
+
+    public function test_S_277_5_filtered_sequences_and_older_days_are_still_computed_on_request(): void
+    {
+        $this->ceo();
+        Cache::flush();
+        foreach (['?page_id=1001', '?bot=Forbeast', '?date=2026-10-19'] as $q) {
+            $s = null;
+            $reads = $this->bigReads(function () use (&$s, $q): void {
+                $s = $this->getJson('/chatbot/speed/sequences' . $q)->assertOk()->json();
+            });
+            $this->assertArrayHasKey('chatbot_events', $reads, "$q: computed");
+            $this->assertArrayNotHasKey('building', $s['sequences']);
+            $this->assertIsInt($s['built_at']);
         }
     }
 }

@@ -1,9 +1,13 @@
 {{-- Ang laman ng Sequences section ng /chatbot/speed (sa ilalim ng heading), mula sa endpoint nito pagkatapos lumabas ng page. --}}
 @php($sec = fn ($v) => $v === null ? '—' : rtrim(rtrim(number_format($v, 1), '0'), '.') . ' s')
-@if(!empty($sequences['too_large']))
-<p class="text-sm text-slate-600" data-sp-note="sequences">Sequences section too large to compute now. The other sections are complete; this one tries again within 2 minutes.</p>
+@php($asOf = isset($builtAt) && $builtAt !== null ? \Carbon\Carbon::createFromTimestamp($builtAt, 'Asia/Manila')->format('H:i') : null)
+@if(!empty($sequences['building']))
+<p class="text-sm text-slate-600" role="status" data-sp-note="sequences-building">Binubuo pa ang Sequences; lalabas sa loob ng ilang minuto.</p>
+@elseif(!empty($sequences['too_large']))
+<p class="text-sm text-slate-600" data-sp-note="sequences">Sequences section too large to compute now. The other sections are complete; this one tries again later.@if($asOf) <span class="text-xs text-slate-500" data-sp-asof="sequences">(as of {{ $asOf }})</span>@endif</p>
 @else
 @php($st = $sequences['total'])
+@if($asOf)<p class="text-xs text-slate-500" data-sp-asof="sequences">As of {{ $asOf }}</p>@endif
 <p class="text-sm tabular-nums text-slate-600" data-sp-summary="sequences">Day: {{ number_format($st['due']) }} due · {{ number_format($st['sent']) }} sent · {{ number_format($st['failed']) }} failed · {{ number_format($st['skipped']) }} skipped; scheduled → pushed avg {{ $sec($st['scheduled_to_pushed']['avg']) }} · p90 {{ $sec($st['scheduled_to_pushed']['p90']) }} · max {{ $sec($st['scheduled_to_pushed']['max']) }}; pushed → sent at Meta: {{ number_format($st['pushed_to_meta']['n']) }} steps · avg {{ $sec($st['pushed_to_meta']['avg']) }} · p90 {{ $sec($st['pushed_to_meta']['p90']) }} · max {{ $sec($st['pushed_to_meta']['max']) }}</p>
 @include('chatbot.partials.speed-chart', ['id' => 'seq', 'title' => 'Sequences by hour due: pushed → sent at Meta, average and p90', 'label' => 'Average and p90 of sequence steps from pushed to sent at Meta per hour, with the previous day as reference'])
 <details class="sp-table mt-3" data-sp-table="sequences">

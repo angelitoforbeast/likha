@@ -15,9 +15,10 @@ use Illuminate\Support\Facades\Schema;
  * nito na talagang naipadala: ang oras ng Meta mula sa send_status (confirmed_at) kapag mayroon, kung wala ay ang sent_at
  * ng talaan (binibilang bilang "unconfirmed"). Hindi ang delivered o seen: oras iyon ng telepono ng customer, hindi ng bot.
  * Dalawang query na may petsa sa index (botcake_chats.received_at at chatbot_replies.sent_at), ang pagtutugma ay sa PHP;
- * naka-cache kada (araw, page, bot): ngayon 2 minuto, ang lumang araw 30 minuto. Ang dobleng tala ng isang mensahe ay
- * isa lang; ang pumalyang padala sa parehong pagbasa ang "Not sent". Ang Sequences ay sariling cache at endpoint
- * (sequencesOutput), at ang default na view ay pinapainit ng chatbot:speed-warm (warmDefault).
+ * naka-cache kada (araw, page, bot): ngayon 2 minuto, ang lumang araw 30 minuto, ang tapos nang araw ng default na view
+ * 7 araw. Ang dobleng tala ng isang mensahe ay isa lang; ang pumalyang padala sa parehong pagbasa ang "Not sent". Ang
+ * Sequences ay sariling cache at endpoint (sequencesOutput), at ang default na view ay pinapainit ng chatbot:speed-warm
+ * (warmDefault); bawat entry ay may built_at ("as of" sa screen).
  */
 class ResponseSpeed
 {
@@ -46,23 +47,31 @@ class ResponseSpeed
      * Ang dalawang cache: ang mga numero ng page (walang Sequences) at ang Sequences. Ang bersyon sa key ay pinapalitan
      * kapag nagbago ang hugis ng laman, para hindi mabasa ng bagong code ang lumang entry pagkatapos ng deploy.
      */
-    public const PAGE_KEY = 'response-speed:v4:';
-    public const SEQUENCES_KEY = 'response-speed-seq:v1:';
+    public const PAGE_KEY = 'response-speed:v5:';
+    /** Ang entry ng Sequences: {built_at, final, sequences}. */
+    public const SEQUENCES_KEY = 'response-speed-seq:v2:';
     /** Ang listahan ng "Not sent" ng isang araw at filter: isinusulat kasabay ng entry ng page (iisang kuwenta). */
     public const NOT_SENT_KEY = 'response-speed-not-sent:v1:';
     /** Ang pinakamaraming row ng listahan na ipinapakita (ang pinakabago); ang bilang ay ang lahat. */
     public const NOT_SENT_SHOWN = 200;
     /**
-     * Ang isinusulat ng pre-warm ay mas matagal nang kaunti kaysa sa sariling TTL ng page, para hindi ito mag-expire sa
-     * pagitan ng dalawang takbo (kada 2 minuto, at ang takbo mismo ay ilang segundo).
+     * Ang isinusulat ng pre-warm ay mas matagal kaysa sa sariling pagitan nito nang isang mabagal na takbo (ang takbo ay
+     * umaabot nang ilang minuto), para hindi ito mag-expire habang tumatakbo pa ang susunod at walang naghihintay na tao.
      */
-    public const WARM_GRACE_SECONDS = 180;
+    public const WARM_GRACE_SECONDS = 900;
+    /** Ang entry ng ngayon na isinulat ng warm: pinapalitan bawat takbo, kaya ilang minuto lang ang edad nito. */
+    public const TODAY_WARM_SECONDS = 900;
     /** Ang kahapon ay halos hindi na nagbabago: pinapainit ulit kapag ganito na katagal ang huling init nito. */
     public const YESTERDAY_WARM_SECONDS = 1200;
     public const WARM_STAMP_KEY = 'response-speed:warmed:';
-    /** The Sequences section is pre-warmed at most this often per day (and kept that long). */
+    /** The Sequences section is pre-warmed at most this often per day (and kept that long plus the grace). */
     public const SEQUENCES_WARM_SECONDS = 1800;
     public const SEQUENCES_WARM_STAMP_KEY = 'response-speed:seq-warmed:';
+    /**
+     * Ang tapos nang araw (lampas na ang palugit ng sagot, o ng huling step para sa Sequences): hindi na nagbabago ang
+     * numero, kaya ang default na view nito ay isang beses kinukuwenta at itinatago nang 7 araw.
+     */
+    public const FINAL_KEEP_SECONDS = 7 * 86400;
 
     public function output(array $q): array
     {
@@ -81,18 +90,20 @@ class ResponseSpeed
 
     /**
      * Ang Sequences ng /chatbot/speed, hiwalay sa page (ito ang pinakamabigat): walang $chart, ang araw lang
-     * ({filters, sequences}); may $chart, ang chart nito ({date, prev_date, seq}) mula sa araw at sa naunang araw. Bawat
-     * tawag ay hindi lalampas sa isang araw ng Sequences na kinukuwenta (ang araw ay naka-cache na mula sa unang tawag).
+     * ({filters, sequences, built_at}); may $chart, ang chart nito ({date, prev_date, seq}) mula sa araw at sa naunang
+     * araw. Bawat tawag ay hindi lalampas sa isang araw ng Sequences na kinukuwenta (ang araw ay naka-cache na mula sa
+     * unang tawag). $fromWarm (ang endpoint): ang default na view ng ngayon at kahapon ay galing lang sa warm; kapag wala
+     * pa ang entry, ang tala na "building" agad (hindi kinukuwenta rito), at ang warm ang gagawa nito sa susunod na takbo.
      */
-    public function sequencesOutput(array $q, bool $chart = false): array
+    public function sequencesOutput(array $q, bool $chart = false, bool $fromWarm = false): array
     {
         $f = self::filters($q);
         $today = now()->toDateString();
-        $seq = $this->sequencesDay($f, $today);
-        if (!$chart) return ['filters' => $f, 'sequences' => $seq];
+        $entry = $this->sequencesDay($f, $today, $fromWarm);
+        if (!$chart) return ['filters' => $f, 'sequences' => $entry['sequences'], 'built_at' => $entry['built_at']];
         $pf = ['date' => CarbonImmutable::parse($f['date'])->subDay()->toDateString()] + $f;
 
-        return self::charts(['filters' => $f, 'sequences' => $seq], ['filters' => $pf, 'sequences' => $this->sequencesDay($pf, $today)], ['seq']);
+        return self::charts(['filters' => $f, 'sequences' => $entry['sequences']], ['filters' => $pf, 'sequences' => $this->sequencesDay($pf, $today, $fromWarm)['sequences']], ['seq']);
     }
 
     private static function ttl(array $f, string $today): int
@@ -100,20 +111,52 @@ class ResponseSpeed
         return $f['date'] === $today ? self::TODAY_CACHE_SECONDS : self::PAST_CACHE_SECONDS;
     }
 
+    /** Ang default na view: walang page at walang bot (ang pinapainit ng warm). */
+    private static function isDefault(array $f): bool
+    {
+        return $f['page_id'] === null && $f['bot'] === null;
+    }
+
+    /** Ang default na view ng ngayon o kahapon: ang mga araw na kinukuwenta ng warm. */
+    private static function warmed(array $f, string $today): bool
+    {
+        return self::isDefault($f) && in_array($f['date'], [$today, CarbonImmutable::parse($today)->subDay()->toDateString()], true);
+    }
+
     /**
-     * Ang mga numero ng isang araw at filter (walang Sequences), naka-cache (ngayon 2 minuto, ang lumang araw 30 minuto,
-     * dagdag ang $extra ng pre-warm). Ang listahan ng "Not sent" ay sariling key, isinusulat muna (kaya kapag may entry ang
-     * page ay may listahan din). $fresh: hindi binabasa ang cache.
+     * Tapos na ang araw kapag lampas na ang palugit nito ($window segundo mula sa dulo ng araw: MAX_WAIT_SECONDS para sa
+     * mga sagot, STEP_LATE_SECONDS para sa Sequences): wala nang darating na mabibilang dito.
      */
-    private function day(array $f, string $today, int $extra = 0, bool $fresh = false): array
+    public static function isFinal(string $date, int $window): bool
+    {
+        return now()->getTimestamp() >= strtotime(CarbonImmutable::parse($date)->addDay()->toDateString() . ' 00:00:00') + $window;
+    }
+
+    /** Ang tala ng init (Unix time). Ang Redis ay nagbabalik ng numero bilang string ("1794733156"), kaya pareho ang dalawa. */
+    private static function stamp(mixed $v): ?int
+    {
+        if (is_int($v)) return $v;
+
+        return is_string($v) && $v !== '' && strlen($v) <= 12 && ctype_digit($v) ? (int) $v : null;
+    }
+
+    /**
+     * Ang mga numero ng isang araw at filter (walang Sequences), naka-cache: ngayon 2 minuto, ang lumang araw 30 minuto, ang
+     * tapos nang araw ng default na view 7 araw; $ttl (ang warm) ang pumapalit dito. Bawat entry ay may built_at (kailan
+     * binasa) at final. Ang listahan ng "Not sent" ay sariling key, isinusulat muna (kaya kapag may entry ang page ay may
+     * listahan din). $fresh: hindi binabasa ang cache.
+     */
+    private function day(array $f, string $today, ?int $ttl = null, bool $fresh = false): array
     {
         $key = self::PAGE_KEY . md5(json_encode($f));
         if (!$fresh) {
             $hit = Cache::get($key);
-            if ($hit !== null) return $hit;
+            if (is_array($hit)) return $hit;
         }
-        $out = $this->build($f, $today);
-        $ttl = self::ttl($f, $today) + $extra;
+        $at = now()->getTimestamp();
+        $final = self::isFinal($f['date'], self::MAX_WAIT_SECONDS);
+        $out = $this->build($f, $today) + ['built_at' => $at, 'final' => $final];
+        $ttl ??= $final && self::isDefault($f) ? self::FINAL_KEEP_SECONDS : self::ttl($f, $today);
         Cache::put(self::NOT_SENT_KEY . md5(json_encode($f)), $out['not_sent_list'], $ttl);
         unset($out['not_sent_list']);
         Cache::put($key, $out, $ttl);
@@ -134,7 +177,7 @@ class ResponseSpeed
         $hour = is_string($h) && ctype_digit($h) && strlen($h) <= 2 && (int) $h <= 23 ? (int) $h : null;
         $list = Cache::get(self::NOT_SENT_KEY . md5(json_encode($f)));
         if (!is_array($list)) {
-            $this->day($f, $today, 0, true);
+            $this->day($f, $today, null, true);
             $list = Cache::get(self::NOT_SENT_KEY . md5(json_encode($f))) ?? ['counts' => [], 'items' => []];
         }
         $items = $list['items'];
@@ -145,87 +188,121 @@ class ResponseSpeed
     }
 
     /**
-     * Ang Sequences ng isang araw at filter, sariling cache: ang hindi nakuwenta (too_large) ay sinusubukan ulit pagkalipas
-     * ng 2 minuto, hindi ng 30. Ang pre-warm ($extra > 0) ay hindi nagsusulat ng too_large: ang badyet ng CLI ay hindi ang
-     * sa web, kaya ang endpoint ang susubok nito sa sariling badyet (at ang naunang buong sagot ay hindi napapalitan).
+     * Ang Sequences ng isang araw at filter, sariling cache: ang entry ay {built_at, final, sequences}. Ang hindi nakuwenta
+     * (too_large) ay sinusubukan ulit pagkalipas ng 2 minuto, hindi ng 30; ang tapos nang araw ng default na view ay 7
+     * araw. $fromWarm: ang default na view ng ngayon at kahapon ay hindi kinukuwenta rito; kapag wala pa, ang tala na
+     * "building" (hindi isinusulat).
+     * @return array{built_at: ?int, final: bool, sequences: array}
      */
-    private function sequencesDay(array $f, string $today, int $extra = 0): array
+    private function sequencesDay(array $f, string $today, bool $fromWarm = false): array
     {
         $key = self::SEQUENCES_KEY . md5(json_encode($f));
-        if ($extra === 0) {
-            $hit = Cache::get($key);
-            if ($hit !== null) return $hit;
+        $hit = Cache::get($key);
+        if (is_array($hit)) return $hit;
+        if ($fromWarm && self::warmed($f, $today)) {
+            return ['built_at' => null, 'final' => false, 'sequences' => ['building' => true, 'hours' => array_fill(0, 24, null), 'total' => null, 'slowest' => []]];
         }
-        $out = $this->buildSequences($f, $today);
-        if (empty($out['too_large'])) Cache::put($key, $out, self::ttl($f, $today) + $extra);
-        elseif ($extra === 0) Cache::put($key, $out, self::TODAY_CACHE_SECONDS);
+        $entry = $this->sequencesEntry($f, $today);
+        $ttl = !empty($entry['sequences']['too_large']) ? self::TODAY_CACHE_SECONDS
+            : ($entry['final'] && self::isDefault($f) ? self::FINAL_KEEP_SECONDS : self::ttl($f, $today));
+        Cache::put($key, $entry, $ttl);
 
-        return $out;
+        return $entry;
     }
 
-    private function buildSequences(array $f, string $today): array
+    /** Ang bagong entry ng Sequences: final kapag lampas na ang huling step ng araw (STEP_LATE_SECONDS) bago pa ang basa. */
+    private function sequencesEntry(array $f, string $today): array
     {
+        $at = now()->getTimestamp();
+        $final = self::isFinal($f['date'], self::STEP_LATE_SECONDS);
         $start = $f['date'] . ' 00:00:00';
         $end = CarbonImmutable::parse($f['date'])->addDay()->toDateString() . ' 00:00:00';
 
-        return $this->sequencesSection($f, $start, $end, $f['date'] === $today ? (int) now()->format('G') : 23);
+        return ['built_at' => $at, 'final' => $final, 'sequences' => $this->sequencesSection($f, $start, $end, $f['date'] === $today ? (int) now()->format('G') : 23)];
     }
 
     /**
-     * Ang pre-warm ng default na view (walang page, walang bot): ang kahapon kapag oras na (walang tala na buo itong
-     * napainit bilang lumang araw, o YESTERDAY_WARM_SECONDS na ang tala), saka ang ngayon (bawat takbo). Sinusulat sa
-     * parehong key na binabasa ng page, hindi binabasa ang cache. Bawat bahagi ay sariling try: ang pumalya ay ini-report
-     * at hindi isinusulat (ang page ang kukuwenta nito gaya ng dati). Ang kahapon muna: ito ang reference ng mga chart ng
-     * ngayon. Pagkalipas ng hatinggabi ay walang tala ang bagong kahapon, kaya agad itong kinukuwenta ulit bilang buong araw.
-     * @return array{warmed: string[], failed: string[], too_large: string[]}
+     * Ang pre-warm ng default na view (walang page, walang bot). Ang mga page muna (mabilis): ang kahapon kapag oras na
+     * (walang entry, o YESTERDAY_WARM_SECONDS na ang tala; ang tapos nang araw ay hindi na), saka ang ngayon (bawat takbo,
+     * TODAY_WARM_SECONDS ang buhay). Saka ang Sequences ng kahapon at ng ngayon (warmSequences). Sinusulat sa parehong key
+     * na binabasa ng page, hindi binabasa ang cache. Bawat bahagi ay sariling try: ang pumalya ay ini-report at hindi
+     * isinusulat. Ang kahapon muna: ito ang reference ng mga chart ng ngayon. Pagkalipas ng hatinggabi ay walang tala ang
+     * bagong kahapon, kaya agad itong kinukuwenta ulit bilang buong araw.
+     * @return array{warmed: string[], failed: string[], too_large: string[], secs: array<string, float>}
      */
     public function warmDefault(): array
     {
         $today = now()->toDateString();
         $yesterday = CarbonImmutable::parse($today)->subDay()->toDateString();
-        $out = ['warmed' => [], 'failed' => [], 'too_large' => []];
-        $at = Cache::get(self::WARM_STAMP_KEY . $yesterday);
-        if (!is_int($at) || now()->getTimestamp() - $at >= self::YESTERDAY_WARM_SECONDS) {
-            if ($this->warm($yesterday, $today, $out)) Cache::put(self::WARM_STAMP_KEY . $yesterday, now()->getTimestamp(), self::PAST_CACHE_SECONDS + self::WARM_GRACE_SECONDS);
+        $out = ['warmed' => [], 'failed' => [], 'too_large' => [], 'secs' => []];
+        $yf = self::filters(['date' => $yesterday]);
+        $entry = Cache::get(self::PAGE_KEY . md5(json_encode($yf)));
+        $at = self::stamp(Cache::get(self::WARM_STAMP_KEY . $yesterday));
+        if (!is_array($entry) || (empty($entry['final']) && ($at === null || now()->getTimestamp() - $at >= self::YESTERDAY_WARM_SECONDS))) {
+            $ttl = self::isFinal($yesterday, self::MAX_WAIT_SECONDS) ? self::FINAL_KEEP_SECONDS : self::YESTERDAY_WARM_SECONDS + self::WARM_GRACE_SECONDS;
+            if ($this->warmPage($yf, $today, $ttl, $out)) Cache::put(self::WARM_STAMP_KEY . $yesterday, now()->getTimestamp(), self::YESTERDAY_WARM_SECONDS + self::WARM_GRACE_SECONDS);
         }
-        $this->warm($today, $today, $out);
+        $tf = self::filters(['date' => $today]);
+        $this->warmPage($tf, $today, self::TODAY_WARM_SECONDS, $out);
+        $this->warmSequences($yf, $today, $out);
+        $this->warmSequences($tf, $today, $out);
 
         return $out;
     }
 
-    /**
-     * Ang dalawang entry ng isang araw ng default na view. true kapag naisulat ang entry ng page (ang tala ng kahapon ay
-     * ayon dito: ang Sequences na hindi nakuwenta ay kinukuwenta ng endpoint, hindi ng bawat takbo).
-     */
-    private function warm(string $date, string $today, array &$out): bool
+    /** Ang entry ng page ng isang araw ng default na view, kinukuwenta ulit. true kapag naisulat. */
+    private function warmPage(array $f, string $today, int $ttl, array &$out): bool
     {
-        $f = self::filters(['date' => $date]);
-        $ok = true;
+        $t = microtime(true);
         try {
-            $this->day($f, $today, self::WARM_GRACE_SECONDS, true);
-            $out['warmed'][] = $date;
-        } catch (\Throwable $e) {
-            report($e);
-            $out['failed'][] = $date;
-            $ok = false;
-        }
-        // Ang error sa loob ng Sequences ay nagiging too_large (hindi isinusulat ng warm); ang try ay para sa pagsulat sa cache.
-        // The Sequences section is the heaviest read of the page (10-13 min a day on Incepxion): the pre-warm builds it at
-        // most once per SEQUENCES_WARM_SECONDS per day, also when it came out too large, and keeps it that long. Every
-        // 2 minutes it held the database the reply sends use.
-        $stamp = self::SEQUENCES_WARM_STAMP_KEY . $date;
-        $at = Cache::get($stamp);
-        if (is_int($at) && now()->getTimestamp() - $at < self::SEQUENCES_WARM_SECONDS) return $ok;
-        Cache::put($stamp, now()->getTimestamp(), self::SEQUENCES_WARM_SECONDS + self::WARM_GRACE_SECONDS);
-        try {
-            $seq = $this->sequencesDay($f, $today, self::SEQUENCES_WARM_SECONDS + self::WARM_GRACE_SECONDS);
-            $out[empty($seq['too_large']) ? 'warmed' : 'too_large'][] = $date . ' sequences';
-        } catch (\Throwable $e) {
-            report($e);
-            $out['failed'][] = $date . ' sequences';
-        }
+            $this->day($f, $today, $ttl, true);
+            $out['warmed'][] = $f['date'];
 
-        return $ok;
+            return true;
+        } catch (\Throwable $e) {
+            report($e);
+            $out['failed'][] = $f['date'];
+
+            return false;
+        } finally {
+            $out['secs'][$f['date']] = round(microtime(true) - $t, 1);
+        }
+    }
+
+    /**
+     * Ang Sequences ng isang araw ng default na view, ang pinakamabigat na basa ng page: kinukuwenta kapag wala pa ang
+     * entry (ang endpoint ay "building" hanggang dito), o kapag SEQUENCES_WARM_SECONDS na ang tala nito, kahit too_large
+     * ang huli (bawat 2 minuto ay hawak nito ang database ng mga padala). Ang tapos nang araw na may buong kopya ay hindi na
+     * kinukuwenta. Ang too_large ay hindi pumapalit sa naunang buong sagot; kapag wala pa, ito ang isinusulat (para ang
+     * endpoint ay "too large" at hindi "building" habang naghihintay ng susunod na subok).
+     */
+    private function warmSequences(array $f, string $today, array &$out): void
+    {
+        $key = self::SEQUENCES_KEY . md5(json_encode($f));
+        $entry = Cache::get($key);
+        $complete = is_array($entry) && empty($entry['sequences']['too_large']);
+        if ($complete && !empty($entry['final'])) return;
+        $stamp = self::SEQUENCES_WARM_STAMP_KEY . $f['date'];
+        $at = self::stamp(Cache::get($stamp));
+        if (is_array($entry) && $at !== null && now()->getTimestamp() - $at < self::SEQUENCES_WARM_SECONDS) return;
+        Cache::put($stamp, now()->getTimestamp(), self::SEQUENCES_WARM_SECONDS + self::WARM_GRACE_SECONDS);
+        $label = $f['date'] . ' sequences';
+        $t = microtime(true);
+        // Ang error sa loob ng Sequences ay nagiging too_large; ang try ay para sa pagsulat sa cache.
+        try {
+            $new = $this->sequencesEntry($f, $today);
+            if (empty($new['sequences']['too_large'])) {
+                Cache::put($key, $new, $new['final'] ? self::FINAL_KEEP_SECONDS : self::SEQUENCES_WARM_SECONDS + self::WARM_GRACE_SECONDS);
+                $out['warmed'][] = $label;
+            } else {
+                if (!$complete) Cache::put($key, $new, self::SEQUENCES_WARM_SECONDS + self::WARM_GRACE_SECONDS);
+                $out['too_large'][] = $label;
+            }
+        } catch (\Throwable $e) {
+            report($e);
+            $out['failed'][] = $label;
+        }
+        $out['secs'][$label] = round(microtime(true) - $t, 1);
     }
 
     /**
@@ -773,22 +850,44 @@ class ResponseSpeed
         $hours = array_fill(0, 24, $blank);
         $total = $blank;
         $late = date('Y-m-d H:i:s', strtotime($end) + self::STEP_LATE_SECONDS);
-        // Dalawang basa ng mga event ng araw, walang hawak na row: una ang mga customer, page at sequence (para sa
-        // kasaysayan nila) at ang unang takbo ng bawat customer + sequence; pangalawa ang bilang. Ang pangalawa ay ang mga
-        // event lang na nakita ng una (hanggang sa ID nito): ang padala ay isinusulat bago ang event, kaya bawat bilang na
-        // event ay may padala na nang basahin ang mga padala, gaya ng dati.
-        [$pages, $psids, $names, $first] = [[], [], [], []];
-        $maxId = $this->stepEvents($f['page_id'], $start, $late, $budget, function (object $e, array $d) use (&$pages, &$psids, &$names, &$first): void {
-            $pages[(int) $e->page_id] = true;
-            $psids[(int) $e->psid] = true;
-            $name = (string) ($d['name'] ?? '');
-            $names[$name] = true;
-            $k = $e->page_id . ':' . $e->psid . ':' . $name;
-            if (!isset($first[$k]) || (string) $e->created_at < $first[$k]) $first[$k] = (string) $e->created_at;
+        // Dalawang basa ng mga event ng araw, walang hawak na row: una ang unang takbo ng bawat customer + sequence ($first)
+        // at kung may naunang event nila sa araw bago iyon ($early); pangalawa ang bilang. Ang pangalawa ay ang mga event
+        // lang na nakita ng una (hanggang sa ID nito): ang padala ay isinusulat bago ang event, kaya bawat bilang na event ay
+        // may padala na nang basahin ang mga padala, gaya ng dati.
+        // Iisang listahan kada customer + sequence ($cur): ang oras ng unang event nila sa araw habang wala pang takbo
+        // (string), saka 1 sa unang takbo, o 2 kapag may naunang event sa araw bago ang takbong iyon.
+        [$names, $cur] = [[], []];
+        $maxId = $this->stepEvents($f['page_id'], $start, $late, $budget, function (object $e, array $d, bool $run) use (&$names, &$cur): void {
+            $at = (string) $e->created_at;
+            if ($run) {
+                $name = (string) ($d['name'] ?? '');
+                $names[$name] = true;
+                $k = $e->page_id . ':' . $e->psid . ':' . $name;
+                // Ayon sa oras ang basa, kaya ang unang nakita ang pinakamaaga.
+                if (!is_int($cur[$k] ?? null)) $cur[$k] = isset($cur[$k]) && $cur[$k] < $at ? 2 : 1;
+            }
+            if (is_string($d['name'] ?? null)) $cur[$e->page_id . ':' . $e->psid . ':' . $d['name']] ??= $at;
         });
-        $before = $this->stepHistory(array_keys($pages), array_keys($psids), $first, $late, $budget);
+        // Ang kasaysayan bago ang araw: ang huling event lang ng bawat customer + sequence na walang naunang event sa araw
+        // bago ang unang takbo nito (ang iba ay may mas bagong event na sa araw mismo).
+        $want = [];
+        foreach ($cur as $k => $v) {
+            if ($v !== 1) continue;
+            [$page, $psid, $name] = explode(':', $k, 3);
+            $want[$page . ':' . $psid][$name] = true;
+        }
+        $last = $this->lastBefore($want, $start, $budget);
+        unset($want);
+        // Habang binabasa ang araw, kada customer + sequence na may takbo: ang oras ng huling event at ng nauna rito na mas
+        // maaga ("huli\nnauna", isang string para magaan), para sa naunang event ng bawat step (originalDue). Simula: ang
+        // huling event bago ang araw ('' = wala, o mas bago na ang nasa araw mismo).
+        foreach ($cur as $k => $v) {
+            if (is_int($v)) $cur[$k] = $last[$k] ?? '';
+            else unset($cur[$k]);
+        }
+        unset($last);
         $delays = $this->stepDelays(array_map('strval', array_keys($names)));
-        unset($pages, $psids, $names, $first);
+        unset($names);
         $sends = $this->stepSends(date('Y-m-d H:i:s', strtotime($start) - self::STEP_PUSH_SECONDS), $late, $f['page_id'], $budget);
         $botOf = $f['bot'] !== null ? BotHealth::botOfPages() : [];
         // Ang 20 pinakamabagal lang ang hawak: min-heap ng [delay, pushed, -bilang], ang pinakamahina ang nasa itaas. Ang
@@ -796,9 +895,26 @@ class ResponseSpeed
         $slow = new \SplMinHeap();
         $n = 0;
 
-        $this->stepEvents($f['page_id'], $start, $late, $budget, function (object $e, array $d) use ($f, $start, $end, $before, $delays, $sends, $botOf, $slow, &$n, &$hours, &$total): void {
+        $this->stepEvents($f['page_id'], $start, $late, $budget, function (object $e, array $d, bool $run) use ($f, $start, $end, $delays, $sends, $botOf, $slow, &$cur, &$n, &$hours, &$total): void {
+            $created = (string) $e->created_at;
+            $prev = null;
+            if ($run) {
+                // Ang naunang event: ang pinakahuli na mas maaga sa takbong ito (ang parehong segundo ay hindi).
+                [$c, $p] = explode("\n", $cur[$e->page_id . ':' . $e->psid . ':' . (string) ($d['name'] ?? '')] ?? '', 2) + [1 => null];
+                if ($c !== '') $prev = $c < $created ? $c : $p;
+            }
+            // Ang event na ito ay kasaysayan din ng mga susunod (pagkatapos kuwentahin ang naunang event nito).
+            if (is_string($d['name'] ?? null)) {
+                $h = $e->page_id . ':' . $e->psid . ':' . $d['name'];
+                if (isset($cur[$h])) {
+                    $c = strstr($cur[$h], "\n", true);
+                    if ($c === false) $c = $cur[$h];
+                    if ($created > $c) $cur[$h] = $c === '' ? $created : $created . "\n" . $c;
+                }
+            }
+            if (!$run) return;
             $n++;
-            $due = self::originalDue($e, $d, $before, $delays);
+            $due = self::originalDue($d, $prev, $delays);
             $at = $due ?? (string) $e->created_at;
             if ($at < $start || $at >= $end) return;
             if ($f['bot'] !== null && ($botOf[(string) $e->page_id] ?? ChatbotConnections::BOTS[0]) !== $f['bot']) return;
@@ -852,10 +968,13 @@ class ResponseSpeed
             'slowest' => $slowest];
     }
 
+    /** Ang mga op ng sequence event na kasaysayan ng step (ang mga sandaling itinakda ng subscribe at ng advance ang next_send_at). */
+    private const HISTORY_OPS = ['subscribed', 'ran', 'skipped', 'failed'];
+
     /**
-     * Ang mga sequence event ng takbo (ran, skipped, failed) sa [$from, $to), ayon sa oras at ID, isa-isang ibinibigay sa
-     * $each kasama ang detail; kada oras ang query at walang row na itinatago. $upTo: ang mga event hanggang sa ID na ito
-     * lang. Ibinabalik ang pinakamataas na ID na nabasa (0 kapag wala).
+     * Ang mga sequence event (subscribed, ran, skipped, failed) sa [$from, $to), ayon sa oras at ID, isa-isang ibinibigay
+     * sa $each kasama ang detail at kung takbo ito ($run: ran, skipped, failed); kada oras ang query at walang row na
+     * itinatago. $upTo: ang mga event hanggang sa ID na ito lang. Ibinabalik ang pinakamataas na ID na nabasa (0 kapag wala).
      */
     private function stepEvents(?string $page, string $from, string $to, int $budget, \Closure $each, ?int $upTo = null): int
     {
@@ -867,7 +986,7 @@ class ResponseSpeed
             foreach ($rows as $e) {
                 $maxId = max($maxId, (int) $e->id);
                 $d = json_decode((string) $e->detail, true);
-                if (is_array($d) && in_array($d['op'] ?? null, ['ran', 'skipped', 'failed'], true)) $each($e, $d);
+                if (is_array($d) && in_array($d['op'] ?? null, self::HISTORY_OPS, true)) $each($e, $d, $d['op'] !== 'subscribed');
             }
             $this->checkBudget($budget);
         }
@@ -875,32 +994,66 @@ class ResponseSpeed
         return $maxId;
     }
 
+    /** Ilang customer ang binabasa sa isang query ng lastBefore(), at ilang event ng bawat isa (ang pinakabago) kada basa. */
+    private const HISTORY_CUSTOMERS = 250;
+    private const HISTORY_ROWS = 10;
+
     /**
-     * Para sa orihinal na due ng bawat step: ang mga naunang sequence event ng parehong customer at sequence (subscribed,
-     * ran, skipped, failed: ang mga sandaling itinakda ng subscribe at ng advance ang next_send_at), kada page:PSID:pangalan,
-     * ayon sa oras, bilang isang string na hinati ng "\n". Ang mga customer + sequence na may step ngayong araw lang
-     * ($first: ang unang takbo nila), at bago ang unang takbong iyon ay ang huli lang ang kailangan.
+     * Ang huling sequence event (subscribed, ran, skipped, failed) bago ang $before ng bawat customer + sequence sa $want
+     * (page:PSID => [pangalan => true]), kada page:PSID:pangalan. Hindi ang buong kasaysayan: kada customer ang
+     * HISTORY_ROWS na pinakabagong sequence event sa index nito (page_id, psid, created_at), pababa; ang customer na wala
+     * pa ang lahat ng sequence nito sa mga iyon ay binabasa ulit mula sa pinakaluma na nabasa. HISTORY_CUSTOMERS na customer
+     * sa isang query (UNION ALL ng tig-isang maikling basa).
      * @return array<string, string>
      */
-    private function stepHistory(array $pages, array $psids, array $first, string $until, int $budget): array
+    private function lastBefore(array $want, string $before, int $budget): array
     {
-        $before = [];
-        foreach (array_chunk($psids, 500) as $chunk) {
-            $rows = DB::table('chatbot_events')->where('type', 'sequence')->whereIn('page_id', $pages)->whereIn('psid', $chunk)->where('created_at', '<', $until)
-                ->orderBy('created_at')->orderBy('id')->select(['page_id', 'psid', 'detail', 'created_at'])->cursor();
-            foreach ($rows as $r) {
-                $d = json_decode((string) $r->detail, true);
-                if (!is_array($d) || !is_string($d['name'] ?? null) || !in_array($d['op'] ?? null, ['subscribed', 'ran', 'skipped', 'failed'], true)) continue;
-                $k = $r->page_id . ':' . $r->psid . ':' . $d['name'];
-                if (!isset($first[$k])) continue;
-                $t = (string) $r->created_at;
-                if ($t < $first[$k] || !isset($before[$k])) $before[$k] = $t;
-                else $before[$k] .= "\n" . $t;
+        $out = [];
+        if (!$want) return $out;
+        // Ang index ng customer ang ginagamit: sa (type, created_at) ay pinili ng planner (nakita sa SQLite) ang lahat ng
+        // sequence event bago ang araw, kada customer. Kapag wala ang index (ibang pangalan), walang hint.
+        $index = 'chatbot_events_page_id_psid_created_at_index';
+        if (!Schema::hasIndex('chatbot_events', $index)) $index = null;
+        // Ang SQL ng isang customer (unang basa, at ang kasunod mula sa pinakaluma na nabasa), isang beses binubuo; ang query
+        // ay ang mga ito na pinagdugtong (UNION ALL), bawat isa ay derived table para pareho sa MySQL at SQLite.
+        $one = fn (\Closure $range) => DB::table('chatbot_events')->when($index !== null, fn ($q) => $q->forceIndex($index))->where('page_id', 0)->where('psid', 0)->where('type', 'sequence')
+            ->where($range)->orderByDesc('created_at')->orderByDesc('id')->limit(self::HISTORY_ROWS)->select(['id', 'page_id', 'psid', 'detail', 'created_at'])->toSql();
+        $sql = [$one(fn ($w) => $w->where('created_at', '<', '')), $one(fn ($w) => $w->where('created_at', '<', '')->orWhere(fn ($x) => $x->where('created_at', '')->where('id', '<', 0)))];
+        $from = array_fill_keys(array_keys($want), null);
+        while ($from) {
+            $next = [];
+            foreach (array_chunk($from, self::HISTORY_CUSTOMERS, true) as $chunk) {
+                [$parts, $bindings] = [[], []];
+                foreach ($chunk as $pair => $after) {
+                    [$page, $psid] = explode(':', (string) $pair, 2);
+                    $parts[] = 'select * from (' . $sql[$after === null ? 0 : 1] . ') as h' . count($parts);
+                    array_push($bindings, (int) $page, (int) $psid, 'sequence', ...($after === null ? [$before] : [$after[0], $after[0], $after[1]]));
+                }
+                // Kada customer: ilang row ang dumating, ang pinakaluma (created_at, ID), at ang mga sequence na nakita.
+                [$rows, $oldest, $found] = [[], [], []];
+                foreach (DB::cursor(implode(' union all ', $parts), $bindings) as $r) {
+                    $pair = $r->page_id . ':' . $r->psid;
+                    $rows[$pair] = ($rows[$pair] ?? 0) + 1;
+                    $t = (string) $r->created_at;
+                    if (!isset($oldest[$pair]) || [$t, (int) $r->id] < $oldest[$pair]) $oldest[$pair] = [$t, (int) $r->id];
+                    $d = json_decode((string) $r->detail, true);
+                    if (!is_array($d) || !is_string($d['name'] ?? null) || !in_array($d['op'] ?? null, self::HISTORY_OPS, true) || !isset($want[$pair][$d['name']])) continue;
+                    $k = $pair . ':' . $d['name'];
+                    if (!isset($out[$k]) || $t > $out[$k]) $out[$k] = $t;
+                    $found[$pair][$d['name']] = true;
+                }
+                foreach ($chunk as $pair => $_) {
+                    $want[$pair] = array_diff_key($want[$pair], $found[$pair] ?? []);
+                    // Wala nang hinahanap, o naubos na ang kasaysayan ng customer (kulang sa HISTORY_ROWS ang dumating).
+                    if (!$want[$pair] || ($rows[$pair] ?? 0) < self::HISTORY_ROWS) unset($want[$pair]);
+                    else $next[$pair] = $oldest[$pair];
+                }
+                $this->checkBudget($budget);
             }
-            $this->checkBudget($budget);
+            $from = $next;
         }
 
-        return $before;
+        return $out;
     }
 
     /**
@@ -923,22 +1076,16 @@ class ResponseSpeed
     }
 
     /**
-     * Ang orihinal na due ng step: ang delay nito mula sa naunang event ng customer sa sequence (gaya ng kinuwenta ng
-     * subscribe at advance), dahil ang next_send_at ay inuusog ng retry (lock, AI na hinihintay, bot paused). Kapag walang
-     * naunang event o step (luma o binura), ang "due" ng event; kung wala rin, null.
+     * Ang orihinal na due ng step: ang delay nito mula sa naunang event ng customer sa sequence ($prev: subscribe o naunang
+     * step, gaya ng kinuwenta ng subscribe at advance), dahil ang next_send_at ay inuusog ng retry (lock, AI na hinihintay,
+     * bot paused). Kapag walang naunang event o step (luma o binura), ang "due" ng event; kung wala rin, null.
      */
-    private static function originalDue(object $e, array $d, array $before, array $delays): ?string
+    private static function originalDue(array $d, ?string $prev, array $delays): ?string
     {
         $recorded = is_string($d['due'] ?? null) && preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $d['due']) ? $d['due'] : null;
         $name = (string) ($d['name'] ?? '');
         $id = is_int($d['sequence_id'] ?? null) ? $d['sequence_id'] : ($delays['name:' . $name] ?? null);
         $delay = $id !== null ? ($delays[$id . ':' . (int) ($d['step'] ?? 0)] ?? null) : null;
-        $prev = null;
-        $history = $before[$e->page_id . ':' . $e->psid . ':' . $name] ?? null;
-        foreach ($history === null ? [] : explode("\n", $history) as $t) {
-            if ($t >= (string) $e->created_at) break;
-            $prev = $t;
-        }
         if ($delay === null || $prev === null) return $recorded;
 
         return ChatbotSequences::dueAt(\Carbon\Carbon::parse($prev), $delay[0], $delay[1])->format('Y-m-d H:i:s');

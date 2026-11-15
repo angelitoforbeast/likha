@@ -33,16 +33,17 @@ class ChatbotSpeedController extends Controller
     /**
      * Ang Sequences section, binubuksan ng page pagkatapos nitong lumabas (ito ang pinakamabigat kuwentahin). Walang part:
      * ang section ng araw (HTML at ang mga numero); part=chart: ang chart nito kasama ang naunang araw. Parehong filter at
-     * access ng page.
+     * access ng page. Ang default na view ng ngayon at kahapon ay galing lang sa warm (kapag wala pa: "building", agad);
+     * ang may page o bot ay kinukuwenta rito gaya ng dati.
      */
     public function sequences(Request $request)
     {
         $this->authorizeSpeed();
-        if ($request->query('part') === 'chart') return response()->json($this->speed->sequencesOutput($request->query(), true));
-        $out = $this->speed->sequencesOutput($request->query());
+        if ($request->query('part') === 'chart') return response()->json($this->speed->sequencesOutput($request->query(), true, true));
+        $out = $this->speed->sequencesOutput($request->query(), false, true);
         $prev = CarbonImmutable::parse($out['filters']['date'])->subDay()->toDateString();
 
-        return response()->json($out + ['html' => view('chatbot.partials.speed-sequences', ['sequences' => $out['sequences'], 'charts' => ['prev_date' => $prev]])->render()]);
+        return response()->json($out + ['html' => view('chatbot.partials.speed-sequences', ['sequences' => $out['sequences'], 'builtAt' => $out['built_at'], 'charts' => ['prev_date' => $prev]])->render()]);
     }
 
     /** Ang listahan ng Not sent (pinakabago muna) ng araw o ng isang oras (?hour=0–23), parehong filter at access ng page. */

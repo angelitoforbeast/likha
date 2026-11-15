@@ -42,6 +42,7 @@
         </label>
         <button class="cb-btn cb-btn-primary">Show</button>
     </form>
+    @if(isset($built_at))<p class="text-xs text-slate-500" data-sp-asof="page">Numbers as of {{ \Carbon\Carbon::createFromTimestamp($built_at, 'Asia/Manila')->format('H:i') }}</p>@endif
 
     <section aria-labelledby="h-meta">
         <h2 id="h-meta" class="mb-1 text-base font-semibold">Reply time at Meta (customer sent → our reply sent, Meta's clock)</h2>
@@ -367,6 +368,8 @@ window.spRemember(document);
             const url = new URL(box.dataset.spSeq, location.href);
             const s = await get(url);
             body.innerHTML = s.html;
+            // Binubuo pa ng warm: subukan ulit pagkalipas ng isang minuto (walang chart pa).
+            if (s.sequences && s.sequences.building) { setTimeout(load, 60000); return; }
             window.spRemember(body);
             url.searchParams.set('part', 'chart');
             const c = await get(url);
