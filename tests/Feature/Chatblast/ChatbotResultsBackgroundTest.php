@@ -253,20 +253,34 @@ class ChatbotResultsBackgroundTest extends ChatblastTestCase
 
         // Isang araw, saklaw na page lang: padala, tags (By message) at chat, bawat isa sa 24 na basa ng isang oras
         // (amendment 278-3). May flow: 2 × 24 (walang chat).
+        BotcakeChatMapWarm::warm(); // ang page map (para sa mga page ng tags) ay naka-cache
         $raw = $this->logOf(fn () => $pieces->build('2026-10-16', ResultsPieces::base($f)));
         $log = array_column($raw, 'query');
-        $this->assertCount(72, $log, json_encode($log));
-        $this->assertCount(48, $this->logOf(fn () => $pieces->build('2026-10-16', ResultsPieces::main(['flow_id' => '1'] + $f))));
+        // Amendment 278-4: walang join; ang reply ng mga tag ay binabasa ayon sa primary key, kada oras na may tag lang.
+        $byId = fn (array $log) => count(array_filter($log, fn ($q) => str_starts_with($q, 'select "id", "kind", "replied_at", "reply_seconds", "via" from "chatbot_replies" where "id" in')));
+        $this->assertCount(72 + $byId($log), $log, json_encode($log));
+        $this->assertSame(3, $byId($log), 'the 3 hours of 2026-10-16 that have tag rows (10:00, 11:00, 12:00)');
+        $flowLog = array_column($this->logOf(fn () => $pieces->build('2026-10-16', ResultsPieces::main(['flow_id' => '1'] + $f))), 'query');
+        $this->assertCount(48 + $byId($flowLog), $flowLog);
         foreach ($log as $q) {
             $this->assertStringNotContainsStringIgnoringCase('json', $q, 'no JSON in SQL: ' . $q);
             $this->assertStringNotContainsStringIgnoringCase('group by', $q);
+            $this->assertStringNotContainsStringIgnoringCase(' join ', $q);
         }
+        $tagsReads = array_values(array_filter($log, fn ($q) => str_contains($q, 'from "chatbot_reply_tags"')));
+        $this->assertMatchesRegularExpression('/where "page_id" in \(\?(, \?)*\) and "sent_at" >= \? and "sent_at" < \?/', $tagsReads[0], 'the (page_id, sent_at) index');
         $this->assertStringContainsString('"sent_at" >= ? and "sent_at" < ?', $log[0]);
         $this->assertStringContainsString('"via"', $log[0]);
         // Bawat basa ay isang oras, magkakasunod, at sakop ang buong araw (Manila).
         [$dayStart, $dayEnd] = ResultsPieces::bounds('2026-10-16');
         foreach (['from "chatbot_replies"', 'from "chatbot_reply_tags"', 'from "botcake_chats"'] as $table) {
-            $windows = array_map(fn ($q) => [Carbon::parse($q['bindings'][0]), Carbon::parse($q['bindings'][1])], array_values(array_filter($raw, fn ($q) => str_contains($q['query'], $table))));
+            $hourly = array_values(array_filter($raw, fn ($q) => str_contains($q['query'], $table) && str_contains($q['query'], '_at" >= ?')));
+            // Ang simula at dulo ng oras ay ang unang dalawang petsa sa mga binding (sa tags, ang mga page_id ang nauuna).
+            $windows = array_map(function ($q) {
+                $dates = array_values(array_filter($q['bindings'], fn ($v) => $v instanceof \DateTimeInterface || (is_string($v) && preg_match('/^\d{4}-\d{2}-\d{2} /', $v))));
+
+                return [Carbon::parse($dates[0]), Carbon::parse($dates[1])];
+            }, $hourly);
             $this->assertCount(24, $windows, $table);
             $this->assertTrue($windows[0][0]->eq($dayStart) && $windows[23][1]->eq($dayEnd), $table);
             foreach ($windows as $i => [$a, $b]) {
@@ -293,9 +307,10 @@ class ChatbotResultsBackgroundTest extends ChatblastTestCase
         $this->assertSame(3 * 24, $sendReads($this->logOf(fn () => $this->build($today))), 'today, yesterday and the day before after an hour');
         // Ang kabuuang bilang ng query ng isang buong build (sinukat): bago 25 (bawat isa ay 7 araw), ngayon 7 × 72 + 12 kapag
         // walang bahagi pa (bawat isa ay isang oras), at 72 + 13 sa pagbuo ulit kada 15 minuto ng range na may ngayon.
-        $this->assertSame(7 * 72 + 12, count($cold));
+        // 278-4: dagdag ang 15 basa ng reply ayon sa id (isa kada oras na may tag sa 7 araw).
+        $this->assertSame(7 * 72 + 12 + 15, count($cold));
         $this->travel(16)->minutes();
-        $this->assertSame(72 + 13, count($this->logOf(fn () => $this->build($today))));
+        $this->assertSame(72 + 13 + 1, count($this->logOf(fn () => $this->build($today))), 'today: 72 hourly reads, 1 read by id, 13 others');
     }
 
     public function test_S_278_2e_per_row_cost_on_a_100k_row_hour_stays_flat(): void
@@ -371,7 +386,9 @@ class ChatbotResultsBackgroundTest extends ChatblastTestCase
         $size = strlen((string) Cache::get(ResultsPieces::PREFIX . $day . ':' . md5(json_encode(ResultsPieces::base($f)))));
         fwrite(STDERR, sprintf("\n[278-2] large day: %d sends, %d queries, peak +%.1f MB, %.2f s, stored %.1f KB\n", 30000, count($log), $peak, $seconds, $size / 1024));
 
-        $this->assertCount(3 * 24, $log);
+        // 24 kada bahagi, at ang basa ng reply ayon sa id kada 1000 tag ng bawat oras (278-4).
+        $this->assertSame(3 * 24, count(array_filter(array_column($log, 'query'), fn ($q) => str_contains($q, '_at" >= ?'))));
+        $this->assertSame(35, count($log) - 3 * 24);
         $this->assertLessThan(64, $peak);
         $r = $this->build(['from' => $day, 'to' => $day]);
         $this->assertSame(30000, $r['funnel']['sent']);

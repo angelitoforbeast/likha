@@ -263,7 +263,12 @@ class ResultsPieces
     private function readMain(array $scope, Carbon $start, Carbon $end): array
     {
         $base = self::isBase($scope);
-        $out = $this->readSends($scope, $start, $end, $base, false) + ['messages' => $this->readMessages($scope, $start, $end)];
+        $out = $this->readSends($scope, $start, $end, $base, false);
+        // Amendment 278-4: ang tags ay binabasa ayon sa page (index na page_id, sent_at): ang page ng filter, o ang mga page
+        // na may padala sa araw na ito at ang mga page sa page settings.
+        $pages = $scope['page_id'] !== null ? [(int) $scope['page_id']]
+            : array_values(array_unique(array_map('intval', array_merge(array_keys($out['sends']), array_keys(\App\Models\BotcakeChat::pageMap())))));
+        $out['messages'] = $this->readMessages($scope, $start, $end, $pages);
         if ($base) $out['chats'] = array_map(fn ($b) => array_map([self::class, 'pack'], $b), $this->chatSets($scope['page_id'], $start, $end));
 
         return $out;
@@ -327,39 +332,52 @@ class ResultsPieces
      * (flow, node, botfield, version): sent at replied (distinct reply_id; isang araw lang ang reply, kaya nadadagdag),
      * at ang pinakabagong MEDIAN_ROWS na [reply_id, grupo, reply_seconds] para sa median.
      */
-    private function readMessages(array $scope, Carbon $start, Carbon $end): array
+    private function readMessages(array $scope, Carbon $start, Carbon $end, array $pages): array
     {
-        $q = fn (Carbon $a, Carbon $b) => DB::table('chatbot_reply_tags as t')->join('chatbot_replies as r', 'r.id', '=', 't.reply_id')
-            ->where('t.sent_at', '>=', $a)->where('t.sent_at', '<', $b)->where('r.kind', 'send')
-            ->when($scope['page_id'], fn ($q, $v) => $q->where('t.page_id', (int) $v))
-            ->when($scope['flow_id'], fn ($q, $v) => $q->where('t.flow_id', (int) $v))
-            ->when($scope['version_id'], fn ($q, $v) => $q->where('t.flow_version_id', (int) $v))
-            ->distinct()->select(['t.reply_id', 't.flow_id', 't.node_id', 't.botfield', 't.setting_id', 'r.replied_at', 'r.reply_seconds', self::viaColumn('r')]);
-
         $keys = [];
         $index = [];
         $counts = [];
         $med = [];
-        // Ang DISTINCT ay kada oras: ang mga tag row ng isang reply ay iisa ang sent_at, kaya walang reply na nasa dalawang oras.
-        self::stream($q, $start, $end, function ($r) use (&$keys, &$index, &$counts, &$med) {
-            $tuple = [$r->flow_id !== null ? (int) $r->flow_id : null, $r->node_id !== null ? (string) $r->node_id : null,
-                $r->botfield !== null ? (string) $r->botfield : null, $r->setting_id !== null ? (int) $r->setting_id : null];
-            $k = ChatbotResults::groupKey(...$tuple);
-            if (!isset($index[$k])) {
-                $index[$k] = count($keys);
-                $keys[] = $tuple;
+        if (!$pages) return ['keys' => [], 'counts' => [], 'seconds' => []];
+        // Amendment 278-4: walang join (sa live, ang join ay nagsimula sa buong chatbot_replies). Kada oras: (1) ang mga tag
+        // row lang, sa index na (page_id, sent_at); (2) ang reply ng mga ito ayon sa primary key, ang kind send lang. Ang
+        // dating DISTINCT (reply_id + grupo) ay ginagawa rito: ang mga tag row ng isang reply ay iisa ang sent_at, kaya
+        // nasa iisang oras.
+        foreach (self::hours($start, $end) as [$a, $b]) {
+            $hour = [];
+            foreach (array_chunk($pages, self::CHUNK) as $pageChunk) {
+                foreach (DB::table('chatbot_reply_tags')->whereIn('page_id', $pageChunk)->where('sent_at', '>=', $a)->where('sent_at', '<', $b)
+                    ->when($scope['flow_id'], fn ($q, $v) => $q->where('flow_id', (int) $v))
+                    ->when($scope['version_id'], fn ($q, $v) => $q->where('flow_version_id', (int) $v))
+                    ->get(['reply_id', 'flow_id', 'node_id', 'botfield', 'setting_id']) as $t) {
+                    $tuple = [$t->flow_id !== null ? (int) $t->flow_id : null, $t->node_id !== null ? (string) $t->node_id : null,
+                        $t->botfield !== null ? (string) $t->botfield : null, $t->setting_id !== null ? (int) $t->setting_id : null];
+                    $k = ChatbotResults::groupKey(...$tuple);
+                    if (!isset($index[$k])) {
+                        $index[$k] = count($keys);
+                        $keys[] = $tuple;
+                    }
+                    $hour[(int) $t->reply_id][$index[$k]] = true;
+                }
             }
-            $i = $index[$k];
-            $b = self::bucket(self::viaOf($r));
-            $counts[$b][$i] ??= [0, 0];
-            $counts[$b][$i][0]++;
-            if ($r->replied_at !== null) $counts[$b][$i][1]++;
-            if ($r->reply_seconds !== null) {
-                $med[$b][0][] = (int) $r->reply_id;
-                $med[$b][1][] = $i;
-                $med[$b][2][] = (int) $r->reply_seconds;
+            foreach (array_chunk(array_keys($hour), self::CHUNK) as $chunk) {
+                foreach (DB::table('chatbot_replies')->whereIn('id', $chunk)->get(['id', 'kind', 'replied_at', 'reply_seconds', self::viaColumn()]) as $r) {
+                    if ($r->kind !== 'send') continue;
+                    $bucket = self::bucket(self::viaOf($r));
+                    foreach (array_keys($hour[(int) $r->id]) as $i) {
+                        $counts[$bucket][$i] ??= [0, 0];
+                        $counts[$bucket][$i][0]++;
+                        if ($r->replied_at !== null) $counts[$bucket][$i][1]++;
+                        if ($r->reply_seconds !== null) {
+                            $med[$bucket][0][] = (int) $r->id;
+                            $med[$bucket][1][] = $i;
+                            $med[$bucket][2][] = (int) $r->reply_seconds;
+                        }
+                    }
+                }
             }
-        }, function () use (&$med) { self::trim($med); });
+            self::trim($med);
+        }
 
         return ['keys' => $keys, 'counts' => $counts, 'seconds' => array_map(fn ($m) => self::newest($m[0], $m[1], $m[2]), $med)];
     }
