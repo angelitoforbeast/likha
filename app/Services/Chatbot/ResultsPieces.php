@@ -13,7 +13,8 @@ use Illuminate\Support\Facades\DB;
  * kada araw at hindi kaya ang 7 araw na basa kada 15 minuto, kaya ang isang araw ay binabasa nang isang beses: ang
  * report ng range ay ang pagsasama ng mga araw nito (kabuuan, at unyon ng set ng customer para eksakto pa rin ang
  * distinct). Ang basa ng chatbot_replies ay isang araw lang sa index ng sent_at, puro column (walang JSON: ang via ay
- * ang column na via), at dumadaloy (cursor, hindi naka-buffer sa MySQL) papunta sa bilang sa PHP.
+ * ang column na via), paisa-isang oras (amendment 278-3: ang buong araw na isang query ay lampas 300 s sa live, ang isang
+ * oras ay ~0.5 s), papunta sa bilang sa PHP.
  *
  * Kailan binubuo ulit: ang ngayon kapag lampas 15 minuto; kahapon at noong isang araw kapag lampas 60 minuto (ang
  * replied_at ay napupunan hanggang 24 oras at may backfill kada oras); ang mas luma ay minsan lang (kapag nabuo na
@@ -206,24 +207,39 @@ class ResultsPieces
     }
 
     /**
-     * Ang query na dumadaloy: sa MySQL, hindi naka-buffer habang binabasa (hindi buong araw sa memory); walang ibang
-     * query habang tumatakbo ito.
+     * Amendment 278-3: ang [$start, $end) na hinati kada oras (gaya ng ResponseSpeed::windows). Sa live, ang buong araw na
+     * isang query ay lampas 300 s, ang isang oras ay ~0.5 s at ~85k row.
+     * @return \Generator<int, array{0: Carbon, 1: Carbon}>
      */
-    private static function stream($query, callable $each): void
+    public static function hours(Carbon $start, Carbon $end): \Generator
     {
-        $conn = $query->getConnection();
-        $pdos = [];
-        if ($conn->getDriverName() === 'mysql') {
-            foreach ([$conn->getPdo(), $conn->getReadPdo()] as $pdo) {
-                if (in_array($pdo, array_column($pdos, 0), true)) continue;
-                $pdos[] = [$pdo, $pdo->getAttribute(\PDO::MYSQL_ATTR_USE_BUFFERED_QUERY)];
-                $pdo->setAttribute(\PDO::MYSQL_ATTR_USE_BUFFERED_QUERY, false);
-            }
+        for ($a = $start->copy(); $a->lt($end); $a = $b) {
+            $b = $a->copy()->addHour();
+            if ($b->gt($end)) $b = $end->copy();
+            yield [$a, $b];
         }
-        try {
-            foreach ($query->cursor() as $row) $each($row);
-        } finally {
-            foreach ($pdos as [$pdo, $was]) $pdo->setAttribute(\PDO::MYSQL_ATTR_USE_BUFFERED_QUERY, $was);
+    }
+
+    /**
+     * Ang basa ng araw nang paisa-isang oras: $query($a, $b) ang query ng oras na iyon (normal, naka-buffer), at ang
+     * bawat row ay ipinapasa sa $each (pare-pareho ang gastos kada row: set bilang array key, walang paghahanap o
+     * pag-aayos habang nagbabasa). $afterHour: pagkatapos ng bawat oras (hal. pagbawas ng hawak na median).
+     */
+    private static function stream(callable $query, Carbon $start, Carbon $end, callable $each, ?callable $afterHour = null): void
+    {
+        foreach (self::hours($start, $end) as [$a, $b]) {
+            foreach ($query($a, $b)->cursor() as $row) $each($row);
+            if ($afterHour) $afterHour();
+        }
+    }
+
+    /** Ang hawak na [id, key, seconds] ay hindi hihigit sa 2 × MEDIAN_ROWS kada bot: ang pinakabago lang ang naiiwan. */
+    private static function trim(array &$med): void
+    {
+        foreach ($med as &$m) {
+            if (count($m[0]) <= 2 * ChatbotResults::MEDIAN_ROWS) continue;
+            array_multisort($m[0], SORT_DESC, SORT_NUMERIC, $m[1], $m[2]);
+            foreach ([0, 1, 2] as $i) array_splice($m[$i], ChatbotResults::MEDIAN_ROWS);
         }
     }
 
@@ -260,7 +276,7 @@ class ResultsPieces
     private function readSends(array $scope, Carbon $start, Carbon $end, bool $steps, bool $median): array
     {
         $cols = array_merge(['page_id', 'psid', 'replied_at', self::viaColumn()], $steps ? ['sequence_id', 'sequence_step', 'ad_id'] : [], $median ? ['id', 'reply_seconds'] : []);
-        $q = DB::table('chatbot_replies')->where('sent_at', '>=', $start)->where('sent_at', '<', $end)->where('kind', 'send')->where('status', 'sent')
+        $q = fn (Carbon $a, Carbon $b) => DB::table('chatbot_replies')->where('sent_at', '>=', $a)->where('sent_at', '<', $b)->where('kind', 'send')->where('status', 'sent')
             ->when($scope['page_id'], fn ($q, $v) => $q->where('page_id', (int) $v))
             ->when($scope['kind'] === 'main' && $scope['flow_id'], fn ($q) => $q->where('flow_id', (int) $scope['flow_id']))
             ->when($scope['kind'] === 'main' && $scope['version_id'], fn ($q) => $q->where('flow_version_id', (int) $scope['version_id']))
@@ -271,7 +287,7 @@ class ResultsPieces
         $seq = [];
         $ads = [];
         $med = [];
-        self::stream($q, function ($r) use (&$pages, &$seq, &$ads, &$med, $steps, $median) {
+        self::stream($q, $start, $end, function ($r) use (&$pages, &$seq, &$ads, &$med, $steps, $median) {
             $b = self::bucket(self::viaOf($r));
             $p = (string) $r->page_id;
             $replied = $r->replied_at !== null;
@@ -294,7 +310,7 @@ class ResultsPieces
                 $med[$b][1][] = 0;
                 $med[$b][2][] = (int) $r->reply_seconds;
             }
-        });
+        }, function () use (&$med) { self::trim($med); });
 
         $out = ['sends' => array_map(fn ($byBot) => array_map(fn ($c) => [$c[0], $c[1], self::pack($c[2])], $byBot), $pages)];
         if ($steps) {
@@ -313,8 +329,8 @@ class ResultsPieces
      */
     private function readMessages(array $scope, Carbon $start, Carbon $end): array
     {
-        $q = DB::table('chatbot_reply_tags as t')->join('chatbot_replies as r', 'r.id', '=', 't.reply_id')
-            ->where('t.sent_at', '>=', $start)->where('t.sent_at', '<', $end)->where('r.kind', 'send')
+        $q = fn (Carbon $a, Carbon $b) => DB::table('chatbot_reply_tags as t')->join('chatbot_replies as r', 'r.id', '=', 't.reply_id')
+            ->where('t.sent_at', '>=', $a)->where('t.sent_at', '<', $b)->where('r.kind', 'send')
             ->when($scope['page_id'], fn ($q, $v) => $q->where('t.page_id', (int) $v))
             ->when($scope['flow_id'], fn ($q, $v) => $q->where('t.flow_id', (int) $v))
             ->when($scope['version_id'], fn ($q, $v) => $q->where('t.flow_version_id', (int) $v))
@@ -324,7 +340,8 @@ class ResultsPieces
         $index = [];
         $counts = [];
         $med = [];
-        self::stream($q, function ($r) use (&$keys, &$index, &$counts, &$med) {
+        // Ang DISTINCT ay kada oras: ang mga tag row ng isang reply ay iisa ang sent_at, kaya walang reply na nasa dalawang oras.
+        self::stream($q, $start, $end, function ($r) use (&$keys, &$index, &$counts, &$med) {
             $tuple = [$r->flow_id !== null ? (int) $r->flow_id : null, $r->node_id !== null ? (string) $r->node_id : null,
                 $r->botfield !== null ? (string) $r->botfield : null, $r->setting_id !== null ? (int) $r->setting_id : null];
             $k = ChatbotResults::groupKey(...$tuple);
@@ -342,7 +359,7 @@ class ResultsPieces
                 $med[$b][1][] = $i;
                 $med[$b][2][] = (int) $r->reply_seconds;
             }
-        });
+        }, function () use (&$med) { self::trim($med); });
 
         return ['keys' => $keys, 'counts' => $counts, 'seconds' => array_map(fn ($m) => self::newest($m[0], $m[1], $m[2]), $med)];
     }
@@ -354,10 +371,10 @@ class ResultsPieces
      */
     public function chatSets(?string $pageId, Carbon $start, Carbon $end): array
     {
-        $q = DB::table('botcake_chats')->where('received_at', '>=', $start)->where('received_at', '<', $end)
+        $q = fn (Carbon $a, Carbon $b) => DB::table('botcake_chats')->where('received_at', '>=', $a)->where('received_at', '<', $b)
             ->when($pageId, fn ($q, $v) => $q->where('page_id', (string) $v))->select(['page_id', 'psid', 'payload']);
         $out = [];
-        self::stream($q, function ($r) use (&$out) {
+        self::stream($q, $start, $end, function ($r) use (&$out) {
             $p = is_string($r->payload) ? json_decode($r->payload, true) : (array) $r->payload;
             if (!is_array($p)) $p = [];
             if (isset($p['_standby'])) return;
@@ -374,8 +391,8 @@ class ResultsPieces
     private function readBotfield(array $scope, Carbon $start, Carbon $end): array
     {
         $ids = [];
-        self::stream(DB::table('chatbot_reply_tags')->where('setting_id', $scope['id'])->where('sent_at', '>=', $start)->where('sent_at', '<', $end)
-            ->when($scope['page_id'], fn ($q, $v) => $q->where('page_id', (int) $v))->select('reply_id'), function ($t) use (&$ids) { $ids[(int) $t->reply_id] = true; });
+        self::stream(fn (Carbon $a, Carbon $b) => DB::table('chatbot_reply_tags')->where('setting_id', $scope['id'])->where('sent_at', '>=', $a)->where('sent_at', '<', $b)
+            ->when($scope['page_id'], fn ($q, $v) => $q->where('page_id', (int) $v))->select('reply_id'), $start, $end, function ($t) use (&$ids) { $ids[(int) $t->reply_id] = true; });
 
         $pages = [];
         $med = [[], [], []];

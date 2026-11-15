@@ -143,7 +143,7 @@ class ChatbotResultsByPageTest extends ChatblastTestCase
         $after = DB::getQueryLog();
         DB::disableQueryLog();
 
-        $this->assertCount(1, $log, json_encode($log));
+        $this->assertCount(24, $log, json_encode($log)); // amendment 278-3: isang basa kada oras ng araw
         $this->assertStringNotContainsString('json', strtolower($log[0]));
         $this->assertSame([], $after);
         $this->assertSame([1001], array_keys($piece['sends']));

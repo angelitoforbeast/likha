@@ -251,39 +251,92 @@ class ChatbotResultsBackgroundTest extends ChatblastTestCase
         $pieces = new ResultsPieces();
         $f = ChatbotResults::filters(self::RANGE);
 
-        // Isang araw, saklaw na page lang: 1 basa ng padala, 1 ng tags (By message), 1 ng chat. May flow: 2 (walang chat).
-        $log = array_column($this->logOf(fn () => $pieces->build('2026-10-16', ResultsPieces::base($f))), 'query');
-        $this->assertCount(3, $log, json_encode($log));
-        $this->assertCount(2, $this->logOf(fn () => $pieces->build('2026-10-16', ResultsPieces::main(['flow_id' => '1'] + $f))));
+        // Isang araw, saklaw na page lang: padala, tags (By message) at chat, bawat isa sa 24 na basa ng isang oras
+        // (amendment 278-3). May flow: 2 × 24 (walang chat).
+        $raw = $this->logOf(fn () => $pieces->build('2026-10-16', ResultsPieces::base($f)));
+        $log = array_column($raw, 'query');
+        $this->assertCount(72, $log, json_encode($log));
+        $this->assertCount(48, $this->logOf(fn () => $pieces->build('2026-10-16', ResultsPieces::main(['flow_id' => '1'] + $f))));
         foreach ($log as $q) {
             $this->assertStringNotContainsStringIgnoringCase('json', $q, 'no JSON in SQL: ' . $q);
             $this->assertStringNotContainsStringIgnoringCase('group by', $q);
         }
         $this->assertStringContainsString('"sent_at" >= ? and "sent_at" < ?', $log[0]);
         $this->assertStringContainsString('"via"', $log[0]);
+        // Bawat basa ay isang oras, magkakasunod, at sakop ang buong araw (Manila).
+        [$dayStart, $dayEnd] = ResultsPieces::bounds('2026-10-16');
+        foreach (['from "chatbot_replies"', 'from "chatbot_reply_tags"', 'from "botcake_chats"'] as $table) {
+            $windows = array_map(fn ($q) => [Carbon::parse($q['bindings'][0]), Carbon::parse($q['bindings'][1])], array_values(array_filter($raw, fn ($q) => str_contains($q['query'], $table))));
+            $this->assertCount(24, $windows, $table);
+            $this->assertTrue($windows[0][0]->eq($dayStart) && $windows[23][1]->eq($dayEnd), $table);
+            foreach ($windows as $i => [$a, $b]) {
+                $this->assertSame(3600, (int) $a->diffInSeconds($b), $table);
+                if ($i) $this->assertTrue($a->eq($windows[$i - 1][1]), $table);
+            }
+        }
 
-        // Ang buong 7 araw na wala pang bahagi: 7 × 3 + ang order, delivered at iba pa. Ang muling pagbuo pagkatapos ng 16
+        // Ang buong 7 araw na wala pang bahagi: 7 × 72 + ang order, delivered at iba pa. Ang muling pagbuo pagkatapos ng 16
         // minuto: ang ngayon lang ang binabasa ulit (wala ang ngayon sa RANGE, kaya walang basa ng padala).
         Cache::flush();
         BotcakeChatMapWarm::warm();
         $cold = $this->logOf(fn () => $this->build(self::RANGE));
         $sendReads = fn (array $log) => count(array_filter(array_column($log, 'query'), fn ($q) => str_starts_with($q, 'select "page_id", "psid", "replied_at", "via"')));
-        $this->assertSame(7, $sendReads($cold));
+        $this->assertSame(7 * 24, $sendReads($cold));
         $this->travel(16)->minutes();
         $this->assertSame(0, $sendReads($this->logOf(fn () => $this->build(self::RANGE))), 'older days are not read again');
         $today = ['from' => '2026-10-15', 'to' => '2026-10-21'];
         $this->build($today);
         $this->travel(16)->minutes();
-        $this->assertSame(1, $sendReads($this->logOf(fn () => $this->build($today))), 'only today is read again after 15 minutes');
+        $this->assertSame(24, $sendReads($this->logOf(fn () => $this->build($today))), 'only today is read again after 15 minutes');
         // Kahapon at noong isang araw: pagkatapos ng 60 minuto.
         $this->travel(45)->minutes();
-        $this->assertSame(3, $sendReads($this->logOf(fn () => $this->build($today))), 'today, yesterday and the day before after an hour');
-        // Ang kabuuang bilang ng query ng isang buong build (sinukat): bago 25 (bawat isa ay 7 araw), ngayon 33 kapag walang
-        // bahagi pa (7 araw × 3 na isang araw lang ang bawat isa, at 12 na order, delivered, sequence at iba pa), at 16 sa
-        // pagbuo ulit kada 15 minuto ng range na may ngayon (ang ngayon lang: 3, at ang 13 na iba).
-        $this->assertSame(33, count($cold));
+        $this->assertSame(3 * 24, $sendReads($this->logOf(fn () => $this->build($today))), 'today, yesterday and the day before after an hour');
+        // Ang kabuuang bilang ng query ng isang buong build (sinukat): bago 25 (bawat isa ay 7 araw), ngayon 7 × 72 + 12 kapag
+        // walang bahagi pa (bawat isa ay isang oras), at 72 + 13 sa pagbuo ulit kada 15 minuto ng range na may ngayon.
+        $this->assertSame(7 * 72 + 12, count($cold));
         $this->travel(16)->minutes();
-        $this->assertSame(16, count($this->logOf(fn () => $this->build($today))));
+        $this->assertSame(72 + 13, count($this->logOf(fn () => $this->build($today))));
+    }
+
+    public function test_S_278_2e_per_row_cost_on_a_100k_row_hour_stays_flat(): void
+    {
+        // 100,000 padala sa iisang oras (gaya ng ~85k kada oras sa live), 40,000 customer, bawat isa may tag row.
+        $day = '2026-10-11';
+        [$start] = ResultsPieces::bounds($day);
+        $at = $start->copy()->addHours(10);
+        $rows = [];
+        $tags = [];
+        for ($i = 0, $id = 2000000; $i < 100000; $i++) {
+            $id++;
+            $sent = $at->copy()->addMilliseconds($i * 30)->format('Y-m-d H:i:s');
+            $via = ['botcake', 'forbeast', null][$i % 3];
+            $rows[] = ['id' => $id, 'page_id' => 1001 + $i % 2, 'psid' => 7000000 + $i % 40000, 'flow_id' => 1, 'node_id' => 'n' . ($i % 9), 'kind' => 'send', 'content' => '[]',
+                'status' => 'sent', 'sent_at' => $sent, 'replied_at' => $i % 4 ? null : $sent, 'reply_seconds' => $i % 4 ? null : $i % 900, 'via' => $via,
+                'sequence_id' => $i % 6 ? null : $this->seq, 'sequence_step' => $i % 6 ? null : 1, 'ad_id' => 'AD' . ($i % 25)];
+            $tags[] = ['reply_id' => $id, 'page_id' => 1001 + $i % 2, 'flow_id' => 1, 'node_id' => 'n' . ($i % 9), 'message' => 0, 'botfield' => null, 'setting_id' => null, 'sent_at' => $sent];
+        }
+        foreach (array_chunk($rows, 500) as $chunk) DB::table('chatbot_replies')->insert($chunk);
+        foreach (array_chunk($tags, 500) as $chunk) DB::table('chatbot_reply_tags')->insert($chunk);
+        unset($rows, $tags);
+
+        $f = ChatbotResults::filters(['from' => $day, 'to' => $day]);
+        // Ang gastos ng basa at bilang (SQLite + PHP) ng 100k, at ng 10k: kada row ay halos pareho (walang lumalaki kada row).
+        $cost = function (int $limitRows) use ($day, $f): float {
+            gc_collect_cycles();
+            $t = microtime(true);
+            (new ResultsPieces())->build($day, ResultsPieces::base($f));
+
+            return (microtime(true) - $t) * 1e6 / $limitRows;
+        };
+        $all = $cost(100000);
+        DB::table('chatbot_replies')->where('id', '>', 2010000)->delete();
+        DB::table('chatbot_reply_tags')->where('reply_id', '>', 2010000)->delete();
+        $tenth = $cost(10000);
+        fwrite(STDERR, sprintf("\n[278-3] per send row (sends + tags + chats reads, SQLite + PHP): 100k-row hour %.1f us, 10k-row hour %.1f us\n", $all, $tenth));
+
+        $this->assertLessThan(100, $all, 'far below the ~175 us per row seen live');
+        $this->assertLessThan(2.0, $all / max($tenth, 0.1), 'the cost per row does not grow with the row count');
+        $this->assertNull(\App\Console\Commands\ChatbotResultsWarm::guard(), 'the statement time guard is MySQL only');
     }
 
     public function test_S_278_2b_a_large_day_is_streamed_with_three_queries_and_bounded_memory(): void
@@ -318,7 +371,7 @@ class ChatbotResultsBackgroundTest extends ChatblastTestCase
         $size = strlen((string) Cache::get(ResultsPieces::PREFIX . $day . ':' . md5(json_encode(ResultsPieces::base($f)))));
         fwrite(STDERR, sprintf("\n[278-2] large day: %d sends, %d queries, peak +%.1f MB, %.2f s, stored %.1f KB\n", 30000, count($log), $peak, $seconds, $size / 1024));
 
-        $this->assertCount(3, $log);
+        $this->assertCount(3 * 24, $log);
         $this->assertLessThan(64, $peak);
         $r = $this->build(['from' => $day, 'to' => $day]);
         $this->assertSame(30000, $r['funnel']['sent']);
