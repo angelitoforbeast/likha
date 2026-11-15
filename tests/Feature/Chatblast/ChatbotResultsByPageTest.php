@@ -128,17 +128,25 @@ class ChatbotResultsByPageTest extends ChatblastTestCase
             ->map(function ($o) { $o->detail = (array) json_decode((string) $o->detail, true); return $o; });
         $names = BotcakeChat::pageMap();
 
-        // Spec 278: ang padala ng funnel, By bot at By page ay iisang grouped query (sendCounts); ang byPage ay walang sariling query.
-        $service = app(ChatbotResults::class);
+        // Spec 278-2: ang padala ng isang araw ay iisang basa ng chatbot_replies (puro column, walang JSON), para sa funnel,
+        // By bot at By page; ang byPage ay walang sariling query (mula sa mga bahagi ng araw).
+        $pieces = new \App\Services\Chatbot\ResultsPieces();
         DB::flushQueryLog();
         DB::enableQueryLog();
-        $sends = (new \ReflectionMethod(ChatbotResults::class, 'sendCounts'))->invoke($service, $f, $start, $end);
-        $out = (new \ReflectionMethod(ChatbotResults::class, 'byPage'))->invoke($service, $sends, 'all', $orders, [], $names);
-        $log = DB::getQueryLog();
+        $piece = $pieces->build('2026-10-16', \App\Services\Chatbot\ResultsPieces::main($f));
+        $log = array_values(array_filter(array_column(DB::getQueryLog(), 'query'), fn ($q) => str_contains($q, 'from "chatbot_replies"')));
+        DB::flushQueryLog();
+        $all = array_map(fn ($d) => $pieces->get($d, \App\Services\Chatbot\ResultsPieces::main($f)) ?? $pieces->build($d, \App\Services\Chatbot\ResultsPieces::main($f)), \App\Services\Chatbot\ResultsPieces::days($f['from'], $f['to']));
+        DB::flushQueryLog();
+        $sends = (new \ReflectionMethod(ChatbotResults::class, 'pageCounts'))->invoke(null, $all, null);
+        $out = (new \ReflectionMethod(ChatbotResults::class, 'byPage'))->invoke(app(ChatbotResults::class), $sends, $orders, [], $names);
+        $after = DB::getQueryLog();
         DB::disableQueryLog();
 
         $this->assertCount(1, $log, json_encode($log));
-        $this->assertStringContainsStringIgnoringCase('group by', $log[0]['query']);
+        $this->assertStringNotContainsString('json', strtolower($log[0]));
+        $this->assertSame([], $after);
+        $this->assertSame([1001], array_keys($piece['sends']));
         $this->assertCount(3, $out['rows']);
     }
 

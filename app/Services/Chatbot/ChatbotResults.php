@@ -24,6 +24,10 @@ use Illuminate\Support\Facades\Schema;
  * chatbot:results-warm (kada minuto) ang bumubuo ng kopya kada hiling (filter at compare) na may built_at; ang walang
  * kopya ay napupunta sa listahang "wanted" at binubuo sa susunod na takbo. Ang chatbot:results ay bumubuo pa rin agad
  * (report(), naka-cache nang 5 minuto).
+ *
+ * Spec 278-2: ang padala at chat (funnel, By bot, By page, By message, By sequence step, By ad, Compare) ay mula sa mga
+ * bahagi ng araw (ResultsPieces: isang basa kada araw, puro column, walang JSON), pinagsasama rito; ang order, delivered,
+ * unsubscribe at mga pangalan ay kinukuwenta pa rin sa build (mabilis ang mga ito).
  */
 class ChatbotResults
 {
@@ -37,6 +41,8 @@ class ChatbotResults
     public const WANTED_MAX_AGE = 1800;
     public const WANTED_PER_RUN = 3;
     public const WANTED_MAX = 50;
+    /** Spec 278-2: ilang segundo ang isang takbo ng warm bago ito huminto sa pagitan ng mga bahagi ng araw. */
+    public const WARM_SECONDS = 240;
     public const WANTED = 'chatbot-results:wanted:v3';
     private const COPY = 'chatbot-results:copy:v3:';
     private const WANTED_LOCK = 'chatbot-results:wanted-lock';
@@ -52,8 +58,11 @@ class ChatbotResults
     /** Gaano kalayo na ang J&T status (gaya ng Chatblast): ang pinakamalayong row ng waybill ang totoo. */
     private const PROGRESS = ['In Transit' => 1, 'Delivering' => 2, 'Delivered' => 3, 'For Return' => 3, 'Returned' => 3];
 
-    public function __construct(private PageSettings $settings)
+    private ResultsPieces $pieces;
+
+    public function __construct(private PageSettings $settings, ?ResultsPieces $pieces = null)
     {
+        $this->pieces = $pieces ?? new ResultsPieces();
     }
 
     // ---- Filters ----
@@ -203,26 +212,46 @@ class ChatbotResults
 
     /**
      * Isang takbo ng warm: ang default na view (filters([])) kapag wala o lampas 15 minuto na ang kopya, saka ang wanted
-     * (pinakamatanda muna, hanggang 3); ang wanted na lampas 30 minuto ay tinatanggal. Ang pumalyang build ay nire-report
-     * at tinatanggal sa wanted (idadagdag ulit ng page kapag may tumitingin pa); hindi nito pinipigilan ang iba.
-     * @return array{built: array<int, array{0: string, 1: float}>, failed: array<int, string>, dropped: int}
+     * (pinakamatanda muna, hanggang 3); ang wanted na lampas 30 minuto ay tinatanggal. Spec 278-2: bawat hiling ay ang
+     * mga bahagi ng araw na wala o luma muna (ResultsPieces), sa loob ng $budget na segundo kada takbo (laging kahit isang
+     * bahagi); ang kopya ay ginagawa kapag kumpleto na ang mga bahagi, kung hindi ay itutuloy sa susunod na takbo (nasa
+     * wanted pa, "binubuo" pa ang page). Ang pumalyang build ay nire-report at tinatanggal sa wanted (idadagdag ulit ng
+     * page kapag may tumitingin pa); hindi nito pinipigilan ang iba.
+     * @return array{built: array<int, array{0: string, 1: float}>, failed: array<int, string>, dropped: int, pieces: int, pending: array<int, string>}
      */
-    public function warm(): array
+    public function warm(?int $budget = null): array
     {
-        $r = ['built' => [], 'failed' => [], 'dropped' => 0];
-        $run = function (string $label, array $in, bool $default) use (&$r): void {
+        $budget ??= self::WARM_SECONDS;
+        $t0 = microtime(true);
+        $r = ['built' => [], 'failed' => [], 'dropped' => 0, 'pieces' => 0, 'pending' => []];
+        $stop = false;
+        // true: tapos na ang hiling (may kopya o pumalya); false: may bahagi pang kulang (lampas na sa oras ng takbo).
+        $run = function (string $label, array $in, bool $default) use (&$r, &$stop, $t0, $budget): bool {
             $t = microtime(true);
             try {
+                foreach ($this->pending($in) as [$day, $scope]) {
+                    if ($r['pieces'] > 0 && microtime(true) - $t0 >= $budget) {
+                        $stop = true;
+                        $r['pending'][] = $label;
+
+                        return false;
+                    }
+                    $this->pieces->build($day, $scope);
+                    $r['pieces']++;
+                }
                 $this->buildCopy($in, $default);
                 $r['built'][] = [$label, round(microtime(true) - $t, 1)];
             } catch (\Throwable $e) {
                 report($e);
                 $r['failed'][] = $label;
             }
+
+            return true;
         };
 
         $default = self::request([]);
         if (self::isStale($this->stored($default))) $run('default', $default, true);
+        if ($stop) return $r;
 
         // Ang lampas 30 minuto at ang may sariwang kopya na (hal. ang default) ay inaalis; ang natitira ay pinakamatanda muna.
         // Ang may lumang kopya (amendment 278-1) ay binubuo ulit.
@@ -242,7 +271,7 @@ class ChatbotResults
         });
         foreach ($due as $id => $w) {
             // Ang default na hiling (kapag pumalya ang sariling build nito sa itaas) ay 6 na oras pa rin itinatago.
-            $run(self::label($w['in']), $w['in'], self::requestId($w['in']) === self::requestId($default));
+            if (!$run(self::label($w['in']), $w['in'], self::requestId($w['in']) === self::requestId($default))) break;
             $this->editWanted(function (array $list) use ($id) {
                 unset($list[$id]);
 
@@ -279,8 +308,37 @@ class ChatbotResults
 
     public function report(array $f): array
     {
-        // v3: ang funnel, By bot at By page ay mula sa iisang basa (spec 278); ang lumang cache ay hindi na binabasa pagka-deploy.
+        // v3: mula sa mga bahagi ng araw (spec 278-2); ang lumang cache ay hindi na binabasa pagka-deploy.
         return Cache::remember('chatbot-results:v3:' . md5(json_encode($f)), self::CACHE_SECONDS, fn () => $this->build($f));
+    }
+
+    /**
+     * Ang mga bahagi ng araw na kailangan ng hiling: ang saklaw ng funnel (page, flow, version) at ang page lang (By
+     * sequence step, By ad, chats) kada araw, at ang sa Compare. @return array<int, array{0: string, 1: array}>
+     */
+    private function needs(array $in): array
+    {
+        $f = self::filters($in);
+        $c = self::compareFrom($in);
+        $scopes = [ResultsPieces::main($f)];
+        if (ResultsPieces::base($f) !== $scopes[0]) $scopes[] = ResultsPieces::base($f);
+        if ($c) foreach ([$c[1], $c[2]] as $id) $scopes[] = $c[0] === 'flow' ? ResultsPieces::flowVersion($f, $id) : ResultsPieces::botfield($f, $id);
+        $out = [];
+        foreach (ResultsPieces::days($f['from'], $f['to']) as $day) foreach (array_unique($scopes, SORT_REGULAR) as $s) $out[] = [$day, $s];
+
+        return $out;
+    }
+
+    /** Ang mga bahagi ng hiling na wala pa o luma na (ang binubuo ng warm, ilan kada takbo). */
+    public function pending(array $in): array
+    {
+        return array_values(array_filter($this->needs($in), fn ($n) => ResultsPieces::stale($n[0], $this->pieces->get($n[0], $n[1]))));
+    }
+
+    /** Ang mga bahagi ng isang saklaw sa range (binubuo ang wala o luma). @return array<int, array> */
+    private function piecesOf(array $f, array $scope): array
+    {
+        return array_map(fn ($day) => $this->pieces->ensure($day, $scope), ResultsPieces::days($f['from'], $f['to']));
     }
 
     private function build(array $f): array
@@ -292,48 +350,101 @@ class ChatbotResults
         $delivery = $this->deliveries($allOrders);
         $flowOrders = $orders->filter(fn ($o) => ($f['flow_id'] === null || (int) $o->flow_id === (int) $f['flow_id'])
             && ($f['version_id'] === null || (int) ($o->detail['flow_version'] ?? 0) === (int) $f['version_id']));
-        // Iisang basa ng padala (kada page, may hati kada bot) para sa funnel, By bot at By page; iisa rin ang sa chat.
-        $sends = $this->sendCounts($f, $start, $end);
-        $chats = $this->chatCounts($f, $start, $end);
-        $bucket = $f['via'] ?? 'all';
+        // Spec 278-2: ang padala at chat ay mula sa mga bahagi ng araw (isang basa kada araw), pinagsama rito.
+        $main = $this->piecesOf($f, ResultsPieces::main($f));
+        $base = ResultsPieces::base($f) === ResultsPieces::main($f) ? $main : $this->piecesOf($f, ResultsPieces::base($f));
+        $buckets = $f['via'] !== null ? [$f['via']] : null;
+        $sends = self::pageCounts($main, $buckets);
+        $chats = self::chatCount($base, $buckets);
 
         return [
             'filters' => $f + ['page' => $f['page_id'] !== null ? ($names[$f['page_id']] ?? null) : null,
                 'flow' => $f['flow_id'] !== null ? DB::table('chatbot_flows')->where('id', (int) $f['flow_id'])->value('name') : null],
-            'funnel' => ['chats' => $chats[$bucket]] + $this->counted(self::sumPages($sends, $bucket), $flowOrders, $delivery),
-            'by_via' => $this->byVia($f, $allOrders, $delivery, $sends, $chats),
-            'by_page' => $this->byPage($sends, $bucket, $flowOrders, $delivery, $names),
-            'by_message' => $this->byMessage($f, $start, $end, $flowOrders, $delivery),
-            'by_step' => $this->bySequenceStep($f, $start, $end, $orders, $delivery),
-            'by_ad' => $this->byAd($f, $start, $end, $orders, $delivery),
+            'funnel' => ['chats' => $chats] + $this->counted(self::sumPages($sends), $flowOrders, $delivery),
+            'by_via' => $this->byVia($f, $allOrders, $delivery, $main, $base),
+            'by_page' => $this->byPage($sends, $flowOrders, $delivery, $names),
+            'by_message' => $this->byMessage($main, $buckets, $flowOrders, $delivery),
+            'by_step' => $this->bySequenceStep($f, $start, $end, $base, $buckets, $orders, $delivery),
+            'by_ad' => $this->byAd($base, $buckets, $orders, $delivery),
             'versions' => $this->versions($f['flow_id'] !== null ? (int) $f['flow_id'] : null),
         ];
     }
 
-    /** Ang mga padala ng bot (send, sent) sa range; $flow: kasama ang filter ng flow at version. */
-    private function sends(array $f, Carbon $start, Carbon $end, bool $flow)
+    private static function inBuckets(string $bucket, ?array $buckets): bool
     {
-        return DB::table('chatbot_replies')->where('sent_at', '>=', $start)->where('sent_at', '<', $end)->where('kind', 'send')->where('status', 'sent')
-            ->when($f['page_id'], fn ($q, $v) => $q->where('page_id', (int) $v))
-            ->when($flow && $f['flow_id'], fn ($q) => $q->where('flow_id', (int) $f['flow_id']))
-            ->when($flow && $f['version_id'], fn ($q) => $q->where('flow_version_id', (int) $f['version_id']))
-            ->when($f['via'], fn ($q, $v) => self::whereVia($q, 'tags->via', $v));
+        return $buckets === null || in_array($bucket, $buckets, true);
     }
 
     /**
-     * Ang hanay na sa bot na ito: ang forbeast ay ang may tanda; ang botcake ay ang may tanda o wala (ang mga luma).
-     * $column ay ang JSON path (hal. tags->via, payload->source).
+     * Kada page, ang sent, replied at customer (distinct psid: unyon ng mga set ng bawat araw) ng mga bot sa $buckets
+     * (null = lahat). Ang page na walang padala sa mga bot na ito ay wala (gaya ng dating WHERE ng via).
+     * @return array<string, array{sent: int, customers_sent: int, replied: int}>
      */
-    private static function whereVia($q, string $column, string $via)
+    private static function pageCounts(array $pieces, ?array $buckets): array
     {
-        $gateway = Gateways::valid($via);
-        if ($column === 'payload->source') {
-            // Ang chat mula sa gateway: ang payload->gateway ay ang gateway na naghatid (wala = forbeast).
-            return $q->where(fn ($w) => !$gateway ? $w->whereNull($column)->orWhere($column, '<>', 'gateway')
-                : $w->where($column, 'gateway')->where(fn ($g) => $via === Gateways::FORBEAST ? $g->whereNull('payload->gateway')->orWhere('payload->gateway', $via) : $g->where('payload->gateway', $via)));
+        $sets = [];
+        $out = [];
+        foreach ($pieces as $piece) {
+            foreach ($piece['sends'] ?? [] as $page => $byBot) {
+                foreach ($byBot as $bucket => [$sent, $replied, $psids]) {
+                    if (!self::inBuckets((string) $bucket, $buckets) || $sent === 0) continue;
+                    $out[(string) $page] ??= ['sent' => 0, 'customers_sent' => 0, 'replied' => 0];
+                    $out[(string) $page]['sent'] += $sent;
+                    $out[(string) $page]['replied'] += $replied;
+                }
+            }
+        }
+        // Ang unyon ay kada page (hindi lahat ng page nang sabay) para hindi lumaki ang memory.
+        foreach (array_keys($out) as $page) {
+            $set = [];
+            foreach ($pieces as $piece) {
+                foreach ($piece['sends'][$page] ?? [] as $bucket => $c) if (self::inBuckets((string) $bucket, $buckets)) ResultsPieces::addTo($set, $c[2]);
+            }
+            $out[$page]['customers_sent'] = count($set);
+        }
+        // Ang ayos ng page ay gaya ng dating GROUP BY page_id.
+        uksort($out, fn ($a, $b) => (int) $a <=> (int) $b);
+
+        return $out;
+    }
+
+    /** @return array{sent: int, customers_sent: int, replied: int} */
+    private static function sumPages(array $pages): array
+    {
+        $t = ['sent' => 0, 'customers_sent' => 0, 'replied' => 0];
+        foreach ($pages as $row) foreach ($t as $k => $_) $t[$k] += $row[$k];
+
+        return $t;
+    }
+
+    /** Ilang customer (page + PSID) ang nag-chat: unyon ng mga araw kada page, ng mga bot sa $buckets (null = lahat). */
+    private static function chatCount(array $pieces, ?array $buckets): int
+    {
+        $pages = [];
+        foreach ($pieces as $piece) foreach (array_keys($piece['chats'] ?? []) as $p) $pages[$p] = true;
+        $n = 0;
+        foreach (array_keys($pages) as $p) {
+            $set = [];
+            foreach ($pieces as $piece) {
+                foreach ($piece['chats'][$p] ?? [] as $bucket => $packed) if (self::inBuckets((string) $bucket, $buckets)) ResultsPieces::addTo($set, $packed);
+            }
+            $n += count($set);
         }
 
-        return $q->where(fn ($w) => $gateway ? $w->where($column, $via) : $w->whereNull($column)->orWhereNotIn($column, Gateways::ALL));
+        return $n;
+    }
+
+    /** Ilang customer (page + PSID) ang nag-chat sa [$start, $end), ayon sa filter ng page at via (direktang basa). */
+    private function chats(array $f, Carbon $start, Carbon $end): int
+    {
+        $n = 0;
+        foreach ($this->pieces->chatSets($f['page_id'] ?? null, $start, $end) as $byBot) {
+            $set = [];
+            foreach ($byBot as $bucket => $psids) if (($f['via'] ?? null) === null || $bucket === $f['via']) $set += $psids;
+            $n += count($set);
+        }
+
+        return $n;
     }
 
     /** Ang via ng isang order; ang wala (luma) ay botcake. */
@@ -342,92 +453,15 @@ class ChatbotResults
         return Gateways::valid($o->detail['via'] ?? null) ? $o->detail['via'] : 'botcake';
     }
 
-    /**
-     * Ang kondisyon ng whereVia() bilang SQL (walang "where") at ang mga binding nito, para sa CASE WHEN ng iisang basa:
-     * eksaktong kapareho ng WHERE na ginagamit ng ibang bahagi (ang NULL ay hindi kasama, gaya sa WHERE).
-     * @return array{0: string, 1: array}
-     */
-    private static function viaCondition(string $table, string $column, string $via): array
-    {
-        $q = self::whereVia(DB::table($table), $column, $via);
-
-        return [preg_replace('/^where\s+/i', '', $q->getGrammar()->compileWheres($q)), $q->getBindings()];
-    }
-
-    /**
-     * Ang padala, customer (page + PSID) at sagot ng funnel, By bot at By page mula sa iisang grouped na basa: kada page,
-     * ang lahat ('all') at ang hati kada bot (ayon sa whereVia), sa filter ng petsa, page, flow at version (walang via).
-     * @return array<string, array<string, array{sent: int, customers_sent: int, replied: int}>> page id => bucket => bilang
-     */
-    private function sendCounts(array $f, Carbon $start, Carbon $end): array
-    {
-        $select = ['page_id', 'COUNT(*) AS s_all', 'COUNT(DISTINCT psid) AS c_all', 'SUM(CASE WHEN replied_at IS NOT NULL THEN 1 ELSE 0 END) AS r_all'];
-        $bindings = [];
-        foreach (self::vias() as $i => $via) {
-            [$cond, $b] = self::viaCondition('chatbot_replies', 'tags->via', $via);
-            $select[] = "SUM(CASE WHEN {$cond} THEN 1 ELSE 0 END) AS s_{$i}";
-            $select[] = "COUNT(DISTINCT CASE WHEN {$cond} THEN psid END) AS c_{$i}";
-            $select[] = "SUM(CASE WHEN ({$cond}) AND replied_at IS NOT NULL THEN 1 ELSE 0 END) AS r_{$i}";
-            array_push($bindings, ...$b, ...$b, ...$b);
-        }
-        $out = [];
-        foreach ($this->sends(['via' => null] + $f, $start, $end, true)->groupBy('page_id')->selectRaw(implode(', ', $select), $bindings)->get() as $r) {
-            $row = ['all' => ['sent' => (int) $r->s_all, 'customers_sent' => (int) $r->c_all, 'replied' => (int) $r->r_all]];
-            foreach (self::vias() as $i => $via) $row[$via] = ['sent' => (int) $r->{"s_$i"}, 'customers_sent' => (int) $r->{"c_$i"}, 'replied' => (int) $r->{"r_$i"}];
-            $out[(string) $r->page_id] = $row;
-        }
-
-        return $out;
-    }
-
-    /** Ang kabuuan ng isang bucket ng sendCounts() sa lahat ng page. @return array{sent: int, customers_sent: int, replied: int} */
-    private static function sumPages(array $sends, string $bucket): array
-    {
-        $t = ['sent' => 0, 'customers_sent' => 0, 'replied' => 0];
-        foreach ($sends as $row) foreach ($t as $k => $_) $t[$k] += $row[$bucket][$k] ?? 0;
-
-        return $t;
-    }
-
-    /**
-     * Ilang customer (page + PSID) ang nag-chat sa range, lahat ('all') at kada bot, mula sa iisang grouped na basa; ang
-     * chat na galing sa gateway ay forbeast. @return array<string, int> bucket => bilang
-     */
-    private function chatCounts(array $f, Carbon $start, Carbon $end): array
-    {
-        $select = ['COUNT(DISTINCT psid) AS c_all'];
-        $bindings = [];
-        foreach (self::vias() as $i => $via) {
-            [$cond, $b] = self::viaCondition('botcake_chats', 'payload->source', $via);
-            $select[] = "COUNT(DISTINCT CASE WHEN {$cond} THEN psid END) AS c_{$i}";
-            array_push($bindings, ...$b);
-        }
-        $out = ['all' => 0] + array_fill_keys(self::vias(), 0);
-        foreach (DB::table('botcake_chats')->whereNull('payload->_standby')->where('received_at', '>=', $start)->where('received_at', '<', $end)
-            ->when($f['page_id'] ?? null, fn ($q, $v) => $q->where('page_id', (string) $v))
-            ->groupBy('page_id')->selectRaw(implode(', ', $select), $bindings)->get() as $r) {
-            $out['all'] += (int) $r->c_all;
-            foreach (self::vias() as $i => $via) $out[$via] += (int) $r->{"c_$i"};
-        }
-
-        return $out;
-    }
-
-    /** Ilang customer (page + PSID) ang nag-chat sa range, ayon sa filter ng page at via. */
-    private function chats(array $f, Carbon $start, Carbon $end): int
-    {
-        return $this->chatCounts($f, $start, $end)[$f['via'] ?? 'all'] ?? 0;
-    }
-
-    /** Ang funnel ng bawat bot (botcake, forbeast) sa range, kahit anong filter ng via; mula sa iisang basa ng build(). */
-    private function byVia(array $f, Collection $allOrders, array $delivery, array $sends, array $chats): array
+    /** Ang funnel ng bawat bot (botcake, forbeast) sa range, kahit anong filter ng via; mula sa parehong mga bahagi. */
+    private function byVia(array $f, Collection $allOrders, array $delivery, array $main, array $base): array
     {
         $out = [];
         foreach (self::vias() as $via) {
             $orders = $allOrders->filter(fn ($o) => self::orderVia($o) === $via
                 && ($f['flow_id'] === null || (int) $o->flow_id === (int) $f['flow_id'])
                 && ($f['version_id'] === null || (int) ($o->detail['flow_version'] ?? 0) === (int) $f['version_id']));
-            $out[$via] = ['chats' => $chats[$via]] + $this->counted(self::sumPages($sends, $via), $orders, $delivery);
+            $out[$via] = ['chats' => self::chatCount($base, [$via])] + $this->counted(self::sumPages(self::pageCounts($main, [$via])), $orders, $delivery);
         }
 
         return $out;
@@ -436,19 +470,16 @@ class ChatbotResults
     /**
      * Kada page, magkakatabi (parehong filter ng funnel: petsa, page, via, flow at version): padala, customer, sagot, order,
      * delivered, at ang hati ng order sa main flow (walang sequence_id o sequence_step sa detail, gaya ng By sequence step)
-     * at pagkatapos ng sequence step. Ang padala ay mula sa iisang basa ng build() (sendCounts, ang bucket ng filter ng
-     * via); ang order at delivered ay mula sa naka-load na. Ang total ay katumbas ng funnel.
+     * at pagkatapos ng sequence step. Ang padala ay mula sa pageCounts(); ang order at delivered ay mula sa naka-load na.
+     * Ang total ay katumbas ng funnel.
      * @param array<string, string> $names page id => pangalan
      * @return array{rows: array<int, array<string, mixed>>, total: array<string, mixed>}
      */
-    private function byPage(array $sends, string $bucket, Collection $orders, array $delivery, array $names): array
+    private function byPage(array $sends, Collection $orders, array $delivery, array $names): array
     {
         $blank = ['sent' => 0, 'customers_sent' => 0, 'replied' => 0, 'orders' => 0, 'main_flow' => 0, 'after_sequence' => 0, 'delivered' => 0];
         $rows = [];
-        foreach ($sends as $page => $r) {
-            // Gaya ng dating WHERE ng via: ang page na walang padala sa bucket na ito ay wala sa hanay ng padala.
-            if (($r[$bucket]['sent'] ?? 0) > 0) $rows[(string) $page] = $r[$bucket] + $blank;
-        }
+        foreach ($sends as $page => $r) $rows[(string) $page] = $r + $blank;
         foreach ($orders as $o) {
             $p = (string) $o->page_id;
             $rows[$p] ??= $blank;
@@ -485,23 +516,8 @@ class ChatbotResults
     }
 
     /**
-     * Ang bilang ng isang hanay ng padala at ng mga order nito: sent, customers, replied, median na oras ng sagot, orders,
-     * delivered, RTS, in transit, other, unmatched. $funnel: ang anyo ng funnel (walang median).
-     */
-    private function metrics($sends, Collection $orders, array $delivery, bool $funnel = false): array
-    {
-        $sent = (int) (clone $sends)->count();
-        $customers = (int) (clone $sends)->groupBy('page_id')->selectRaw('COUNT(DISTINCT psid) AS n')->pluck('n')->sum();
-        $replied = (int) (clone $sends)->whereNotNull('replied_at')->count();
-        $median = $funnel ? [] : ['median_reply_seconds' => self::median((clone $sends)->whereNotNull('reply_seconds')->orderByDesc('id')->limit(self::MEDIAN_ROWS)
-            ->pluck('reply_seconds')->map(fn ($v) => (int) $v)->all())];
-
-        return $this->counted(['sent' => $sent, 'customers_sent' => $customers, 'replied' => $replied], $orders, $delivery, $median);
-    }
-
-    /**
-     * Ang anyo ng metrics() mula sa nabilang na: sent, customers, replied (at ang median kapag mayroon), saka ang mga order
-     * at ang delivered, RTS, in transit, other at unmatched nila.
+     * Ang anyo ng dating metrics() mula sa nabilang na: sent, customers, replied (at ang median kapag mayroon), saka ang
+     * mga order at ang delivered, RTS, in transit, other at unmatched nila.
      * @param array{sent: int, customers_sent: int, replied: int} $c
      */
     private function counted(array $c, Collection $orders, array $delivery, array $median = []): array
@@ -515,15 +531,10 @@ class ChatbotResults
             'rts' => $tally['rts'], 'rts_pct' => self::pct($tally['rts'], $n), 'in_transit' => $tally['in_transit'], 'other' => $tally['other'], 'unmatched' => $tally['unmatched']];
     }
 
-    /** Ang mga row ng chatbot_reply_tags sa range (kasama ang reply), ayon sa filter. */
-    private function tags(array $f, Carbon $start, Carbon $end)
+    /** Ang susi ng grupo ng By message (flow, node, botfield, version), gaya ng dati. */
+    public static function groupKey(?int $flow, ?string $node, ?string $botfield, ?int $setting): string
     {
-        return DB::table('chatbot_reply_tags as t')->join('chatbot_replies as r', 'r.id', '=', 't.reply_id')
-            ->where('t.sent_at', '>=', $start)->where('t.sent_at', '<', $end)->where('r.kind', 'send') // ang padala ng bot lang, gaya ng funnel
-            ->when($f['page_id'], fn ($q, $v) => $q->where('t.page_id', (int) $v))
-            ->when($f['flow_id'], fn ($q, $v) => $q->where('t.flow_id', (int) $v))
-            ->when($f['version_id'], fn ($q, $v) => $q->where('t.flow_version_id', (int) $v))
-            ->when($f['via'], fn ($q, $v) => self::whereVia($q, 'r.tags->via', $v));
+        return ($flow ?? '') . '|' . ($node ?? '') . '|' . ($botfield ?? '') . '|' . ($setting ?? '');
     }
 
     private static function tagKey(object $t): string
@@ -575,48 +586,107 @@ class ChatbotResults
         return $ids ? DB::table('chatbot_flows')->whereIn('id', $ids)->pluck('name', 'id')->all() : [];
     }
 
-    private function byMessage(array $f, Carbon $start, Carbon $end, Collection $orders, array $delivery): array
+    /**
+     * Ang median ng pinakabagong MEDIAN_ROWS (pinakamataas na id, lahat ng grupo) ng mga [id, grupo, seconds] ng mga
+     * bahagi, gaya ng dating ORDER BY id DESC LIMIT. $group: ang susi ng grupo mula sa index ng bahagi.
+     * @return array<string, array<int, int>> grupo => mga segundo
+     */
+    private static function newestSeconds(array $pieces, ?array $buckets, callable $group): array
     {
-        $groups = $this->tags($f, $start, $end)->groupBy('t.flow_id', 't.node_id', 't.botfield', 't.setting_id')
-            ->selectRaw('t.flow_id, t.node_id, t.botfield, t.setting_id, COUNT(DISTINCT t.reply_id) AS sent, COUNT(DISTINCT CASE WHEN r.replied_at IS NOT NULL THEN t.reply_id END) AS replied')
-            ->orderByDesc('sent')->orderBy('t.flow_id')->orderBy('t.node_id')->orderBy('t.setting_id')->limit(self::MAX_ROWS)->get();
-        if ($groups->isEmpty()) return [];
-
-        $seconds = [];
-        // Ang reply_seconds ay laging kasama ng replied_at (ChatbotTags): kapag walang sinagot sa mga grupong ito, wala ring
-        // median, kaya hindi na tinatakbo ang pangalawang join. (Ang median ay mula sa pinakabagong MEDIAN_ROWS ng lahat ng
-        // grupo, kaya hindi ito maisasama sa unang grouped na basa nang hindi binabago ang numero.)
-        if ($groups->sum(fn ($g) => (int) $g->replied) > 0) foreach ($this->tags($f, $start, $end)->whereNotNull('r.reply_seconds')->distinct()
-            ->orderByDesc('t.reply_id')->limit(self::MEDIAN_ROWS)->get(['t.reply_id', 't.flow_id', 't.node_id', 't.botfield', 't.setting_id', 'r.reply_seconds']) as $t) {
-            $seconds[self::tagKey($t)][] = (int) $t->reply_seconds;
+        $ids = $groups = $secs = [];
+        foreach ($pieces as $piece) {
+            foreach ($piece['seconds'] ?? [] as $bucket => [$pid, $pkey, $psec]) {
+                if (!self::inBuckets((string) $bucket, $buckets)) continue;
+                $pieceIds = ResultsPieces::ints($pid, 'J');
+                $pieceKeys = ResultsPieces::ints($pkey);
+                $pieceSecs = ResultsPieces::ints($psec);
+                foreach ($pieceIds as $i => $id) {
+                    $ids[] = $id;
+                    $groups[] = $group($piece, $pieceKeys[$i]);
+                    $secs[] = $pieceSecs[$i];
+                }
+                // Hindi hihigit sa dalawang beses ng MEDIAN_ROWS ang hawak: ang pinakabago lang ang naiiwan.
+                if (count($ids) > 2 * self::MEDIAN_ROWS) {
+                    array_multisort($ids, SORT_DESC, SORT_NUMERIC, $groups, $secs);
+                    array_splice($ids, self::MEDIAN_ROWS);
+                    array_splice($groups, self::MEDIAN_ROWS);
+                    array_splice($secs, self::MEDIAN_ROWS);
+                }
+            }
         }
-        $after = $this->ordersAfter($orders, $delivery);
-        $info = $this->settingInfo($groups->pluck('setting_id')->filter()->map(fn ($v) => (int) $v)->unique()->values()->all());
-        $flows = $this->flowNames($groups->pluck('flow_id')->filter()->unique()->values()->all());
+        if (!$ids) return [];
+        array_multisort($ids, SORT_DESC, SORT_NUMERIC, $groups, $secs);
+        $out = [];
+        foreach (array_slice($groups, 0, self::MEDIAN_ROWS, true) as $i => $g) $out[$g][] = $secs[$i];
 
-        return $groups->map(function ($g) use ($seconds, $after, $info, $flows) {
-            $k = self::tagKey($g);
-            $s = $g->setting_id !== null ? ($info[(int) $g->setting_id] ?? null) : null;
-
-            return ['flow_id' => $g->flow_id !== null ? (int) $g->flow_id : null, 'flow' => $flows[$g->flow_id] ?? null, 'node' => $g->node_id,
-                'botfield' => $g->botfield, 'label' => $s['label'] ?? $g->botfield, 'version' => $g->setting_id !== null ? (int) $g->setting_id : null,
-                'changed_on' => $s['changed_on'] ?? null, 'value' => $s['value'] ?? null, 'active' => $s['active'] ?? null,
-                'sent' => (int) $g->sent, 'replied' => (int) $g->replied, 'replied_pct' => self::pct((int) $g->replied, (int) $g->sent),
-                'median_reply_seconds' => self::median($seconds[$k] ?? []), 'orders' => $after[$k]['orders'] ?? 0, 'delivered' => $after[$k]['delivered'] ?? 0];
-        })->values()->all();
+        return $out;
     }
 
     /**
-     * Kada step ng sequence (page at petsa lang; ang step ay may sariling flow): padala, sagot, ilang nag-unsubscribe
-     * (ang huling step na naipadala sa kanila bago umalis), at ang mga order na ang huling step ng customer ay ito.
+     * By message mula sa mga bahagi: kada grupo ang sent at replied (kabuuan ng mga araw), ayos gaya ng dati (pinakamaraming
+     * padala, saka flow, node, version), hanggang MAX_ROWS; ang median mula sa newestSeconds().
      */
-    private function bySequenceStep(array $f, Carbon $start, Carbon $end, Collection $orders, array $delivery): array
+    private function byMessage(array $pieces, ?array $buckets, Collection $orders, array $delivery): array
+    {
+        $totals = [];
+        foreach ($pieces as $piece) {
+            foreach ($piece['messages']['counts'] ?? [] as $bucket => $byKey) {
+                if (!self::inBuckets((string) $bucket, $buckets)) continue;
+                foreach ($byKey as $i => [$sent, $replied]) {
+                    $tuple = $piece['messages']['keys'][$i];
+                    $k = self::groupKey(...$tuple);
+                    $totals[$k] ??= ['tuple' => $tuple, 'sent' => 0, 'replied' => 0];
+                    $totals[$k]['sent'] += $sent;
+                    $totals[$k]['replied'] += $replied;
+                }
+            }
+        }
+        if (!$totals) return [];
+        // Gaya ng ORDER BY sent DESC, flow_id, node_id, setting_id (ang NULL ay nauuna).
+        $nullFirst = fn ($v) => $v === null ? [0, ''] : [1, $v];
+        uasort($totals, fn ($a, $b) => [$b['sent'], $nullFirst($a['tuple'][0]), $nullFirst($a['tuple'][1]), $nullFirst($a['tuple'][3])]
+            <=> [$a['sent'], $nullFirst($b['tuple'][0]), $nullFirst($b['tuple'][1]), $nullFirst($b['tuple'][3])]);
+        $groups = array_slice($totals, 0, self::MAX_ROWS, true);
+
+        // Ang reply_seconds ay laging kasama ng replied_at (ChatbotTags): kapag walang sinagot sa mga grupong ito, wala ring median.
+        $seconds = array_sum(array_column($groups, 'replied')) > 0
+            ? self::newestSeconds(array_map(fn ($p) => ['seconds' => $p['messages']['seconds'] ?? []] + $p, $pieces), $buckets, fn ($p, $i) => self::groupKey(...$p['messages']['keys'][$i]))
+            : [];
+        $after = $this->ordersAfter($orders, $delivery);
+        $info = $this->settingInfo(array_values(array_unique(array_filter(array_map(fn ($g) => $g['tuple'][3], $groups), fn ($v) => $v !== null))));
+        $flows = $this->flowNames(array_values(array_unique(array_filter(array_map(fn ($g) => $g['tuple'][0], $groups), fn ($v) => $v !== null))));
+
+        return array_values(array_map(function ($g) use ($seconds, $after, $info, $flows) {
+            [$flow, $node, $botfield, $setting] = $g['tuple'];
+            $k = self::groupKey($flow, $node, $botfield, $setting);
+            $s = $setting !== null ? ($info[$setting] ?? null) : null;
+
+            return ['flow_id' => $flow, 'flow' => $flows[$flow] ?? null, 'node' => $node,
+                'botfield' => $botfield, 'label' => $s['label'] ?? $botfield, 'version' => $setting,
+                'changed_on' => $s['changed_on'] ?? null, 'value' => $s['value'] ?? null, 'active' => $s['active'] ?? null,
+                'sent' => $g['sent'], 'replied' => $g['replied'], 'replied_pct' => self::pct($g['replied'], $g['sent']),
+                'median_reply_seconds' => self::median($seconds[$k] ?? []), 'orders' => $after[$k]['orders'] ?? 0, 'delivered' => $after[$k]['delivered'] ?? 0];
+        }, $groups));
+    }
+
+    /**
+     * Kada step ng sequence (page at petsa lang; ang step ay may sariling flow): padala, sagot (mula sa mga bahagi),
+     * ilang nag-unsubscribe (ang huling step na naipadala sa kanila bago umalis), at ang mga order na ang huling step ng
+     * customer ay ito.
+     */
+    private function bySequenceStep(array $f, Carbon $start, Carbon $end, array $pieces, ?array $buckets, Collection $orders, array $delivery): array
     {
         $rows = [];
         $key = fn ($seq, $step) => (int) $seq . ':' . (int) $step;
-        foreach ($this->sends($f, $start, $end, false)->whereNotNull('sequence_id')->groupBy('sequence_id', 'sequence_step')
-            ->selectRaw('sequence_id, sequence_step, COUNT(*) AS sent, SUM(CASE WHEN replied_at IS NOT NULL THEN 1 ELSE 0 END) AS replied')->get() as $r) {
-            $rows[$key($r->sequence_id, $r->sequence_step)] = ['sequence_id' => (int) $r->sequence_id, 'step' => (int) $r->sequence_step, 'sent' => (int) $r->sent, 'replied' => (int) $r->replied];
+        foreach ($pieces as $piece) {
+            foreach ($piece['steps'] ?? [] as $bucket => $bySteps) {
+                if (!self::inBuckets((string) $bucket, $buckets)) continue;
+                foreach ($bySteps as $k => [$seq, $step, $sent, $replied]) {
+                    $rows[$k] ??= ['sequence_id' => $seq, 'step' => $step, 'sent' => 0, 'replied' => 0];
+                    $rows[$k]['sent'] += $sent;
+                    $rows[$k]['replied'] += $replied;
+                }
+            }
         }
         $blank = fn ($seq, $step) => ['sequence_id' => (int) $seq, 'step' => (int) $step, 'sent' => 0, 'replied' => 0];
 
@@ -656,14 +726,22 @@ class ChatbotResults
             'orders' => $ordered[$key($r['sequence_id'], $r['step'])]['orders'] ?? 0, 'delivered' => $ordered[$key($r['sequence_id'], $r['step'])]['delivered'] ?? 0], array_slice($rows, 0, self::MAX_ROWS)));
     }
 
-    /** Kada ad (page at petsa lang): ilang customer ang naabot ng bot, ilang order, ilang delivered; ang pangalan mula sa ads_manager_reports. */
-    private function byAd(array $f, Carbon $start, Carbon $end, Collection $orders, array $delivery): array
+    /** Kada ad (page at petsa lang): ilang customer ang naabot ng bot (unyon ng mga araw), ilang order, ilang delivered; ang pangalan mula sa ads_manager_reports. */
+    private function byAd(array $pieces, ?array $buckets, Collection $orders, array $delivery): array
     {
-        $rows = [];
-        foreach ($this->sends($f, $start, $end, false)->whereNotNull('ad_id')->where('ad_id', '<>', '')->groupBy('ad_id')
-            ->selectRaw('ad_id, COUNT(DISTINCT psid) AS chats')->get() as $r) {
-            $rows[(string) $r->ad_id] = ['ad_id' => (string) $r->ad_id, 'chats' => (int) $r->chats, 'orders' => 0, 'delivered' => 0];
+        $sets = [];
+        foreach ($pieces as $piece) {
+            foreach ($piece['ads'] ?? [] as $bucket => $byAd) {
+                if (!self::inBuckets((string) $bucket, $buckets)) continue;
+                foreach ($byAd as $ad => $packed) {
+                    $sets[(string) $ad] ??= [];
+                    ResultsPieces::addTo($sets[(string) $ad], $packed);
+                }
+            }
         }
+        $rows = [];
+        foreach ($sets as $ad => $set) $rows[(string) $ad] = ['ad_id' => (string) $ad, 'chats' => count($set), 'orders' => 0, 'delivered' => 0];
+        unset($sets);
         foreach ($orders as $o) {
             $ad = trim((string) ($o->detail['ad_id'] ?? ''));
             if ($ad === '') continue;
@@ -702,11 +780,11 @@ class ChatbotResults
     /**
      * Dalawang flow version (kind flow: a at b ay chatbot_flow_versions id) o dalawang version ng isang botfield (kind
      * botfield: a at b ay page_settings id), magkatabi, sa parehong page at petsa. Kasama ang bilang (sent, orders) para
-     * kita ang maliit na sample.
+     * kita ang maliit na sample. Spec 278-2: ang padala ay mula sa mga bahagi ng araw ng bawat version.
      */
     public function compare(array $f, string $kind, int $a, int $b): array
     {
-        return Cache::remember('chatbot-results-compare:' . md5(json_encode([$f, $kind, $a, $b])), self::CACHE_SECONDS, fn () => $this->compareBuild($f, $kind, $a, $b));
+        return Cache::remember('chatbot-results-compare:v3:' . md5(json_encode([$f, $kind, $a, $b])), self::CACHE_SECONDS, fn () => $this->compareBuild($f, $kind, $a, $b));
     }
 
     private function compareBuild(array $f, string $kind, int $a, int $b): array
@@ -714,33 +792,39 @@ class ChatbotResults
         [$start, $end] = $this->bounds($f);
         $orders = $this->orders($f, $start, $end);
         $delivery = $this->deliveries($orders);
-        $side = $kind === 'flow' ? fn (int $id) => $this->flowSide($f, $start, $end, $orders, $delivery, $id) : fn (int $id) => $this->botfieldSide($f, $start, $end, $orders, $delivery, $id);
+        $side = $kind === 'flow' ? fn (int $id) => $this->flowSide($f, $orders, $delivery, $id) : fn (int $id) => $this->botfieldSide($f, $start, $end, $orders, $delivery, $id);
 
         return ['kind' => $kind, 'a' => $side($a), 'b' => $side($b)];
     }
 
-    private function flowSide(array $f, Carbon $start, Carbon $end, Collection $orders, array $delivery, int $version): array
+    /** Ang bilang ng Compare mula sa mga bahagi: sent, customers, replied at ang median ng pinakabagong reply_seconds. */
+    private function sideCounts(array $pieces, ?array $buckets): array
+    {
+        $median = self::newestSeconds($pieces, $buckets, fn () => 'all');
+
+        return [self::sumPages(self::pageCounts($pieces, $buckets)), ['median_reply_seconds' => self::median($median['all'] ?? [])]];
+    }
+
+    private function flowSide(array $f, Collection $orders, array $delivery, int $version): array
     {
         $row = DB::table('chatbot_flow_versions')->where('id', $version)->first(['id', 'flow_id', 'note', 'published_by', 'created_at']);
-        $sends = $this->sends(['flow_id' => null, 'version_id' => null] + $f, $start, $end, false)->where('flow_version_id', $version);
+        [$counts, $median] = $this->sideCounts($this->piecesOf($f, ResultsPieces::flowVersion($f, $version)), $f['via'] !== null ? [$f['via']] : null);
 
         return ['label' => ['id' => $version, 'flow' => $row ? DB::table('chatbot_flows')->where('id', $row->flow_id)->value('name') : null,
                 'at' => $row?->created_at ? Carbon::parse($row->created_at)->timezone('Asia/Manila')->format('Y-m-d H:i') : null,
                 'by' => $row?->published_by ? User::whereKey($row->published_by)->value('name') : null, 'note' => $row?->note]]
-            + $this->metrics($sends, $orders->filter(fn ($o) => (int) ($o->detail['flow_version'] ?? 0) === $version), $delivery);
+            + $this->counted($counts, $orders->filter(fn ($o) => (int) ($o->detail['flow_version'] ?? 0) === $version), $delivery, $median);
     }
 
     private function botfieldSide(array $f, Carbon $start, Carbon $end, Collection $orders, array $delivery, int $setting): array
     {
-        $tagged = DB::table('chatbot_reply_tags')->where('setting_id', $setting)->where('sent_at', '>=', $start)->where('sent_at', '<', $end)
-            ->when($f['page_id'], fn ($q, $v) => $q->where('page_id', (int) $v))->select('reply_id');
-        $sends = DB::table('chatbot_replies')->whereIn('id', $tagged);
+        [$counts, $median] = $this->sideCounts($this->piecesOf($f, ResultsPieces::botfield($f, $setting)), null);
         $ids = DB::table('chatbot_reply_tags')->where('setting_id', $setting)->whereIn('reply_id', $orders->flatMap(fn ($o) => (array) ($o->detail['sends'] ?? []))->map(fn ($v) => (int) $v)->unique()->values()->all())
             ->pluck('reply_id')->map(fn ($v) => (int) $v)->flip();
         $info = $this->settingInfo([$setting])[$setting] ?? [];
 
         return ['label' => ['id' => $setting, 'botfield' => PageSetting::whereKey($setting)->value('key')] + $info]
-            + $this->metrics($sends, $orders->filter(fn ($o) => collect((array) ($o->detail['sends'] ?? []))->contains(fn ($id) => isset($ids[(int) $id]))), $delivery);
+            + $this->counted($counts, $orders->filter(fn ($o) => collect((array) ($o->detail['sends'] ?? []))->contains(fn ($id) => isset($ids[(int) $id]))), $delivery, $median);
     }
 
     // ---- Delivered ----

@@ -19,6 +19,7 @@ class ChatbotResultsWarm extends Command
     public const LOCK = 'chatbot-results:warm';
     /** Kapareho ng withoutOverlapping(30): ang lock ng namatay na proseso ay hindi haharang nang matagal. */
     private const LOCK_SECONDS = 1800;
+    private const MEMORY = '1024M';
 
     protected $signature = 'chatbot:results-warm';
 
@@ -32,17 +33,23 @@ class ChatbotResultsWarm extends Command
 
             return self::SUCCESS;
         }
+        // Ang unyon ng mga set ng customer ng 7 araw ay nasa memory (kada page): hindi bababa sa MEMORY ang takbong ito.
+        $limit = (int) ini_parse_quantity((string) ini_get('memory_limit'));
+        if ($limit > 0 && $limit < ini_parse_quantity(self::MEMORY)) ini_set('memory_limit', self::MEMORY);
         $t = microtime(true);
         try {
             $r = $results->warm();
         } catch (\Throwable $e) {
             report($e);
-            $r = ['built' => [], 'failed' => ['run'], 'dropped' => 0];
+            $r = ['built' => [], 'failed' => ['run'], 'dropped' => 0, 'pieces' => 0, 'pending' => []];
         } finally {
             $lock->release();
         }
-        $line = sprintf('chatbot:results-warm built %s%s%s in %.1f s',
+        // Spec 278-2: pati ilang bahagi ng araw ang nabasa, at ang hiling na kulang pa (itutuloy sa susunod na takbo).
+        $line = sprintf('chatbot:results-warm built %s%s%s%s%s in %.1f s',
             $r['built'] ? implode(', ', array_map(fn ($b) => sprintf('%s (%.1f s)', $b[0], $b[1]), $r['built'])) : 'nothing',
+            $r['pieces'] ? '; ' . $r['pieces'] . ' day ' . ($r['pieces'] === 1 ? 'piece' : 'pieces') : '',
+            $r['pending'] ? '; still building ' . implode(', ', $r['pending']) : '',
             $r['dropped'] ? '; dropped ' . $r['dropped'] . ' wanted' : '', $r['failed'] ? '; failed ' . implode(', ', $r['failed']) : '', microtime(true) - $t);
         $r['failed'] ? Log::warning($line) : Log::info($line);
         $this->line($line);
