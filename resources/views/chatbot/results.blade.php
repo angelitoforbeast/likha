@@ -4,7 +4,7 @@
 @section('heading', 'Results')
 
 @section('description')
-    Which bot messages get replies, orders and deliveries, per flow version and per botfield version. Numbers only; refreshed every 5 minutes.
+    Which bot messages get replies, orders and deliveries, per flow version and per botfield version. Numbers only; built in the background (the default view every 15 minutes).
 @endsection
 
 @php
@@ -33,6 +33,7 @@
         </label>
         <label class="flex flex-col text-xs">From<input type="date" name="from" value="{{ $f['from'] }}" class="border px-2 py-1 text-sm text-gray-900"></label>
         <label class="flex flex-col text-xs">To<input type="date" name="to" value="{{ $f['to'] }}" class="border px-2 py-1 text-sm text-gray-900"></label>
+        @if($asOf)<span class="self-center text-xs text-slate-500" data-results-as-of>as of {{ $asOf }} (Manila)</span>@endif
         <label class="flex min-w-0 flex-col text-xs">Flow
             <select name="flow_id" class="max-w-[16rem] border px-2 py-1 text-sm text-gray-900">
                 <option value="">All flows</option>
@@ -56,6 +57,12 @@
         <button class="cb-btn cb-btn-primary">Show</button>
         <a href="{{ route('chatbot.results.json', $keep) }}" class="text-xs text-blue-700 hover:underline">JSON</a>
     </form>
+
+    {{-- Spec 278: wala pang kopya para sa filter na ito; binubuo ng chatbot:results-warm, kaya kusang nagre-reload ang page. --}}
+    @if($building)
+        <p class="cb-card px-3 py-2 text-sm text-slate-700" role="status" data-results-building>Binubuo pa ang report (mga 1–3 minuto). Kusa itong magre-reload.</p>
+        @push('scripts')<script>setTimeout(function () { location.reload(); }, 20000);</script>@endpush
+    @else
 
     {{-- Funnel --}}
     <section aria-labelledby="h-funnel">
@@ -294,5 +301,6 @@
             <p class="mt-1 text-xs text-slate-500">Small counts swing a lot: compare the numbers in brackets before trusting a percentage.</p>
         @endif
     </section>
+    @endif
 </div>
 @endsection

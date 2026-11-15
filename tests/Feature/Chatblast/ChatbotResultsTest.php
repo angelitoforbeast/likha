@@ -209,18 +209,24 @@ class ChatbotResultsTest extends ChatblastTestCase
     public function test_S_100_12_the_json_and_the_command_give_the_same_shape_without_customer_data(): void
     {
         $this->actingAs($this->user('CEO', 'ceo2@example.test'));
+        // Spec 278: ang web ay nagbabasa ng kopya lang; ang warm ang bumubuo nito.
+        $copy = fn (array $q) => app(ChatbotResults::class)->buildCopy($q);
+        $copy(self::RANGE + ['compare' => 'flow', 'flow_id' => $this->flowF, 'a' => $this->v1, 'b' => $this->v2]);
         $json = $this->getJson('/chatbot/results.json?' . http_build_query(self::RANGE + ['compare' => 'flow', 'flow_id' => $this->flowF, 'a' => $this->v1, 'b' => $this->v2]))->assertOk()->json();
-        $this->assertSame(['filters', 'funnel', 'by_via', 'by_page', 'by_message', 'by_step', 'by_ad', 'versions', 'compare'], array_keys($json));
+        $this->assertSame(['filters', 'funnel', 'by_via', 'by_page', 'by_message', 'by_step', 'by_ad', 'versions', 'compare', 'built_at'], array_keys($json));
         $this->assertSame(['a', 'b', 'kind'], collect(array_keys($json['compare']))->sort()->values()->all());
         $raw = json_encode($json);
         foreach (['secret customer text', 'Customer Name', '"psid"'] as $never) $this->assertStringNotContainsString($never, $raw);
 
         Artisan::call('chatbot:results', ['--page' => 'Page Uno', '--from' => '2026-10-14', '--to' => '2026-10-20', '--flow' => (string) $this->flowF, '--json' => true]);
         $cli = json_decode(Artisan::output(), true);
+        $copy(self::RANGE + ['flow_id' => $this->flowF]);
         $web = $this->getJson('/chatbot/results.json?' . http_build_query(self::RANGE + ['flow_id' => $this->flowF]))->json();
+        unset($web['built_at']);
         $this->assertSame($web, $cli);
 
         // Bad filters fall back to the defaults (last 7 days, all pages), never an error.
+        $copy([]);
         $bad = $this->getJson('/chatbot/results.json?page_id=abc&from=2026-99-99&to=%27%3B--&flow_id=x&version_id=-1&compare=nope')->assertOk()->json();
         $this->assertSame([null, '2026-10-15', '2026-10-21', null, null], [$bad['filters']['page_id'], $bad['filters']['from'], $bad['filters']['to'], $bad['filters']['flow_id'], $bad['filters']['version_id']]);
         $this->assertNull($bad['compare']);
@@ -237,6 +243,7 @@ class ChatbotResultsTest extends ChatblastTestCase
         $this->getJson('/chatbot/results.json')->assertForbidden();
 
         $this->actingAs($this->user('CEO', 'ceo3@example.test'));
+        app(ChatbotResults::class)->buildCopy(self::RANGE);
         $page = $this->get('/chatbot/results?' . http_build_query(self::RANGE))->assertOk();
         $this->assertMatchesRegularExpression('/data-cb-nav="Results"\s+aria-current="page"/', $page->getContent());
         foreach (['Funnel', 'By message', 'By sequence step', 'By ad', 'Compare', 'Promo Ad One', 'Hello v2'] as $text) $page->assertSee($text);

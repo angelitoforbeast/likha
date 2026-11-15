@@ -111,6 +111,14 @@ Schedule::command('chatbot:content-check')
     ->dailyAt('02:40')
     ->withoutOverlapping();
 
+// Chatbot Results (spec 278): ang kopya ng /chatbot/results ay dito binubuo, hindi sa web request. Kada minuto: ang default
+// na view kapag lampas 15 minuto na, saka hanggang 3 hiling na walang kopya pa. Isang takbo lang sa isang server.
+Schedule::command('chatbot:results-warm')
+    ->everyMinute()
+    ->withoutOverlapping(30) // 30 min: ang takbong nag-crash ay hindi haharang nang matagal
+    ->onOneServer()
+    ->runInBackground(); // ilang minuto ang isang takbo: hindi pinaghihintay ang ibang job ng parehong minuto (hal. forbeast-watch)
+
 // Chatbot Results: ang replied_at ng mga padalang hindi naabot ng job ng chat (huling 48 oras).
 Schedule::command('chatbot:replied-backfill')
     ->hourlyAt(7)

@@ -128,10 +128,12 @@ class ChatbotResultsByPageTest extends ChatblastTestCase
             ->map(function ($o) { $o->detail = (array) json_decode((string) $o->detail, true); return $o; });
         $names = BotcakeChat::pageMap();
 
-        $method = new \ReflectionMethod(ChatbotResults::class, 'byPage');
+        // Spec 278: ang padala ng funnel, By bot at By page ay iisang grouped query (sendCounts); ang byPage ay walang sariling query.
+        $service = app(ChatbotResults::class);
         DB::flushQueryLog();
         DB::enableQueryLog();
-        $out = $method->invoke(app(ChatbotResults::class), $f, $start, $end, $orders, [], $names);
+        $sends = (new \ReflectionMethod(ChatbotResults::class, 'sendCounts'))->invoke($service, $f, $start, $end);
+        $out = (new \ReflectionMethod(ChatbotResults::class, 'byPage'))->invoke($service, $sends, 'all', $orders, [], $names);
         $log = DB::getQueryLog();
         DB::disableQueryLog();
 
@@ -144,8 +146,10 @@ class ChatbotResultsByPageTest extends ChatblastTestCase
     {
         Cache::flush();
         $this->actingAs($this->user('CEO', 'ceo276@example.test'));
+        app(ChatbotResults::class)->buildCopy(self::RANGE);
+        app(ChatbotResults::class)->buildCopy(self::RANGE + ['via' => 'botcake']);
         $json = $this->getJson('/chatbot/results.json?' . http_build_query(self::RANGE))->assertOk()->json();
-        $this->assertSame(['filters', 'funnel', 'by_via', 'by_page', 'by_message', 'by_step', 'by_ad', 'versions', 'compare'], array_keys($json));
+        $this->assertSame(['filters', 'funnel', 'by_via', 'by_page', 'by_message', 'by_step', 'by_ad', 'versions', 'compare', 'built_at'], array_keys($json));
         $this->assertSame(['rows', 'total'], array_keys($json['by_page']));
         $this->assertSame('Page Uno', $json['by_page']['rows'][0]['page']);
         $this->assertStringNotContainsString('"psid"', json_encode($json['by_page']));
