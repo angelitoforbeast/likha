@@ -14,7 +14,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 /**
- * Ang report ng /chatbot/results (at ng results.json at chatbot:results): funnel, By message, By sequence step, By ad, at
+ * Ang report ng /chatbot/results (at ng results.json at chatbot:results): funnel, By bot, By page, By message, By sequence step, By ad, at
  * ang paghahambing ng dalawang flow version o dalawang version ng isang botfield. Mula sa talaan ng ChatbotTags; ang
  * delivered ay kinukuwenta ngayon mula sa macro_output at J&T (walang kopya). Bawat query ay may petsa sa isang index; ang
  * resulta ay naka-cache nang 5 minuto kada filter. Bilang, pangalan at version lang ang lumalabas: walang text, pangalan
@@ -120,7 +120,8 @@ class ChatbotResults
 
     public function report(array $f): array
     {
-        return Cache::remember('chatbot-results:' . md5(json_encode($f)), self::CACHE_SECONDS, fn () => $this->build($f));
+        // v2: may by_page na; ang lumang cache (walang by_page) ay hindi na binabasa pagka-deploy.
+        return Cache::remember('chatbot-results:v2:' . md5(json_encode($f)), self::CACHE_SECONDS, fn () => $this->build($f));
     }
 
     private function build(array $f): array
@@ -138,6 +139,7 @@ class ChatbotResults
                 'flow' => $f['flow_id'] !== null ? DB::table('chatbot_flows')->where('id', (int) $f['flow_id'])->value('name') : null],
             'funnel' => ['chats' => $this->chats($f, $start, $end)] + $this->metrics($this->sends($f, $start, $end, true), $flowOrders, $delivery, true),
             'by_via' => $this->byVia($f, $start, $end, $allOrders, $delivery),
+            'by_page' => $this->byPage($f, $start, $end, $flowOrders, $delivery, $names),
             'by_message' => $this->byMessage($f, $start, $end, $flowOrders, $delivery),
             'by_step' => $this->bySequenceStep($f, $start, $end, $orders, $delivery),
             'by_ad' => $this->byAd($f, $start, $end, $orders, $delivery),
@@ -199,6 +201,42 @@ class ChatbotResults
         }
 
         return $out;
+    }
+
+    /**
+     * Kada page, magkakatabi (parehong filter ng funnel: petsa, page, via, flow at version): padala, customer, sagot, order,
+     * delivered, at ang hati ng order sa main flow (walang sequence_id o sequence_step sa detail, gaya ng By sequence step)
+     * at pagkatapos ng sequence step. Isang grouped query lang ang padala (hindi kada page); ang order at delivered ay mula
+     * sa naka-load na. Ang total ay katumbas ng funnel.
+     * @param array<string, string> $names page id => pangalan
+     * @return array{rows: array<int, array<string, mixed>>, total: array<string, mixed>}
+     */
+    private function byPage(array $f, Carbon $start, Carbon $end, Collection $orders, array $delivery, array $names): array
+    {
+        $blank = ['sent' => 0, 'customers_sent' => 0, 'replied' => 0, 'orders' => 0, 'main_flow' => 0, 'after_sequence' => 0, 'delivered' => 0];
+        $rows = [];
+        foreach ($this->sends($f, $start, $end, true)->groupBy('page_id')
+            ->selectRaw('page_id, COUNT(*) AS sent, COUNT(DISTINCT psid) AS customers, SUM(CASE WHEN replied_at IS NOT NULL THEN 1 ELSE 0 END) AS replied')->get() as $r) {
+            $rows[(string) $r->page_id] = ['sent' => (int) $r->sent, 'customers_sent' => (int) $r->customers, 'replied' => (int) $r->replied] + $blank;
+        }
+        foreach ($orders as $o) {
+            $p = (string) $o->page_id;
+            $rows[$p] ??= $blank;
+            $rows[$p]['orders']++;
+            $rows[$p][empty($o->detail['sequence_id']) || empty($o->detail['sequence_step']) ? 'main_flow' : 'after_sequence']++;
+            if (($delivery[$o->id]['delivery'] ?? '') === 'delivered') $rows[$p]['delivered']++;
+        }
+
+        $total = $blank;
+        foreach ($rows as $r) foreach ($blank as $k => $_) $total[$k] += $r[$k];
+        $rates = fn (array $r) => $r + ['replied_pct' => self::pct($r['replied'], $r['sent']), 'orders_pct' => self::pct($r['orders'], $r['customers_sent']),
+            'main_flow_pct' => self::pct($r['main_flow'], $r['orders']), 'after_sequence_pct' => self::pct($r['after_sequence'], $r['orders']),
+            'delivered_pct' => self::pct($r['delivered'], $r['orders'])];
+        $out = [];
+        foreach ($rows as $id => $r) $out[] = ['page_id' => (string) $id, 'page' => $names[(string) $id] ?? (string) $id] + $rates($r);
+        usort($out, fn ($a, $b) => [$b['orders'], $b['sent'], $a['page']] <=> [$a['orders'], $a['sent'], $b['page']]);
+
+        return ['rows' => array_slice($out, 0, self::MAX_ROWS), 'total' => $rates($total)];
     }
 
     /**

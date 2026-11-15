@@ -100,6 +100,48 @@
         </div>
     </section>
 
+    {{-- By page: lahat ng page magkakatabi; ang pangalan ay link na nagse-set ng page filter (kasama ang ibang filter). --}}
+    <section aria-labelledby="h-page">
+        <h2 id="h-page" class="mb-2 text-base font-semibold">By page</h2>
+        @php($split = fn ($n, $p) => number_format($n) . ' · ' . $pct($p))
+        <div class="cb-card overflow-x-auto">
+            <table class="cb-table min-w-[56rem]">
+                <thead><tr><th>Page</th><th class="!text-right">Sent</th><th class="!text-right">Customers</th><th class="!text-right">Replied</th><th class="!text-right">Orders</th><th class="!text-right">Order rate</th><th class="!text-right">Main flow</th><th class="!text-right">After sequence</th><th class="!text-right">Delivered</th></tr></thead>
+                <tbody>
+                @forelse($by_page['rows'] as $p)
+                    <tr>
+                        <td><a href="{{ route('chatbot.results', ['page_id' => $p['page_id']] + $keep) }}" class="text-blue-700 hover:underline">{{ $p['page'] }}</a></td>
+                        <td class="text-right tabular-nums">{{ number_format($p['sent']) }}</td>
+                        <td class="text-right tabular-nums">{{ number_format($p['customers_sent']) }}</td>
+                        <td class="text-right tabular-nums">{{ $pct($p['replied_pct']) }}</td>
+                        <td class="text-right tabular-nums">{{ number_format($p['orders']) }}</td>
+                        <td class="text-right tabular-nums">{{ $pct($p['orders_pct']) }}</td>
+                        <td class="text-right tabular-nums">{{ $split($p['main_flow'], $p['main_flow_pct']) }}</td>
+                        <td class="text-right tabular-nums">{{ $split($p['after_sequence'], $p['after_sequence_pct']) }}</td>
+                        <td class="text-right tabular-nums">{{ $pct($p['delivered_pct']) }}</td>
+                    </tr>
+                @empty
+                    <tr><td colspan="9" class="text-slate-500">No bot sends or orders in this range.</td></tr>
+                @endforelse
+                </tbody>
+                @if($by_page['rows'])
+                    @php($t = $by_page['total'])
+                    <tfoot><tr class="font-semibold">
+                        <td>Total</td>
+                        <td class="text-right tabular-nums">{{ number_format($t['sent']) }}</td>
+                        <td class="text-right tabular-nums">{{ number_format($t['customers_sent']) }}</td>
+                        <td class="text-right tabular-nums">{{ $pct($t['replied_pct']) }}</td>
+                        <td class="text-right tabular-nums">{{ number_format($t['orders']) }}</td>
+                        <td class="text-right tabular-nums">{{ $pct($t['orders_pct']) }}</td>
+                        <td class="text-right tabular-nums">{{ $split($t['main_flow'], $t['main_flow_pct']) }}</td>
+                        <td class="text-right tabular-nums">{{ $split($t['after_sequence'], $t['after_sequence_pct']) }}</td>
+                        <td class="text-right tabular-nums">{{ $pct($t['delivered_pct']) }}</td>
+                    </tr></tfoot>
+                @endif
+            </table>
+        </div>
+    </section>
+
     {{-- By message --}}
     <section aria-labelledby="h-msg">
         <h2 id="h-msg" class="mb-2 text-base font-semibold">By message</h2>
