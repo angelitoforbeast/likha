@@ -260,12 +260,12 @@ class ChatbotResultsBackgroundTest extends ChatblastTestCase
         $this->assertSame([], $this->reportQueriesIn($log, $q, self::RANGE));
     }
 
-    public function test_S_278_4_with_a_copy_the_page_and_json_serve_it_with_as_of_and_build_nothing(): void
+    public function test_S_278_4_with_a_fresh_copy_the_page_and_json_serve_it_with_as_of_build_nothing_and_do_not_re_want(): void
     {
         $this->actingAs($this->user('CEO', 'ceo278b@example.test'));
         $copy = app(ChatbotResults::class)->buildCopy(self::RANGE);
         $asOf = Carbon::parse($copy['built_at'])->timezone('Asia/Manila')->format('H:i');
-        $this->travel(50)->minutes(); // mas matanda sa 15 minuto: ipinapakita pa rin
+        $this->travel(14)->minutes(); // sariwa pa (wala pang 15 minuto)
 
         $log = $this->logOf(function () use (&$page, &$json) {
             $page = $this->get('/chatbot/results?' . http_build_query(self::RANGE))->assertOk();
@@ -278,6 +278,43 @@ class ChatbotResultsBackgroundTest extends ChatblastTestCase
         $this->assertSame(json_decode(json_encode($copy['out'] + ['built_at' => $copy['built_at']]), true), $json);
         $this->assertSame([], app(ChatbotResults::class)->wanted());
         $this->assertSame([], $this->reportQueriesIn($log, self::RANGE));
+    }
+
+    public function test_S_278_4b_a_stale_filtered_copy_is_served_at_once_and_wanted_and_the_warm_rebuilds_it(): void
+    {
+        $this->actingAs($this->user('CEO', 'ceo278c@example.test'));
+        $results = app(ChatbotResults::class);
+        $q = self::RANGE + ['page_id' => '1001'];
+        $old = $results->buildCopy($q);
+        $oldAsOf = Carbon::parse($old['built_at'])->timezone('Asia/Manila')->format('H:i');
+        $this->travel(16)->minutes(); // lampas 15 minuto: luma na
+        $results->buildCopy([], true); // sariwa ang default, para ang hiling lang ang binubuo ng warm
+
+        $log = $this->logOf(function () use ($q, &$page, &$json) {
+            $page = $this->get('/chatbot/results?' . http_build_query($q))->assertOk();
+            $json = $this->getJson('/chatbot/results.json?' . http_build_query($q))->assertOk()->json();
+        });
+        $page->assertSee('as of ' . $oldAsOf . ' (Manila)');
+        $page->assertSee('id="h-funnel"', false);
+        $page->assertDontSee('Binubuo pa ang report');
+        $this->assertSame($old['built_at'], $json['built_at']);
+        $this->assertSame([ChatbotResults::request($q)], array_column(array_values($results->wanted()), 'in'), 'the stale copy is wanted once (page and json)');
+
+        // Ang warm ay hindi nag-aalis nito (luma ang kopya): binubuo ulit.
+        $this->travel(1)->minutes();
+        $r = $results->warm();
+        $this->assertSame([ChatbotResults::label($q)], array_column($r['built'], 0));
+        $this->assertSame(0, $r['dropped']);
+        $this->assertSame([], $results->wanted());
+        $fresh = $results->stored($q);
+        $this->assertSame(now()->toIso8601String(), $fresh['built_at']);
+        $this->assertSame(['1001', 6], [$fresh['out']['by_page']['rows'][0]['page_id'], $fresh['out']['by_page']['rows'][0]['customers_sent']]);
+
+        // Ang bagong kopya ay ipinapakita at hindi na idinadagdag sa wanted.
+        $this->get('/chatbot/results?' . http_build_query($q))->assertOk()
+            ->assertSee('as of ' . Carbon::parse($fresh['built_at'])->timezone('Asia/Manila')->format('H:i') . ' (Manila)');
+        $this->assertSame([], $results->wanted());
+        $this->assertSame([], $this->reportQueriesIn($log, $q));
     }
 
     // ---- Warm ----

@@ -30,6 +30,13 @@ Branch `fix/278-results-background` (from `feat/276-results-by-page`, d6f7757e).
   uses the newest 200,000 tagged rows across all groups, which one grouped SQL read cannot give without pulling every
   tag row into PHP.
 - `chatbot:results` still builds directly through `report()` (5 min cache); the cache key is now `chatbot-results:v3:`.
+- **Amendment 278-1 (applied, the owner's decision):** a filtered view should not sit up to 1 hour old while someone
+  looks at it. When a copy exists but is older than 15 minutes (`DEFAULT_STALE_SECONDS`, `ChatbotResults::isStale()`),
+  the page and `results.json` still serve it at once with its as-of time AND add the request to wanted. `warm()` now
+  drops a wanted entry only when its copy is fresh (younger than 15 minutes), not whenever a copy exists, so the stale
+  re-want is rebuilt on the next run. A wanted entry that is the default request keeps the 6 h lifetime. Tests: a fresh
+  copy (14 min) is served and not re-wanted (S_278_4); a stale filtered copy (16 min) is served with its old as-of, wanted
+  once by page and json, rebuilt by the warm (not dropped), then served fresh and not re-wanted (S_278_4b).
 - View: description now says built in the background; sections wrapped in the building check. No redesign.
 
 ## Why the grouped read uses conditional columns, not GROUP BY page_id, via
@@ -72,11 +79,12 @@ Funnel + By bot + By page + chats went from 13 queries (17 with 3 bots) to 2, an
 site this removes the 3 funnel queries repeated per bot (by_via 58.6 s), the separate By page read and the per-bot chats.
 
 ### Test runs
-- `vendor/bin/phpunit --filter ChatbotResults`: before 21 tests OK (97 assertions); after **31 tests OK** (253 assertions).
-  Also passing: ForbeastStandbyHiddenTest, RunEventRowTest, ChatbotRepliesViaTest, SpeedPrewarmTest (58 tests together).
-- Full suite, base d6f7757e: 5235 tests, 3 failures, 6 skipped. After: **5245 tests, 3 failures**, 6 skipped. The same 3
-  known failures both times: ExampleTest root response (302), ItemTableFitScriptTest min width, SharedPagesBasePinTest
-  S_42_4 `/owner/private`. No new failures.
+- `vendor/bin/phpunit --filter ChatbotResults`: before 21 tests OK (97 assertions); after the first commit 31 tests OK;
+  after amendment 278-1 **32 tests OK**. Also passing: ForbeastStandbyHiddenTest, RunEventRowTest, ChatbotRepliesViaTest
+  (47 tests together with the filter set).
+- Full suite, base d6f7757e: 5235 tests, 3 failures, 6 skipped. After the first commit: 5245 tests, 3 failures. After
+  amendment 278-1: **5246 tests, 3 failures**, 6 skipped. The same 3 known failures every time: ExampleTest root
+  response (302), ItemTableFitScriptTest min width, SharedPagesBasePinTest S_42_4 `/owner/private`. No new failures.
 
 ## Unsure / for the owner
 - **runInBackground() added** to the schedule line beyond the spec's chain: a run takes minutes, and without it
@@ -85,6 +93,7 @@ site this removes the 3 funnel queries repeated per bot (by_via 58.6 s), the sep
 - `results.json` gained a `built_at` key (additive). Consumers that check the exact key list would see it.
 - The single grouped read carries 3 COUNT DISTINCT per bot plus the total in one pass; it was proved equal on SQLite
   only (tests); the MySQL time of this one query on the live data was not measured (no server access in this job).
-- A non-default copy is not refreshed while it exists (per spec): it is shown up to 1 h old, then rebuilt on the next view.
+- With amendment 278-1, a viewed filtered copy is at most about 15 minutes plus one warm run old. A copy nobody opens
+  is not refreshed and expires after 1 h.
 - The warm needs `schedule:run` on the server (already true there for chatbot:speed-warm).
 - by_message still runs its two joins whenever a group has a reply (see above).

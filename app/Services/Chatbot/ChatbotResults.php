@@ -137,6 +137,15 @@ class ChatbotResults
         return is_array($copy) && isset($copy['built_at'], $copy['out']) ? $copy : null;
     }
 
+    /**
+     * Amendment 278-1: ang kopyang lampas 15 minuto ay luma na. Ipinapakita pa rin ng page (may as-of), pero idinadagdag
+     * ulit sa wanted para may bago sa loob ng ilang minuto; ang warm ay nag-aalis lang ng wanted na sariwa na ang kopya.
+     */
+    public static function isStale(?array $copy): bool
+    {
+        return !$copy || Carbon::parse($copy['built_at'])->lt(now()->subSeconds(self::DEFAULT_STALE_SECONDS));
+    }
+
     /** Idinadagdag sa wanted ang hiling na walang kopya; ang naunang oras ng hiling ang naiiwan (pinakamatanda muna ang warm). */
     public function want(array $in): void
     {
@@ -213,15 +222,15 @@ class ChatbotResults
         };
 
         $default = self::request([]);
-        $copy = $this->stored($default);
-        if (!$copy || Carbon::parse($copy['built_at'])->lt(now()->subSeconds(self::DEFAULT_STALE_SECONDS))) $run('default', $default, true);
+        if (self::isStale($this->stored($default))) $run('default', $default, true);
 
-        // Ang luma at ang may kopya na (hal. ang default) ay inaalis; ang natitira ay pinakamatanda muna.
+        // Ang lampas 30 minuto at ang may sariwang kopya na (hal. ang default) ay inaalis; ang natitira ay pinakamatanda muna.
+        // Ang may lumang kopya (amendment 278-1) ay binubuo ulit.
         $oldest = now()->getTimestamp() - self::WANTED_MAX_AGE;
         $due = [];
         $this->editWanted(function (array $list) use ($oldest, &$due, &$r) {
             foreach ($list as $id => $w) {
-                if (!is_array($w['in'] ?? null) || (int) ($w['at'] ?? 0) < $oldest || $this->stored($w['in'])) {
+                if (!is_array($w['in'] ?? null) || (int) ($w['at'] ?? 0) < $oldest || !self::isStale($this->stored($w['in']))) {
                     unset($list[$id]);
                     $r['dropped']++;
                 }
@@ -232,7 +241,8 @@ class ChatbotResults
             return $list;
         });
         foreach ($due as $id => $w) {
-            $run(self::label($w['in']), $w['in'], false);
+            // Ang default na hiling (kapag pumalya ang sariling build nito sa itaas) ay 6 na oras pa rin itinatago.
+            $run(self::label($w['in']), $w['in'], self::requestId($w['in']) === self::requestId($default));
             $this->editWanted(function (array $list) use ($id) {
                 unset($list[$id]);
 
