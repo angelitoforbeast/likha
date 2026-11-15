@@ -63,7 +63,17 @@ Branch `fix/278-results-background` (from `feat/276-results-by-page`, d6f7757e).
     + tags + chats reads): **8.5 µs per send row on a 100k-row hour, 9.2 µs on a 10k-row hour** (flat). **Statement
     guard:** on MySQL the warm sets `SESSION max_execution_time = 60000` (MariaDB: `max_statement_time = 60`) for its
     run and restores the old value after; if it cannot be set, it logs a warning and runs anyway. A day piece is now 24
-    queries per part (72 for the page-only piece, 48 with a flow filter).
+    queries per part (72 for the page-only piece, 48 with a flow filter), plus since 278-4 one read by id per
+    1000 tag rows of each hour that has tags.
+  - **Amendment 278-4 (applied, the owner's decision, from the live run of 54ebdf4b: the hourly By message join took
+    45 s and over 60 s, MySQL driving from a full scan of chatbot_replies):** By message no longer joins. Per hour:
+    (1) the tag rows (reply_id, flow, node, botfield, setting) from `chatbot_reply_tags` alone with
+    `whereIn('page_id', …)` and the sent_at hour, so the (page_id, sent_at) index is used; the pages are the page filter,
+    or the pages with sends that day plus the pages in page settings; (2) the reply columns (id, kind, replied_at,
+    reply_seconds, via) by primary key, `whereIn('id', …)` in chunks of 1000, keeping kind = send; the old DISTINCT
+    (reply + group) is done in PHP (all tag rows of a reply share its sent_at, so they fall in one hour). The botfield
+    Compare read already read the tags first (setting_id index) and the replies by id; no other piece read joins
+    chatbot_replies. Equality tests unchanged and exact.
   - Replaces 278's single grouped read (`sendCounts`, `chatCounts`, compiled `whereVia`), which is removed, and 278's
     by_message skip (kept only as: no median read is needed when no group has a reply, now a merge-time check).
 - View: description says built in the background; sections wrapped in the building check. No redesign.
@@ -83,8 +93,11 @@ namespace, class name and cache keys.
 - S_278_2 one day = 24 one-hour reads per part (72; 48 with a flow filter), each window exactly 3600 s, back to back,
   covering the Manila day; none with JSON or GROUP BY; a 7-day build reads 7 × 24 sends windows; 16 min later an old
   range reads nothing again, a range with today reads only today's 24; after an hour today, yesterday and the day before.
-- S_278_2b **large day**: 30,000 sends (3 pages, 3 bots + NULL, 12,000 customers, tag rows, steps, ads): **72 queries
-  (24 per part), peak +2.1 MB, ~0.25 s, stored piece 94.6 KB** (SQLite in memory); numbers equal the old code.
+- S_278_2b **large day**: 30,000 sends (3 pages, 3 bots + NULL, 12,000 customers, tag rows, steps, ads): **107 queries
+  (24 per part + 35 reads by id since 278-4), peak +3.0 MB, ~0.2 s, stored piece 94.6 KB** (SQLite in memory); numbers
+  equal the old code.
+- S_278_2 (278-4): no piece query contains a join; the tags read is `page_id in (…) and sent_at` in the hour; the reply
+  read is by `id in (…)`; one by-id read per hour that has tag rows.
 - S_278_2e (278-3) **per-row cost**: 100,000 sends in one hour (40,000 customers, tag rows, steps, ads): 8.5 µs per row,
   and 9.2 µs per row for 10,000 rows of the same hour (the cost does not grow with the row count); the statement guard
   is a no-op off MySQL.
@@ -113,13 +126,16 @@ no `via` column, so they run the tags fallback).
 | 278-2, 15-minute refresh of a range with today | 16 (3 + 13) | today only |
 | 278-3, no pieces yet | 516 (7 days × 72 + 12) | 1 hour, plain columns |
 | 278-3, 15-minute refresh of a range with today | 85 (72 + 13) | 1 hour of today |
+| 278-4, no pieces yet | 531 (516 + 15 reads by id) | 1 hour, or up to 1000 ids by primary key; no join |
+| 278-4, 15-minute refresh of a range with today | 86 (85 + 1 read by id) | same |
 
 ### Test runs
 - `vendor/bin/phpunit --filter ChatbotResults`: base 21 tests OK; after 278: 31; after 278-1: 32; after 278-2:
   35 tests OK; after 278-3: **36 tests OK** (662 assertions). ForbeastStandbyHiddenTest, RunEventRowTest and
   ChatbotRepliesViaTest also pass.
 - Full suite, base d6f7757e: 5235 tests, 3 failures, 6 skipped. After 278: 5245 / 3. After 278-1: 5246 / 3. After
-  278-2: 5249 / 3. After 278-3: **5250 tests, 3 failures**, 6 skipped. The same 3 known failures every time: ExampleTest root response (302),
+  278-2: 5249 / 3. After 278-3: 5250 / 3. After 278-4: **5250 tests, 3 failures**, 6 skipped (`--filter
+  ChatbotResults`: 36 tests OK, 746 assertions). The same 3 known failures every time: ExampleTest root response (302),
   ItemTableFitScriptTest min width, SharedPagesBasePinTest S_42_4 `/owner/private`. No new failures.
 
 ## Unsure / for the owner
@@ -128,6 +144,11 @@ no `via` column, so they run the tags fallback).
   tags join and the chats hour were not measured live. The 60 s guard turns a bad plan into a failed build (reported,
   retried on a later run) instead of a long-held statement.
 - The time cap (240 s) is checked between pieces, not inside one; a single piece of a busy day may run past it.
+- **278-4 page list:** By message tags are read only for the pages with a sent bot send that day or in page settings
+  (or the page filter). A page that is in neither and has only failed or non-sent bot sends with tags would drop out of
+  By message (the old join counted kind = send of any status). The seeded equality data has no such page.
+- With the join gone, a busy hour makes ~62 reads by id of 1000 each (from the live 62,028 tags per hour); each is a
+  primary-key read, not measured live.
 - **Memory on the live day** is not known: a piece holds packed psid sets (8 bytes per customer per page and bot, per
   ad, and per chat customer) and up to 200,000 median rows per bot; building it holds the day's distinct sets in PHP
   arrays. The warm raises memory_limit to at least 1024M.
