@@ -200,26 +200,98 @@ class ChatbotTags
         return $n;
     }
 
-    /** Ang hourly na backfill: ang mga padala ng huling 48 oras na wala pang sagot, kada customer. @return int ilang napunan */
+    private const BACKFILL_CHUNK = 1000; // customer kada basa ng backfill
+
+    /**
+     * Ang hourly na backfill: ang mga padala ng huling 48 oras na wala pang sagot. Nagsisimula sa mga customer na nag-chat
+     * (mas kaunti kaysa sa daan-daang libong padala, na karamihan ay chatblast at sequence na walang sumasagot):
+     * kada page, ang mga customer na may chat sa 48 oras; kada 1000 customer, isang basa ng mga padala nilang wala pang
+     * sagot at isang basa ng mga chat nila pagkatapos ng pinakaunang padala; sa PHP, ang unang chat pagkatapos ng bawat
+     * padala sa loob ng 24 oras (pareho ng dating basa kada padala). Plain na SELECT lang; ang update ay kada id.
+     * @return int ilang napunan
+     */
     public static function backfill(): int
     {
         if (!self::ready()) return 0;
+        $since = now()->subHours(self::BACKFILL_HOURS);
         $n = 0;
-        DB::table('chatbot_replies')->where('sent_at', '>=', now()->subHours(self::BACKFILL_HOURS))->whereNull('replied_at')
-            ->whereIn('kind', ['send', 'manual'])->where('status', 'sent')->orderBy('id')
-            ->chunkById(1000, function ($rows) use (&$n) {
-                foreach ($rows as $r) {
-                    $sent = Carbon::parse($r->sent_at);
-                    // Ang pagbukas ng ad (ChatbotInbound::AD_OPEN) ay hindi sagot ng customer.
-                    $chat = BotcakeChat::active()->whereNull('payload->' . ChatbotInbound::AD_OPEN)->where('page_id', (string) $r->page_id)->where('psid', (string) $r->psid)
-                        ->where('received_at', '>', $sent)->where('received_at', '<=', $sent->copy()->addHours(self::REPLY_HOURS))
-                        ->orderBy('received_at')->value('received_at');
-                    if ($chat === null) continue;
-                    $at = Carbon::parse($chat);
-                    $n += DB::table('chatbot_replies')->where('id', $r->id)->whereNull('replied_at')
-                        ->update(['replied_at' => $at, 'reply_seconds' => max(0, $at->getTimestamp() - $sent->getTimestamp())]);
-                }
-            }, 'id');
+        $seen = [];
+        // Ang mga page_id sa chats, isa-isa sa index (page_id, …): isang maikling basa kada page, hindi ang buong table.
+        for ($last = null; ($raw = BotcakeChat::query()->toBase()->whereNotNull('page_id')->when($last !== null, fn ($q) => $q->where('page_id', '>', $last))
+            ->orderBy('page_id')->limit(1)->value('page_id')) !== null; $last = $raw) {
+            $page = self::idString($raw);
+            if ($page === null || isset($seen[$page])) continue;
+            $seen[$page] = true;
+            // Ang page_id at psid ng chats ay string, ang sa chatbot_replies ay numero: string sa chats, int sa replies.
+            $psids = [];
+            foreach (self::replyChats()->where('page_id', $page)->where('received_at', '>=', $since)->whereNotNull('psid')->distinct()->pluck('psid') as $p) {
+                if (($p = self::idString($p)) !== null) $psids[$p] = true;
+            }
+            foreach (array_chunk(array_keys($psids), self::BACKFILL_CHUNK) as $chunk) $n += self::backfillChunk($page, $chunk, $since);
+        }
+
+        return $n;
+    }
+
+    /** Ang mga chat na sagot: totoo (hindi standby) at hindi pagbukas ng ad (ChatbotInbound::AD_OPEN). */
+    private static function replyChats(): \Illuminate\Database\Query\Builder
+    {
+        return BotcakeChat::active()->whereNull('payload->' . ChatbotInbound::AD_OPEN)->toBase();
+    }
+
+    /**
+     * Ang id na tutugma sa numero ng chatbot_replies gaya ng dating basa (ang chats ay hinahanap sa (string) ng numero, kaya
+     * '7001' lang ang tugma sa 7001, hindi ang '07001'); ang hindi tutugma = null. Ang hulihang espasyo ay inaalis dahil
+     * sa mysql ay pareho ang '7001 ' at '7001'.
+     */
+    private static function idString(mixed $value): ?string
+    {
+        $s = rtrim((string) $value, ' ');
+
+        return $s !== '' && ctype_digit($s) && (string) (int) $s === $s ? $s : null;
+    }
+
+    /** Ang isang chunk ng mga customer ng isang page: dalawang basa, saka update kada id ng mga may sagot. */
+    private static function backfillChunk(string $page, array $psids, Carbon $since): int
+    {
+        $sends = DB::table('chatbot_replies')->where('page_id', (int) $page)->whereIn('psid', array_map('intval', $psids))
+            ->where('sent_at', '>=', $since)->whereNull('replied_at')->whereIn('kind', ['send', 'manual'])->where('status', 'sent')
+            ->get(['id', 'psid', 'sent_at']);
+        if ($sends->isEmpty()) return 0;
+
+        $first = $lastSent = null;
+        $who = [];
+        foreach ($sends as $s) {
+            $s->ts = strtotime((string) $s->sent_at);
+            if ($first === null || $s->ts < $first->ts) $first = $s;
+            if ($lastSent === null || $s->ts > $lastSent->ts) $lastSent = $s;
+            $who[(string) $s->psid] = true;
+        }
+        // Nakaayos ayon sa psid saka received_at = ang ayos ng index (page_id, psid, received_at), kaya iyon ang ginagamit
+        // (ang mga chat lang ng mga customer na ito); kung received_at lang, pinipili ang (page_id, received_at) at binabasa
+        // ang buong 48 oras ng page kada chunk. Sa bawat psid, ang mga chat ay nakaayos pa rin ayon sa oras.
+        $chats = [];
+        foreach (self::replyChats()->where('page_id', $page)->whereIn('psid', array_map('strval', array_keys($who)))
+            ->where('received_at', '>', Carbon::parse($first->sent_at))->where('received_at', '<=', Carbon::parse($lastSent->sent_at)->addHours(self::REPLY_HOURS))
+            ->orderBy('psid')->orderBy('received_at')->get(['psid', 'received_at']) as $c) {
+            $chats[rtrim((string) $c->psid, ' ')][] = [strtotime((string) $c->received_at), $c->received_at];
+        }
+
+        $n = 0;
+        foreach ($sends as $s) {
+            $list = $chats[(string) $s->psid] ?? [];
+            // Ang unang chat na lampas sa padala (nakaayos ayon sa oras): binary search.
+            $lo = 0;
+            $hi = count($list);
+            while ($lo < $hi) {
+                $mid = intdiv($lo + $hi, 2);
+                if ($list[$mid][0] > $s->ts) $hi = $mid; else $lo = $mid + 1;
+            }
+            if ($lo === count($list) || $list[$lo][0] > $s->ts + self::REPLY_HOURS * 3600) continue;
+            $at = Carbon::parse($list[$lo][1]);
+            $n += DB::table('chatbot_replies')->where('id', $s->id)->whereNull('replied_at')
+                ->update(['replied_at' => $at, 'reply_seconds' => max(0, $at->getTimestamp() - Carbon::parse($s->sent_at)->getTimestamp())]);
+        }
 
         return $n;
     }
