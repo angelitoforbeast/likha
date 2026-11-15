@@ -14,86 +14,116 @@ Branch `fix/278-results-background` (from `feat/276-results-by-page`, d6f7757e).
 - **`chatbot:results-warm`** (`app/Console/Commands/ChatbotResultsWarm.php`, `ChatbotResults::warm()`), scheduled in
   `routes/console.php` as `everyMinute()->withoutOverlapping(30)->onOneServer()->runInBackground()`. Per run: the default
   view (`filters([])`) when its copy is missing or older than 15 min; then wanted entries, oldest first, at most 3; entries
-  older than 30 min (or that already have a copy) are dropped. Copies kept 6 h (default) / 1 h (others). A failing build
+  older than 30 min (or whose copy is fresh) are dropped. Copies kept 6 h (default) / 1 h (others). A failing build
   is `report()`ed, removed from wanted (the page adds it again on its next reload) and does not stop the others; the run
   then exits 1. One log line per run, e.g.
-  `chatbot:results-warm built default (84.2 s), 2026-11-09..2026-11-15 page 1001 (12.1 s); dropped 1 wanted in 96.4 s`.
-  A cache lock (30 min) also guards manual runs. No queue is used.
-- **Fewer scans, same numbers.** `sendCounts()` is ONE grouped read of the sends (GROUP BY page_id) that returns, per
-  page, sent / distinct psid / replied for all sends and for each via bucket (conditional `SUM(CASE…)` and
-  `COUNT(DISTINCT CASE … THEN psid END)`), where each bucket condition is compiled from the existing `whereVia()` itself
-  (`compileWheres` + bindings), so the bucket rules are exactly the old WHERE rules (old rows without a via tag, or with
-  an unknown via, count as botcake). Funnel, By bot and By page all read from it. `chatCounts()` does the same for the
-  chats (one grouped read of botcake_chats, all + per bot). by_step, by_ad and compare are unchanged.
-- **by_message:** numbers unchanged. The second join (median rows) is skipped when no returned group has a reply
-  (`reply_seconds` is only ever written together with `replied_at`). It is not merged into the first read: the median
-  uses the newest 200,000 tagged rows across all groups, which one grouped SQL read cannot give without pulling every
-  tag row into PHP.
-- `chatbot:results` still builds directly through `report()` (5 min cache); the cache key is now `chatbot-results:v3:`.
+  `chatbot:results-warm built default (41.2 s), 2026-11-09..2026-11-15 page 1001 (12.1 s); 4 day pieces; still building 2026-08-15..2026-11-15 in 236.4 s`.
+  A cache lock (30 min) also guards manual runs; the run raises its own memory_limit to at least 1024M. No queue is used.
+- `chatbot:results` (console) builds directly through `report()` (5 min cache, key `chatbot-results:v3:`); since 278-2 it
+  uses the same day pieces (building the missing ones without a time cap), so there is one implementation.
 - **Amendment 278-1 (applied, the owner's decision):** a filtered view should not sit up to 1 hour old while someone
   looks at it. When a copy exists but is older than 15 minutes (`DEFAULT_STALE_SECONDS`, `ChatbotResults::isStale()`),
-  the page and `results.json` still serve it at once with its as-of time AND add the request to wanted. `warm()` now
-  drops a wanted entry only when its copy is fresh (younger than 15 minutes), not whenever a copy exists, so the stale
-  re-want is rebuilt on the next run. A wanted entry that is the default request keeps the 6 h lifetime. Tests: a fresh
-  copy (14 min) is served and not re-wanted (S_278_4); a stale filtered copy (16 min) is served with its old as-of, wanted
-  once by page and json, rebuilt by the warm (not dropped), then served fresh and not re-wanted (S_278_4b).
-- View: description now says built in the background; sections wrapped in the building check. No redesign.
-
-## Why the grouped read uses conditional columns, not GROUP BY page_id, via
-Grouping by (page_id, via bucket) would count a customer reached by two bots on the same page twice in the funnel and
-By page "customers" (they are distinct page+psid). Per-page conditional COUNT DISTINCT gives the exact old numbers in
-one scan. The seeded data has such customers (psid 11 on page 1001, psid 21 on page 1002) and the equality test covers it.
+  the page and `results.json` still serve it at once with its as-of time AND add the request to wanted. `warm()` drops a
+  wanted entry only when its copy is fresh (younger than 15 minutes), so the stale re-want is rebuilt on the next run. A
+  wanted entry that is the default request keeps the 6 h lifetime. Tests S_278_4 and S_278_4b.
+- **Amendment 278-2 (applied, the owner's decision, from live measurements: ~1.7M sends a day, any `tags->via` read
+  unusable, the 278 grouped 7-day read killed after 90 s):** the sends- and chats-based parts are built per Manila day
+  and merged, never read per range.
+  - **Day pieces** (`app/Services/Chatbot/ResultsPieces.php`), cached per (day, scope), stored as
+    base64(gzip(serialize)) so the database cache store takes them. Scopes: `main` = page + flow + version (funnel, By bot,
+    By page, By message); the page-only `main` also holds By sequence step, By ad and chats; `vflow` = one flow version
+    (Compare flow); `field` = one botfield version (Compare botfield). Contents, per page and via bucket: sent, replied and
+    the customer set (psids packed `J*`, sorted); By sequence step rows (sequence, step → sent, replied); By ad: ad_id →
+    packed psid set; By message: groups → sent, replied (distinct reply_id per day, additive) plus the newest
+    `MEDIAN_ROWS` (reply_id, group, reply_seconds) per bucket; chats: per page and bucket packed psid sets; Compare: per
+    page sent/replied/psids and the newest `MEDIAN_ROWS` (id, reply_seconds).
+  - **Merge** (`ChatbotResults::build()`): sums, set unions for every distinct-customer number (per page, so memory stays
+    per page), the old median rule on the merged list (newest `MEDIAN_ROWS` by id over all days and groups), the old
+    By message order (sent desc, flow, node, version; NULL first) and the old 300-row limits. Orders, deliveries, the
+    unsubscribe count, names, versions and setting info are still read at build time as before.
+  - **Refresh rule** (`ResultsPieces::stale()`): today after 15 min; yesterday and the day before after 60 min; older days
+    once (a piece built while the day was still recent is rebuilt once after it turns old). Kept 9 days for days inside
+    the default 7-day window, 1 day otherwise.
+  - **Warm with a time cap**: each request's missing or stale pieces are built first, within `WARM_SECONDS` (240 s) per
+    run (always at least one piece); its copy is made only when all pieces exist, otherwise it stays in wanted and the
+    page keeps showing "binubuo". The default view then reads about one day (today) every 15 minutes.
+  - **Queries on chatbot_replies**: one day at a time on the sent_at range, plain columns only (no JSON in WHERE, GROUP
+    BY or SELECT), each read streamed with `cursor()` (on MySQL with buffered queries turned off for that read, restored
+    after) and aggregated in PHP. The via bucket comes from the `via` column with the old rule (a valid gateway value is
+    itself; anything else, including NULL, is botcake). When the column does not exist yet (old installs, several older
+    tests), the `tags` column is selected and decoded in PHP, still no JSON in SQL. By message: one `SELECT DISTINCT` of
+    tag + reply plain columns per day. Chats (botcake_chats): `page_id, psid, payload` for the day, with standby,
+    source and gateway read in PHP (no JSON in SQL), so I did not need to decide whether the JSON read is acceptable.
+  - Replaces 278's single grouped read (`sendCounts`, `chatCounts`, compiled `whereVia`), which is removed, and 278's
+    by_message skip (kept only as: no median read is needed when no group has a reply, now a merge-time check).
+- View: description says built in the background; sections wrapped in the building check. No redesign.
 
 ## Tests
-New `tests/Feature/Chatblast/ChatbotResultsBackgroundTest.php` (10 tests):
-- S_278_1 old-vs-new equality: `OldResultsReference` (a copy of the pre-278 funnel / By bot / By page / chats code in the
-  test) vs the new build, identical (`assertSame`) for funnel, by_via, by_page and chats over 9 filter sets (all, each via,
-  page, page+via, flow, flow+version, flow+via, a page not in page settings) with incepxionbot both off and on (10 sets).
-  Seed: 3 pages (one not in page settings), botcake / forbeast / incepxionbot / no tags / tags without via / unknown via,
-  failed and manual rows, out-of-range rows, 2 flows and versions, chats from gateway (with and without payload gateway),
-  default reply, no source, standby, and orders with and without via, sequence steps, deliveries.
-- S_278_2 query count (below).
-- S_278_3 no copy: page 200 with the building text and 20 s reload, json 202 building, wanted holds the normalized
-  request with its first time (a repeat does not reset it), and none of the build's SQL appears in the request query log.
-- S_278_4 with a copy (50 min old): page shows "as of HH:MM (Manila)" next to the date filter, json equals the copy plus
-  built_at, nothing added to wanted, none of the build's SQL in the request log.
-- S_278_5 warm builds the default when missing, skips at 14 min, rebuilds at 16 min; keep times 1 h / 6 h.
-- S_278_6 wanted: oldest first, 3 per run, entry older than 30 min dropped, entry with a copy dropped, the rest next run;
-  the stored copy equals a direct `output()` of the same filters.
-- S_278_7 a failing build (page 1002) is reported, the default and the other wanted still build, exit 1, one warning line.
-- S_278_8 one log line per run; a held lock skips the run.
-- S_278_9 schedule registered: `* * * * *`, withoutOverlapping 30, onOneServer.
-- S_278_10 `chatbot:results` still builds directly and adds nothing to wanted.
+`tests/Feature/Chatblast/ChatbotResultsBackgroundTest.php` (14 tests), with
+`tests/Feature/Chatblast/OldChatbotResultsReference.php` = the base (d6f7757e) `ChatbotResults` unchanged except
+namespace, class name and cache keys.
+- S_278_1 **old-vs-new equality, whole output**: `assertSame` of the full build (filters, funnel, by_via, by_page,
+  by_message, by_step, by_ad, versions) for 4 ranges (1 day, 3 days, 7 days, 7 days including today) × 9 filter sets
+  (all, each via, page, page+via, flow, flow+version, flow+via, a page not in page settings; + incepxionbot via when set
+  up) with incepxionbot off and on, and of Compare (flow versions all/forbeast/page, botfield versions all/page) for each
+  range: 116 comparisons. Seed: `via` column equal to tags.via; 3 pages, botcake / forbeast / incepxionbot / no tags /
+  tags without via / unknown via, failed and manual rows, rows outside the range, today and yesterday rows, 2 flows and
+  versions, 2 botfield versions, 1–2 tag rows per send, sequence steps, ad ids, an unsubscribe, chats from gateway (with
+  and without payload gateway), default reply, no source, standby, orders with sends, via, sequence and ad, deliveries.
+- S_278_2 one day = 3 queries (sends, tags, chats; 2 with a flow filter), none with JSON or GROUP BY, the sends on the
+  sent_at range; a 7-day build reads 7 day-sends; 16 min later an old range reads nothing again, a range with today reads
+  only today; after an hour today, yesterday and the day before.
+- S_278_2b **large day**: 30,000 sends (3 pages, 3 bots + NULL, 12,000 customers, tag rows, steps, ads): **3 queries,
+  peak +2.0 MB, ~0.13 s, stored piece 94.6 KB** (SQLite in memory); numbers equal the old code.
+- S_278_2c a stale piece (today, 16 min) and a missing piece (dropped from the cache) are rebuilt; the old day and
+  yesterday are kept; the new send shows in the copy; the copy equals the old code.
+- S_278_2d progressive fill: with a 0 s cap one piece per run, the default copy appears after its 7th piece, the page
+  shows "binubuo" until then; a wanted 3-day flow range builds its 3 missing pieces over 3 runs and stays wanted until
+  its copy exists; the copy equals the old code.
+- S_278_3 / 4 / 4b / 5 / 6 / 7 / 8 / 9 / 10 as in 278 and 278-1 (no copy → building + wanted + no report SQL in the
+  request; fresh copy served, not re-wanted; stale copy served + wanted + rebuilt; default when missing/stale; wanted
+  order, max 3, 30 min drop; a failing build does not stop the others; one log line; lock; schedule; the console command
+  builds directly and equals the old funnel).
 
 Existing tests adjusted: ChatbotResultsTest S_100_12 / S_100_13 and ChatbotResultsByPageTest S_276_5 build the copy
-first (the web no longer builds); the json key list now ends with `built_at` (removed before the web-vs-CLI equality);
-S_276_4 now checks that `sendCounts()` is one grouped query and `byPage()` runs none.
+first; the json key list ends with `built_at`; S_276_4 now checks that a day's sends are one query on plain columns and
+that By page runs no query of its own. All hand-computed expectations in ChatbotResultsTest, ChatbotResultsByPageTest,
+ChatbotRepliesViaTest, ForbeastStandbyHiddenTest and RunEventRowTest pass unchanged on the day-piece path (these seed
+no `via` column, so they run the tags fallback).
 
-### Query count of a build (seeded data, default 7 days, all pages)
-| | 2 bots | 3 bots (incepxionbot set up) |
+### Query count (seeded data, default 7 days, all pages)
+| | queries | each chatbot_replies read covers |
 |---|---|---|
-| before (measured on d6f7757e) | 25 | 29 |
-| after | 14 | 14 |
-
-Funnel + By bot + By page + chats went from 13 queries (17 with 3 bots) to 2, and no longer grows per bot. On the live
-site this removes the 3 funnel queries repeated per bot (by_via 58.6 s), the separate By page read and the per-bot chats.
+| before (d6f7757e) | 25 | 7 days (JSON `tags->via` when filtered by bot) |
+| 278 | 14 | 7 days |
+| 278-2, no pieces yet | 33 (7 days × 3 + 12) | 1 day, plain columns |
+| 278-2, 15-minute refresh of a range with today | 16 (3 + 13) | today only |
 
 ### Test runs
-- `vendor/bin/phpunit --filter ChatbotResults`: before 21 tests OK (97 assertions); after the first commit 31 tests OK;
-  after amendment 278-1 **32 tests OK**. Also passing: ForbeastStandbyHiddenTest, RunEventRowTest, ChatbotRepliesViaTest
-  (47 tests together with the filter set).
-- Full suite, base d6f7757e: 5235 tests, 3 failures, 6 skipped. After the first commit: 5245 tests, 3 failures. After
-  amendment 278-1: **5246 tests, 3 failures**, 6 skipped. The same 3 known failures every time: ExampleTest root
-  response (302), ItemTableFitScriptTest min width, SharedPagesBasePinTest S_42_4 `/owner/private`. No new failures.
+- `vendor/bin/phpunit --filter ChatbotResults`: base 21 tests OK; after 278: 31; after 278-1: 32; after 278-2:
+  **35 tests OK** (374 assertions). ForbeastStandbyHiddenTest, RunEventRowTest and ChatbotRepliesViaTest also pass.
+- Full suite, base d6f7757e: 5235 tests, 3 failures, 6 skipped. After 278: 5245 / 3. After 278-1: 5246 / 3. After
+  278-2: **5249 tests, 3 failures**, 6 skipped. The same 3 known failures every time: ExampleTest root response (302),
+  ItemTableFitScriptTest min width, SharedPagesBasePinTest S_42_4 `/owner/private`. No new failures.
 
 ## Unsure / for the owner
-- **runInBackground() added** to the schedule line beyond the spec's chain: a run takes minutes, and without it
-  `schedule:run` would hold every later job of that minute (forbeast-watch, broadcast-feed, ai-load) until it finished.
-  Same as `chatbot:speed-warm`. Remove it if the owner wants the exact chain.
-- `results.json` gained a `built_at` key (additive). Consumers that check the exact key list would see it.
-- The single grouped read carries 3 COUNT DISTINCT per bot plus the total in one pass; it was proved equal on SQLite
-  only (tests); the MySQL time of this one query on the live data was not measured (no server access in this job).
-- With amendment 278-1, a viewed filtered copy is at most about 15 minutes plus one warm run old. A copy nobody opens
-  is not refreshed and expires after 1 h.
+- **Not measured on live MySQL.** All equality and memory numbers are from SQLite tests. On MySQL the sends read
+  turns buffered queries off for that one read (so a 1.7M-row day is not held in memory); no other query runs on the
+  connection while it streams. The day read itself is still a scan of one day on the sent_at index (~30 s live, from your
+  count), plus the tags join and the chats read for that day.
+- **Memory on the live day** is not known: a piece holds packed psid sets (8 bytes per customer per page and bot, per
+  ad, and per chat customer) and up to 200,000 median rows per bot; building it holds the day's distinct sets in PHP
+  arrays. The warm raises memory_limit to at least 1024M.
+- **Cache size**: pieces are compressed; on the database cache a value must fit in the `cache.value` column
+  (MEDIUMTEXT, 16 MB). A very large day with many ads could approach that; not measured.
+- Rows with `via` NULL that the backfill has not reached are botcake (same rule as before for rows without tags.via).
+- **Ordering edge cases** may differ from MySQL's collation: By message ties on node_id compare in PHP (binary),
+  MySQL compares case-insensitively; By ad drops ad ids that are only spaces (as MySQL `<> ''` does). A send with a
+  sequence_id but a NULL step is counted under step 0 (the old code kept one of the two rows).
+- **runInBackground() added** to the schedule line beyond the spec's chain (a run takes minutes; without it the other
+  jobs of that minute wait). Same as `chatbot:speed-warm`.
+- `results.json` gained a `built_at` key (additive).
+- The console `chatbot:results` now shares the pieces: for today it may show up to 15 minutes old data.
+- A long range (e.g. 92 days) fills over many runs (about one day's reads per piece); its wanted entry may pass 30
+  minutes and be dropped, and the page re-adds it on the next reload; the pieces already built are kept.
 - The warm needs `schedule:run` on the server (already true there for chatbot:speed-warm).
-- by_message still runs its two joins whenever a group has a reply (see above).
