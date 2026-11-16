@@ -5,13 +5,16 @@ namespace App\Http\Controllers;
 use App\Jobs\CompareMetaAds;
 use App\Jobs\SyncMetaAdsReports;
 use App\Models\UploadLog;
+use App\Services\MetaAds\AppConfig;
 use App\Services\MetaAds\Connections;
+use App\Services\MetaAds\Graph;
 use App\Services\MetaAds\GraphException;
 use App\Services\MetaAds\Sync;
 use App\Support\NavAccess;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 
 /**
@@ -81,13 +84,25 @@ class MetaAdsController extends Controller
             $accounts[] = $a + ['selected' => isset($selected[(string) $id]), 'compare' => $numbers[(string) $id] ?? null];
         }
 
+        $isCeo = (new self($connections))->getNormalizedRole() === 'CEO';
+
         return [
             'set_up'     => $connections->appId() !== null,
             'people'     => $people,
             'mine'       => $connections->get((int) Auth::id()) !== null,
             'write_mode' => Sync::writeMode(),
             'schedule'   => Sync::schedule(),
-            'is_ceo'     => (new self($connections))->getNormalizedRole() === 'CEO',
+            'is_ceo'     => $isCeo,
+            // Ang Meta app ng site (spec 281), CEO lang. Walang secret dito: Set / Not set lang.
+            'app'        => $isCeo ? [
+                'app_id'       => AppConfig::appId(),
+                'config_id'    => AppConfig::configId(),
+                'secret_set'   => AppConfig::appSecret() !== null,
+                'sources'      => ['app_id' => AppConfig::source('app_id'), 'app_secret' => AppConfig::source('app_secret'), 'config_id' => AppConfig::source('config_id')],
+                'redirect_uri' => $connections->redirectUri(),
+                'app_domain'   => $connections->appDomain(),
+                'connections'  => count($all),
+            ] : null,
             'can_choose_accounts' => in_array((new self($connections))->getNormalizedRole(), self::ACCOUNT_ROLES, true),
             'range'      => Sync::range(null, null),
             'accounts'   => $accounts,
@@ -199,6 +214,73 @@ class MetaAdsController extends Controller
         if ($unknown) return $this->back()->withErrors(['meta' => 'Not in any connection: ' . implode(', ', $unknown)])->with('meta_accounts_error', true);
 
         return $this->back()->with('status', 'Meta Ads ad accounts saved: ' . count(Sync::accounts()) . ' selected');
+    }
+
+    /**
+     * Ang Meta app ng site (spec 281), CEO lang (gaya ng write mode). Ang nagbago lang ang isinusulat; ang walang laman na
+     * App Secret ay nagtatabi ng dati. Ang secret ay hindi ibinabalik sa session (walang old input nito, dontFlash).
+     */
+    public function saveApp(Request $request)
+    {
+        $this->checkAccess();
+        if ($this->getNormalizedRole() !== 'CEO') abort(403);
+
+        $v = Validator::make($request->only(['app_id', 'app_secret', 'config_id']), [
+            'app_id'     => ['required', 'string', 'max:32', 'regex:/^\d+$/'],
+            'app_secret' => ['nullable', 'string', 'regex:/^[0-9a-fA-F]{32}$/'],
+            'config_id'  => ['nullable', 'string', 'max:32', 'regex:/^\d+$/'],
+        ], [
+            'app_id.required'  => 'App ID is required',
+            'app_id.*'         => 'App ID: digits only',
+            'app_secret.*'     => 'App Secret: 32 hex characters (0-9, a-f)',
+            'config_id.*'      => 'Configuration ID: digits only',
+        ]);
+        $v->after(function ($v) use ($request) {
+            if ((string) $request->input('app_secret') === '' && AppConfig::appSecret() === null) {
+                $v->errors()->add('app_secret', 'App Secret is required (none is saved yet)');
+            }
+        });
+        if ($v->fails()) return $this->back()->withErrors($v)->withInput($request->only(['app_id', 'config_id']));
+        $data = $v->validated();
+
+        $oldId     = AppConfig::appId();
+        $oldConfig = AppConfig::configId();
+        $changed   = AppConfig::save($data['app_id'], $data['app_secret'] ?? null, $data['config_id'] ?? null);
+
+        // Isang audit line kada save: sino, kailan, aling field. Ang App ID at Configuration ID ay hindi lihim; ang secret ay "changed" lang.
+        $values = [];
+        if (in_array('app_id', $changed, true)) $values['app_id'] = [(string) $oldId, $data['app_id']];
+        if (in_array('config_id', $changed, true)) $values['config_id'] = [(string) $oldConfig, (string) ($data['config_id'] ?? '')];
+        Connections::event('meta app saved: ' . ($changed ? implode(', ', $changed) : 'no change'), Auth::id(), ['changed' => $changed, 'values' => $values]);
+
+        $res = $this->back()->with('status', $changed ? 'Meta app saved: ' . implode(', ', $changed) : 'Meta app: nothing changed');
+        // Ang token ay pag-aari ng app: ang mga naka-connect sa lumang App ID ay kailangang mag-Connect ulit. Hindi binubura.
+        $count = count($this->connections->all());
+        if (in_array('app_id', $changed, true) && $oldId !== null && $count > 0) {
+            $res->with('meta_app_warning', "App ID changed: the {$count} existing Facebook connection(s) were made with the old app and must reconnect (Connect Facebook again). They were not removed.");
+        }
+
+        return $res;
+    }
+
+    /** Sinusubok ang naka-save na App ID + App Secret: humihingi ng app token sa Graph (client_credentials), hindi ito itinatabi. */
+    public function testApp(Graph $graph)
+    {
+        $this->checkAccess();
+        if ($this->getNormalizedRole() !== 'CEO') abort(403);
+
+        $id     = AppConfig::appId();
+        $secret = AppConfig::appSecret();
+        if ($id === null || $secret === null) return $this->back()->withErrors(['meta_app' => 'Meta app test: save the App ID and App Secret first.']);
+
+        try {
+            $graph->get('oauth/access_token', ['client_id' => $id, 'client_secret' => $secret, 'grant_type' => 'client_credentials'], null, false, 1, 20);
+        } catch (GraphException $e) {
+            // Graph::clean ang naglinis; ang secret mismo ay tinatanggal din kahit walang "client_secret=" sa harap.
+            return $this->back()->withErrors(['meta_app' => 'Meta app test failed: ' . str_replace($secret, '[hidden]', $e->getMessage())]);
+        }
+
+        return $this->back()->with('status', 'Meta app test: OK (Facebook accepted App ID ' . $id . ' and its secret)');
     }
 
     /** from / to (Y-m-d, Manila); default ang huling 7 araw kasama ngayon. Hanggang 31 araw. */
