@@ -609,8 +609,11 @@ class ForbeastWatch
 
         if ($res !== null && $res->successful()) {
             // Ang token ng page kada Meta app (Bot N sa "Replies via"): itinatabi kapag nagbago, para ang mga pili ay totoo.
+            // Ang comment permission kada Meta app ("comments", spec 279): ipinapakita lang, hindi kailanman dahilan ng lipat.
             try {
-                app(ForbeastPageSetup::class)->on($gw)->keepApps($page, ForbeastPageSetup::appStatuses($res));
+                $setup = app(ForbeastPageSetup::class)->on($gw);
+                $setup->keepApps($page, ForbeastPageSetup::appStatuses($res));
+                $setup->keepComments($page, ForbeastPageSetup::commentStatuses($res));
             } catch (Throwable $e) {
                 report($e);
             }

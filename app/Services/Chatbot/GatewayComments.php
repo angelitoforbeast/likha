@@ -20,16 +20,24 @@ class GatewayComments
     public const ALREADY_REPLIED = 'already_replied';
     public const UNKNOWN = 'unknown';
     public const THROTTLED = 'throttled';
+    /**
+     * Tinanggihan ng Meta ang comment dahil walang comment permission ang page sa Meta app na iyon (ang code ng gateway,
+     * anuman ang HTTP status): sariling status, hindi failed, at hindi inuulit; ang page ay nananatili sa gateway.
+     */
+    public const NO_PERMISSION = ForbeastPageSetup::NO_COMMENT_PERMISSION;
+    public const NOT_ALLOWED = 'comments_not_allowed';
+    /** Ang simula ng error ng tinanggihang comment (pm_error / reply_error). */
+    public const REFUSED_PREFIX = 'Walang comment permission:';
     private const UNKNOWN_OUTCOME = 'unknown_outcome';
     private const META_ALREADY_REPLIED = 10900;
 
-    /** @return array{status: string, error: ?string, http: ?int, comment_id: ?string, code: ?string} status = sent | failed | unknown | throttled */
+    /** @return array{status: string, error: ?string, http: ?int, comment_id: ?string, code: ?string} status = sent | failed | no_permission | unknown | throttled */
     public function reply(string $pageName, string $pageId, string $commentId, string $message): array
     {
         return $this->post($pageName, $pageId, $commentId, 'reply', ['message' => $message]);
     }
 
-    /** @return array{status: string, error: ?string, http: ?int, comment_id: ?string, code: ?string} status = sent | failed | already_replied | unknown | throttled */
+    /** @return array{status: string, error: ?string, http: ?int, comment_id: ?string, code: ?string} status = sent | failed | already_replied | no_permission | unknown | throttled */
     public function privateReply(string $pageName, string $pageId, string $commentId, string $text): array
     {
         return $this->post($pageName, $pageId, $commentId, 'private-reply', ['text' => $text]);
@@ -60,6 +68,7 @@ class GatewayComments
         $str = fn ($v, int $max) => is_scalar($v) && trim((string) $v) !== '' ? mb_substr(mb_scrub(trim((string) $v), 'UTF-8'), 0, $max) : null;
 
         if ($http >= 200 && $http < 300 && ($json['ok'] ?? true) !== false) {
+            $this->permission($gw, $pageName, true);
             return ['status' => 'sent', 'error' => null, 'http' => $http, 'comment_id' => $str($json['comment_id'] ?? null, 100), 'code' => null];
         }
         // Ang code ng error: "error" na text ({ok:false, error}), o object ({"error": {"code", "message"}}, ang 401/403/404/422
@@ -74,7 +83,10 @@ class GatewayComments
         if (is_array($err) && !isset($json['meta_code']) && isset($err['meta_code'])) $json['meta_code'] = $err['meta_code'];
         // 409 already_replied (Meta #10900): naitala na. 504 unknown_outcome: maaaring naipost na ng Meta, kaya hindi inuulit.
         // 429: subukan ulit sa susunod na minuto. Ang iba (401, 403, 404, 422, 502 …): failed.
+        // Ang code lang ang batayan ng comments_not_allowed (4xx ito, pero hindi inaasahan ang eksaktong status).
+        if ($error === null && ($json['code'] ?? null) === self::NOT_ALLOWED) $error = self::NOT_ALLOWED;
         $status = match (true) {
+            $error === self::NOT_ALLOWED => self::NO_PERMISSION,
             $error === self::ALREADY_REPLIED || (int) ($json['meta_code'] ?? 0) === self::META_ALREADY_REPLIED => self::ALREADY_REPLIED,
             $error === self::UNKNOWN_OUTCOME || $http === 504 => self::UNKNOWN,
             $http === 429 => self::THROTTLED,
@@ -83,8 +95,23 @@ class GatewayComments
         $l = Gateways::label($gw);
         $why = $http === 0 ? $l . ' did not answer' : ($error !== null ? $l . ' said "' . $error . ($detail !== null ? ': ' . $detail : '') . '"' : $l . ' refused it');
         if (($code = $str($json['meta_code'] ?? null, 10)) !== null) $why .= ' (Meta #' . $code . ')';
+        if ($status === self::NO_PERMISSION) {
+            $this->permission($gw, $pageName, false);
+            $why = self::REFUSED_PREFIX . ' ' . $why;
+        }
 
-        return ['status' => $status, 'error' => $why . ' (HTTP ' . $http . ')', 'http' => $http ?: null, 'comment_id' => null,
+        // Ang pm_error / reply_error ay hanggang 255 letra.
+        return ['status' => $status, 'error' => mb_substr($why . ' (HTTP ' . $http . ')', 0, 255), 'http' => $http ?: null, 'comment_id' => null,
             'code' => $error !== null ? mb_substr($error, 0, 20) : ($http === 0 ? 'no_answer' : 'http_' . $http)];
+    }
+
+    /** Itinatala ang comment permission ng address ng page (ForbeastPageSetup::markComment); ang pagkabigo ay hindi humaharang sa sagot. */
+    private function permission(string $gw, string $pageName, bool $allowed): void
+    {
+        try {
+            app(ForbeastPageSetup::class)->on($gw)->markComment($pageName, $allowed);
+        } catch (Throwable $e) {
+            report($e);
+        }
     }
 }

@@ -1301,7 +1301,7 @@
         ]);
         paintSwitch(b, r.active);
         if (url.activeUrl) b.addEventListener('click', () => toggle(r, b)); else b.disabled = true; // CEO lang ang makakapag-switch
-        td.append(b, repliesViaSelect(r), gatewaySelect(r), aiButton(r));
+        td.append(b, repliesViaSelect(r), gatewaySelect(r), commentPermissionNote(r), aiButton(r));
         if (r.ai_load) td.append(aiLoadNote(r.ai_load));
         if (r.auto_switched) td.append(autoSwitchNote(r.auto_switched));
         const err = errors.get(r.page);
@@ -1542,6 +1542,14 @@
             redraw(r.page);
         });
         return sel;
+    }
+
+    // Spec 279: ang address na dinadaanan ngayon ng comment ng page ay walang comment permission sa Meta app nito (sabi ng
+    // gateway). Label lang, hindi error: ang page ay nananatili sa gateway at tuloy ang messages.
+    function commentPermissionNote(r) {
+        if (r.provider !== 'gateway' || r.comment_permission !== 'no_permission') return document.createTextNode('');
+        return el('div', {class: 'mt-1 text-xs text-amber-700', 'data-comment-permission': r.comment_route || '',
+            title: 'Meta refuses comment replies for this page on ' + (r.comment_route || 'this app') + '. Messages still go through the gateway.', text: 'Walang comment permission'});
     }
 
     // Aling gateway ang sumasagot (kapag gateway ang Bot): ang mga naka-set up na may gumaganang token ng page, kasama ang

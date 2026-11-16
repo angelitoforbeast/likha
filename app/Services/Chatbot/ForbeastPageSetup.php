@@ -25,6 +25,9 @@ class ForbeastPageSetup
     public const PROVIDER = 'forbeast';
     public const NEEDS_TOKEN = 'Add the Forbeast token first';
     private const TIMEOUT = 15;
+    /** Ang comment permission ng isang Meta app ng gateway (ang "comments" ng page check). */
+    public const NO_COMMENT_PERMISSION = 'no_permission';
+    private const COMMENT_STATUSES = ['ok', self::NO_COMMENT_PERMISSION];
 
     /** Ang gateway na sakop (Gateways): ang mga row ng page ay <gateway>.token, …; ang default ay forbeast. */
     private string $gateway = Gateways::FORBEAST;
@@ -68,6 +71,7 @@ class ForbeastPageSetup
         $this->keepScopes($page, self::scopes($res));
         $apps = self::appStatuses($res);
         $this->keepApps($page, $apps);
+        $this->keepComments($page, self::commentStatuses($res));
         // Ang pangalan ng page sa Facebook na ibinalik na ng gateway: itinatabi, walang dagdag na tawag.
         app(FacebookName::class)->fromProbe($page, $pageId, ['status' => 'ok', 'name' => $name, 'id' => is_scalar($res->json('id')) ? (string) $res->json('id') : null], $this->gateway);
         // Ang webhook ay isinusulat sa address ng Meta app na may token ang page: ang page na naka-connect lang sa ibang
@@ -105,7 +109,7 @@ class ForbeastPageSetup
         $str = fn ($v, int $max) => is_scalar($v) && trim((string) $v) !== '' ? mb_substr(trim((string) $v), 0, $max) : null;
 
         return ['status' => 'ok', 'name' => $str($res->json('name'), 255), 'id' => $str($res->json('id'), 64), 'permissions' => self::scopes($res),
-            'apps' => self::appStatuses($res), 'webhook' => $str($res->json('webhook.url'), 500), 'error' => null];
+            'apps' => self::appStatuses($res), 'comments' => self::commentStatuses($res), 'webhook' => $str($res->json('webhook.url'), 500), 'error' => null];
     }
 
     /**
@@ -121,6 +125,7 @@ class ForbeastPageSetup
         if ($p['status'] === 'ok') {
             $this->keepScopes($page, $p['permissions']);
             $this->keepApps($page, $p['apps'] ?? null);
+            $this->keepComments($page, $p['comments'] ?? null);
         }
         // Nabasa ang page (kahit nasa ibang site ang webhook): ang pangalan nito sa Facebook, kapag ito ring page ID.
         app(FacebookName::class)->fromProbe($page, $pageId, $p, $this->gateway);
@@ -292,6 +297,86 @@ class ForbeastPageSetup
         $v = json_decode((string) $this->settings->get($page, $this->gateway, 'apps'), true);
 
         return is_array($v) ? $v : null;
+    }
+
+    /**
+     * Ang comment permission ng page kada Meta app ng gateway (ang "comments" ng page check: {key: ok | no_permission | null}),
+     * o null kapag wala ang field (ang lumang gateway): hindi alam. Untrusted: maiikling key at kilalang status lang, gaya ng apps.
+     * @return array<string, ?string>|null
+     */
+    public static function commentStatuses(Response $res): ?array
+    {
+        $list = $res->json('comments');
+        if (!is_array($list)) return null;
+        $out = [];
+        foreach (array_slice($list, 0, 10, true) as $key => $status) {
+            if (!is_string($key) || !preg_match('/^[a-z0-9_]{1,30}$/', $key)) continue;
+            $out[$key] = in_array($status, self::COMMENT_STATUSES, true) ? $status : null;
+        }
+        ksort($out);
+
+        return $out;
+    }
+
+    /**
+     * Itinatabi ang "comments" sa <gateway>.comments (JSON) ng page; isinusulat lang kapag nagbago. null (hindi alam): walang
+     * galaw. Ang null ng isang key ay hindi nagbubura ng alam na: ang no_permission na galing sa tinanggihang comment
+     * (markComment) ay nananatili hanggang may "ok" o "no_permission" mula sa gateway, o may comment na nasagot.
+     */
+    public function keepComments(string $page, ?array $comments): void
+    {
+        if ($comments === null) return;
+        $out = $this->comments($page) ?? [];
+        foreach ($comments as $key => $status) {
+            if ($status !== null || !array_key_exists($key, $out)) $out[$key] = $status;
+        }
+        $this->writeComments($page, $out);
+    }
+
+    /** @return array<string, ?string>|null ang naitabing comment permission ng page kada Meta app ng gateway; null = hindi pa alam */
+    public function comments(string $page): ?array
+    {
+        $v = json_decode((string) $this->settings->get($page, $this->gateway, 'comments'), true);
+
+        return is_array($v) ? $v : null;
+    }
+
+    /**
+     * Ang key ng Meta app na dinadaanan ng comment ng page sa gateway na ito: ang address (chatbot.gateway_app) sa forbeast,
+     * ang pangalan ng gateway sa iba (gaya ng Gateways::sendRoute).
+     */
+    public function commentRoute(string $page): string
+    {
+        return $this->gateway === Gateways::FORBEAST ? Gateways::route($page) : $this->gateway;
+    }
+
+    /** ok | no_permission | null (hindi alam) ng address na dinadaanan ngayon ng comment ng page. */
+    public function commentStatus(string $page): ?string
+    {
+        return ($this->comments($page) ?? [])[$this->commentRoute($page)] ?? null;
+    }
+
+    /**
+     * Ang sagot ng gateway sa isang comment reply: tinanggihan (comments_not_allowed) = no_permission ng address na iyon;
+     * nasagot = ok ulit, pero kapag no_permission lang ang naitala (walang sulat sa bawat nasagot na comment).
+     */
+    public function markComment(string $page, bool $allowed): void
+    {
+        $out = $this->comments($page) ?? [];
+        $key = $this->commentRoute($page);
+        $now = $out[$key] ?? null;
+        if ($allowed ? $now !== self::NO_COMMENT_PERMISSION : $now === self::NO_COMMENT_PERMISSION) return;
+        $out[$key] = $allowed ? 'ok' : self::NO_COMMENT_PERMISSION;
+        $this->writeComments($page, $out);
+    }
+
+    private function writeComments(string $page, array $comments): void
+    {
+        ksort($comments);
+        $json = json_encode($comments);
+        // Ang pareho ay hindi isinusulat (walang lock o transaction sa bawat health check o comment).
+        if ($json === (string) $this->settings->get($page, $this->gateway, 'comments')) return;
+        $this->settings->set($page, $this->gateway, 'comments', $json, false, null, true);
     }
 
     private function why(?Response $res): string

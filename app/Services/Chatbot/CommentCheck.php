@@ -19,6 +19,9 @@ class CommentCheck
     /** Ang mga scope na kailangan ng Forbeast token para sumagot sa comment. */
     public const SCOPES = ['pages_manage_engagement', 'pages_read_user_content'];
     public const NO_PERMISSION = 'Forbeast: walang comment permission — i-connect ulit ang page';
+    /** Ang sinabi ng gateway (spec 279): %s = gateway, %s = address (Meta app). Ang label din ng listahan ng page. */
+    public const NO_COMMENT_PERMISSION = '%s (%s): Walang comment permission — hindi masasagot ang comment; tuloy ang messages';
+    private const REFUSED_PREFIX = GatewayComments::REFUSED_PREFIX;
     private const META_PERMISSION = [10, 200, 230]; // ang code ng Meta na permission error, sa "(Meta #N)" ng pm_error / reply_error
     private const SPAM = 'the same text on every comment can be flagged as spam';
     private const SHORT = 'keep the public reply short; the details go in the PM';
@@ -96,6 +99,10 @@ class CommentCheck
 
         if (ChatbotProvider::name($page) !== ChatbotProvider::GATEWAY) {
             $finding('Comment', 'info', 'Comment columns: comments are answered only on Forbeast pages');
+        } elseif (($setup = app(ForbeastPageSetup::class)->on(Gateways::active($page)))->commentStatus($page) === ForbeastPageSetup::NO_COMMENT_PERMISSION) {
+            // Galing sa gateway (page check o tinanggihang comment): kilalang limit ng Meta app, hindi sira, kaya warn at hindi X;
+            // ang messages ay tuloy sa gateway.
+            $finding(Gateways::label($setup->gateway()), 'warn', sprintf(self::NO_COMMENT_PERMISSION, Gateways::label($setup->gateway()), Gateways::routeLabel($setup->commentRoute($page))));
         } elseif ($this->noPermission($page)) {
             $finding('Forbeast', 'x', self::NO_PERMISSION);
         } elseif ($this->settings->get($page, ForbeastPageSetup::PROVIDER, 'permissions') === null) {
@@ -117,10 +124,14 @@ class CommentCheck
         $pageId = trim((string) $this->settings->get($page, 'botcake', 'page_id'));
         if (!ctype_digit($pageId) || !Schema::hasTable('chatbot_comment_events')) return false;
 
+        // Ang comments_not_allowed (spec 279, ang error na nagsisimula sa "Walang comment permission:") ay hindi patunay na
+        // kailangang i-connect ulit: ang gateway ang nagsasabi niyon sa <gateway>.comments, na nagiging ok ulit kapag may nasagot.
         return DB::table('chatbot_comment_events')->where('page_id', (int) $pageId)->where('received_at', '>=', now()->subDay())
             ->where(function ($q) {
                 foreach (['pm_error', 'reply_error'] as $col) {
-                    foreach (self::META_PERMISSION as $code) $q->orWhere($col, 'like', '%(Meta #' . $code . ')%');
+                    foreach (self::META_PERMISSION as $code) {
+                        $q->orWhere(fn ($w) => $w->where($col, 'like', '%(Meta #' . $code . ')%')->where($col, 'not like', self::REFUSED_PREFIX . '%'));
+                    }
                 }
             })->exists();
     }

@@ -171,7 +171,12 @@ class ChatbotController extends Controller
                 'auto_switched' => ForbeastWatch::note($autoSwitch, $providerRow, $provider, $gatewayRow),
                 // Aling gateway ang sumasagot kapag gateway ang provider, at ang mapipili (naka-set up at gumagana ang token ng page).
                 'gateway' => Gateways::active($page), 'gateways' => Gateways::readyFor($page),
-            ] + ($apps !== null ? ['gateway_app' => Gateways::route($page),
+            ]
+                // Ang comment permission ng address na dinadaanan ngayon ng comment (ok | no_permission), kapag alam lang, kaya
+                // pareho ang JSON kung wala pa: ang "Walang comment permission" ay label lang, nananatili sa gateway (spec 279).
+                + (($commentSetup = $forbeast->on(Gateways::active($page)))->commentStatus($page) !== null
+                    ? ['comment_permission' => $commentSetup->commentStatus($page), 'comment_route' => $commentSetup->commentRoute($page)] : [])
+                + ($apps !== null ? ['gateway_app' => Gateways::route($page),
                 // Ang token ng page kada Meta app (address) ayon sa huling check ng Forbeast; null = hindi pa alam.
                 'route_apps' => $forbeast->apps($page)] : []) + [ // ang address ng forbeast gateway ng page (chatbot.gateway_app)
                 'flow_text' => $linked === null && $text !== null && $text !== '' ? $text : null,
@@ -385,7 +390,10 @@ class ChatbotController extends Controller
                 if ($apps === null) {
                     // Basa lang (walang isinusulat na status o webhook): ang token ng page kada app, saka itinatabi.
                     $probe = $setup->probe(trim((string) $this->settings->get($p, 'botcake', 'page_id')), $setup->token($p), $p);
-                    if ($probe['status'] === 'ok') $setup->keepApps($p, $probe['apps'] ?? null);
+                    if ($probe['status'] === 'ok') {
+                        $setup->keepApps($p, $probe['apps'] ?? null);
+                        $setup->keepComments($p, $probe['comments'] ?? null);
+                    }
                     $apps = $probe['apps'] ?? null;
                     // Sumagot ang gateway pero walang "apps" (lumang bersyon): hindi alam, kaya gaya ng dati. Hindi sumagot: hindi.
                     if ($apps === null) return $probe['status'] !== 'ok';

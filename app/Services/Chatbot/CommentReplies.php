@@ -35,6 +35,7 @@ class CommentReplies
         'page_author' => 'written by the page', 'ours' => 'our own reply', 'not_set' => 'not set (no Comment PM or Comment Reply)',
         'unknown_page' => 'unknown page', GatewayComments::ALREADY_REPLIED => 'already replied',
         self::DAILY_LIMIT => 'already answered today',
+        GatewayComments::NOT_ALLOWED => 'Walang comment permission (Meta refused comments for this page and app; messages still go through)',
     ];
 
     /** @var callable|null ang pumipili ng variant (test seam); null = random_int */
@@ -143,7 +144,13 @@ class CommentReplies
             in_array('sent', $parts, true) => 'sent',
             default => 'skipped',
         };
-        $reason = $status === 'failed' ? (array_values(array_filter($codes))[0] ?? $event->reason) : ($status === 'skipped' ? GatewayComments::ALREADY_REPLIED : null);
+        // Ang tinanggihan dahil walang comment permission (no_permission) ay hindi failed: skipped na may sariling dahilan,
+        // isang subok lang (walang retry), at ang page ay nananatili sa gateway.
+        $reason = match (true) {
+            $status === 'failed' => array_values(array_filter($codes))[0] ?? $event->reason,
+            $status === 'skipped' => in_array(GatewayComments::NO_PERMISSION, $parts, true) ? GatewayComments::NOT_ALLOWED : GatewayComments::ALREADY_REPLIED,
+            default => null,
+        };
         $event->update($done + ['status' => $status, 'reason' => $reason, 'handled_at' => now()]);
 
         return 0;
