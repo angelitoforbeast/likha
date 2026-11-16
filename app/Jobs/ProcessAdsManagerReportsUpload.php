@@ -580,9 +580,11 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
             } catch (\Throwable $e) {}
         }
 
+        // Ang '!' sa petsang walang oras: hatinggabi, hindi ang oras ng upload (spec 280: kung hindi, bawat upload
+        // ng parehong file ay "nagbabago" ang reporting_starts/ends, at gumagalaw ang updated_at).
         $cands = [
             'Y-m-d H:i:s','Y-m-d H:i','d-m-Y H:i','d/m/Y H:i','m/d/Y H:i',
-            'd-m-Y','Y-m-d','H:i d-m-Y','H:i d/m/Y',
+            '!d-m-Y','!Y-m-d','H:i d-m-Y','H:i d/m/Y',
         ];
         foreach ($cands as $fmt) {
             try {
@@ -699,12 +701,16 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
                         // parehong row, kaya walang mas mababang numerong nakakalusot sa pagtanggi.
                         ->orderBy('ad_id')
                         ->lockForUpdate()
-                        ->get(array_merge(['ad_id'], self::MONOTONIC_FIELDS));
+                        // Buong row (spec 280): ikinukumpara rin ang bawat isinusulat na column para malaman kung may nagbago.
+                        ->get();
                     foreach ($existing as $row) {
                         $existingByKey["{$day}|{$row->ad_id}"] = (array) $row;
                     }
                 }
             }
+            // Ang laman ng row ngayon (spec 280), para sa parehong (day, ad_id) na dalawang beses sa chunk. Ang
+            // $existingByKey ay hindi ginagalaw: doon pa rin ikinukumpara ang PROTECTION, gaya ng dati.
+            $currentByKey = $existingByKey;
 
             // 3) Upsert facts into ads_manager_reports keyed by (day + ad_id)
             foreach ($rows as $r) {
@@ -795,6 +801,15 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
                     }
                 }
 
+                // Spec 280: kapag nakatabi na ang row at walang isinusulat na value na iba, hindi na ginagalaw ang row,
+                // kaya ang updated_at ay nananatiling oras ng huling pagbabago ng numero (ang "Ads spend updated" ng CPP).
+                // Binibilang pa rin itong "updated", gaya ng dati.
+                $currentRow = $currentByKey["{$day}|{$adId}"] ?? null;
+                if ($currentRow !== null && !self::changes($currentRow, $updateData)) {
+                    $this->updated++;
+                    continue;
+                }
+
                 $affected = DB::table('ads_manager_reports')
                     ->where('day', $day)
                     ->where('ad_id', $adId)
@@ -812,6 +827,7 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
                 } else {
                     $this->updated++;
                 }
+                $currentByKey["{$day}|{$adId}"] = array_merge($currentRow ?? [], $updateData);
             }
 
             DB::commit();
@@ -972,6 +988,38 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
                 ->where(fn ($q) => $q->whereNull('ad_link')->orWhere('ad_link', '!=', $link))
                 ->update(['ad_link' => $link, 'updated_at' => $now]);
         }
+    }
+
+    /** Mga numerong column na hindi pumapasok sa MONOTONIC_FIELDS; ikinukumpara bilang numero (decimal(12,2) o integer). */
+    private const NUMERIC_FIELDS = ['ad_set_budget', 'cost_per_result', 'video_plays_3s', 'video_thruplays', 'video_p50'];
+
+    /**
+     * Spec 280. May isinusulat bang value na iba sa nakatabi? Ang updated_at ay hindi kasama. Ang numero ay ikinukumpara
+     * sa 2 decimal (ang "100.00" ng decimal column = 100.0 na float); ang iba ay bilang string, at ang null = ''.
+     * Ang column na wala sa nakatabing row ay itinuturing na nagbago.
+     */
+    private static function changes(array $stored, array $write): bool
+    {
+        foreach ($write as $col => $new) {
+            if ($col === 'updated_at') continue;
+            if (!array_key_exists($col, $stored)) return true;
+            $old = $stored[$col];
+
+            $oldBlank = $old === null || $old === '';
+            $newBlank = $new === null || $new === '';
+            if ($oldBlank || $newBlank) {
+                if ($oldBlank !== $newBlank) return true;
+                continue;
+            }
+            if ((in_array($col, self::MONOTONIC_FIELDS, true) || in_array($col, self::NUMERIC_FIELDS, true))
+                && is_numeric($old) && is_numeric($new)) {
+                if (round((float) $old, 2) !== round((float) $new, 2)) return true;
+                continue;
+            }
+            if ((string) $old !== (string) $new) return true;
+        }
+
+        return false;
     }
 
     /**
