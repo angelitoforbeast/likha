@@ -81,7 +81,7 @@ failures; 3 is in the known base list). In this worktree only one of the three k
 fails. No new failures.
 
 ## Head commit
-See the branch head (this file is in that commit).
+`5b9198ab` (work); this line is filled in a follow-up docs commit at the branch head.
 
 ## Notes for release
 - No migration. Works with an older gateway (no `comments` field = nothing stored, nothing shown).
