@@ -11,6 +11,8 @@ use Throwable;
  * meta_ads.app.app_id, meta_ads.app.app_secret (naka-encrypt, Crypt::encryptString), meta_ads.app.config_id.
  * Ang naka-save na row ang nananalo; kapag walang row, ang .env (config services.meta_ads.*) gaya ng dati.
  * Ang secret ay hindi kailanman ibinabalik sa page: secretSet() lang ang alam ng screen.
+ * Spec 282: meta_ads.app.company_name at meta_ads.app.contact_email para sa public na /privacy. Walang .env fallback:
+ * kapag wala, config('app.name') ang pangalan at walang email line.
  */
 class AppConfig
 {
@@ -18,6 +20,37 @@ class AppConfig
     public const APP_ID     = self::PREFIX . 'app_id';
     public const APP_SECRET = self::PREFIX . 'app_secret';
     public const CONFIG_ID  = self::PREFIX . 'config_id';
+    public const COMPANY    = self::PREFIX . 'company_name';
+    public const EMAIL      = self::PREFIX . 'contact_email';
+
+    /** Ang naka-save na pangalan ng kompanya (null = wala; ang /privacy ay gumagamit ng config('app.name')). */
+    public static function companyName(): ?string
+    {
+        return self::blankToNull(self::row(self::COMPANY));
+    }
+
+    /** Ang contact email sa /privacy (null = walang email line). */
+    public static function contactEmail(): ?string
+    {
+        return self::blankToNull(self::row(self::EMAIL));
+    }
+
+    /**
+     * Isinusulat ang company name at contact email kapag nagbago ('' = binubura ang value). Ibinabalik ang mga nagbago.
+     * @return list<string>
+     */
+    public static function savePrivacy(?string $company, ?string $email): array
+    {
+        $changed = [];
+        foreach (['company_name' => [self::COMPANY, $company], 'contact_email' => [self::EMAIL, $email]] as $field => [$key, $value]) {
+            $value = trim((string) $value);
+            if ($value === (string) self::blankToNull(self::row($key))) continue;
+            self::put($key, $value);
+            $changed[] = $field;
+        }
+
+        return $changed;
+    }
 
     public static function appId(): ?string
     {

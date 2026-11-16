@@ -102,6 +102,11 @@ class MetaAdsController extends Controller
                 'redirect_uri' => $connections->redirectUri(),
                 'app_domain'   => $connections->appDomain(),
                 'connections'  => count($all),
+                // Spec 282: para sa public na /privacy, at ang dalawang URL na ilalagay sa Meta app.
+                'company_name'  => AppConfig::companyName(),
+                'contact_email' => AppConfig::contactEmail(),
+                'privacy_url'   => rtrim((string) config('app.url'), '/') . '/privacy',
+                'deletion_url'  => rtrim((string) config('app.url'), '/') . '/meta/data-deletion',
             ] : null,
             'can_choose_accounts' => in_array((new self($connections))->getNormalizedRole(), self::ACCOUNT_ROLES, true),
             'range'      => Sync::range(null, null),
@@ -225,32 +230,47 @@ class MetaAdsController extends Controller
         $this->checkAccess();
         if ($this->getNormalizedRole() !== 'CEO') abort(403);
 
-        $v = Validator::make($request->only(['app_id', 'app_secret', 'config_id']), [
-            'app_id'     => ['required', 'string', 'max:32', 'regex:/^\d+$/'],
-            'app_secret' => ['nullable', 'string', 'regex:/^[0-9a-fA-F]{32}$/'],
-            'config_id'  => ['nullable', 'string', 'max:32', 'regex:/^\d+$/'],
+        $v = Validator::make($request->only(['app_id', 'app_secret', 'config_id', 'company_name', 'contact_email']), [
+            'app_id'        => ['required', 'string', 'max:32', 'regex:/^\d+$/'],
+            'app_secret'    => ['nullable', 'string', 'regex:/^[0-9a-fA-F]{32}$/'],
+            'config_id'     => ['nullable', 'string', 'max:32', 'regex:/^\d+$/'],
+            'company_name'  => ['nullable', 'string', 'max:150'],
+            'contact_email' => ['nullable', 'string', 'max:150', 'email'],
         ], [
             'app_id.required'  => 'App ID is required',
             'app_id.*'         => 'App ID: digits only',
             'app_secret.*'     => 'App Secret: 32 hex characters (0-9, a-f)',
             'config_id.*'      => 'Configuration ID: digits only',
+            'company_name.*'   => 'Company name: up to 150 characters',
+            'contact_email.*'  => 'Contact email: enter a valid email address',
         ]);
         $v->after(function ($v) use ($request) {
             if ((string) $request->input('app_secret') === '' && AppConfig::appSecret() === null) {
                 $v->errors()->add('app_secret', 'App Secret is required (none is saved yet)');
             }
         });
-        if ($v->fails()) return $this->back()->withErrors($v)->withInput($request->only(['app_id', 'config_id']));
+        if ($v->fails()) return $this->back()->withErrors($v)->withInput($request->only(['app_id', 'config_id', 'company_name', 'contact_email']));
         $data = $v->validated();
 
-        $oldId     = AppConfig::appId();
-        $oldConfig = AppConfig::configId();
-        $changed   = AppConfig::save($data['app_id'], $data['app_secret'] ?? null, $data['config_id'] ?? null);
+        $oldId      = AppConfig::appId();
+        $oldConfig  = AppConfig::configId();
+        $oldCompany = AppConfig::companyName();
+        $oldEmail   = AppConfig::contactEmail();
+        $changed    = AppConfig::save($data['app_id'], $data['app_secret'] ?? null, $data['config_id'] ?? null);
+        // Spec 282: kapag nasa form ang dalawang field (laging nasa block), ang laman nila ang naka-save; blangko = wala.
+        if ($request->has('company_name') || $request->has('contact_email')) {
+            $changed = array_merge($changed, AppConfig::savePrivacy(
+                $request->has('company_name') ? ($data['company_name'] ?? '') : $oldCompany,
+                $request->has('contact_email') ? ($data['contact_email'] ?? '') : $oldEmail,
+            ));
+        }
 
-        // Isang audit line kada save: sino, kailan, aling field. Ang App ID at Configuration ID ay hindi lihim; ang secret ay "changed" lang.
+        // Isang audit line kada save: sino, kailan, aling field. Ang App ID, Configuration ID, company at email ay hindi lihim; ang secret ay "changed" lang.
         $values = [];
         if (in_array('app_id', $changed, true)) $values['app_id'] = [(string) $oldId, $data['app_id']];
         if (in_array('config_id', $changed, true)) $values['config_id'] = [(string) $oldConfig, (string) ($data['config_id'] ?? '')];
+        if (in_array('company_name', $changed, true)) $values['company_name'] = [(string) $oldCompany, (string) AppConfig::companyName()];
+        if (in_array('contact_email', $changed, true)) $values['contact_email'] = [(string) $oldEmail, (string) AppConfig::contactEmail()];
         Connections::event('meta app saved: ' . ($changed ? implode(', ', $changed) : 'no change'), Auth::id(), ['changed' => $changed, 'values' => $values]);
 
         $res = $this->back()->with('status', $changed ? 'Meta app saved: ' . implode(', ', $changed) : 'Meta app: nothing changed');

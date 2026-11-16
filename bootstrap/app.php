@@ -22,6 +22,9 @@ return Application::configure(basePath: dirname(__DIR__))
 
         // Last seen at staff_events ng naka-login na staff (para sa staff feed ng owner).
         $middleware->appendToGroup('web', \App\Http\Middleware\RecordStaffActivity::class);
+
+        // Ang Data Deletion Callback ng Meta (spec 282): ang Meta ang nagpo-POST, walang CSRF token; ang signed_request ang patunay.
+        $middleware->validateCsrfTokens(except: ['meta/data-deletion']);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         // Huwag kailanman i-flash sa session ang API key fields (/boardroom/agents) kapag may validation error.

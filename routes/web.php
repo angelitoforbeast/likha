@@ -107,6 +107,14 @@ Route::post('/login', [LoginController::class, 'login']);
 Route::get('/registerlogin', [RegisterController::class, 'showRegistrationForm'])->name('register');
 Route::post('/registerlogin', [RegisterController::class, 'register']);
 
+// Spec 282: public na Privacy Policy at Data Deletion Callback ng Meta app (walang login). Ang POST ay walang CSRF
+// (bootstrap/app.php): ang Meta ang tumatawag, may signed_request na pinirmahan ng App Secret.
+Route::get('/privacy', [\App\Http\Controllers\MetaPrivacyController::class, 'privacy'])->name('privacy');
+Route::post('/meta/data-deletion', [\App\Http\Controllers\MetaPrivacyController::class, 'deletion'])
+    ->middleware('throttle:60,1')->name('meta.data_deletion');
+Route::get('/meta/data-deletion/{code}', [\App\Http\Controllers\MetaPrivacyController::class, 'status'])
+    ->where('code', '[A-Za-z0-9]{1,64}')->name('meta.data_deletion.status');
+
 // ✅ Logout
 Route::post('/logout', [LoginController::class, 'logout'])->name('logout')->middleware('auth');
 

@@ -30,7 +30,7 @@
   @if ($meta['app'])
     @php
       $app = $meta['app'];
-      $appErrors = ['app_id', 'app_secret', 'config_id', 'meta_app'];
+      $appErrors = ['app_id', 'app_secret', 'config_id', 'company_name', 'contact_email', 'meta_app'];
       $appOpen = !$meta['set_up'] || $errors->hasAny($appErrors) || session('meta_app_warning');
       $appSource = fn ($f) => ['saved' => 'saved here', 'env' => 'from the server file (.env)'][$app['sources'][$f] ?? ''] ?? 'none';
     @endphp
@@ -52,9 +52,9 @@
           </div>
         @endif
 
-        <p class="text-xs text-gray-500">Ilagay ang dalawang ito sa Meta app (developers.facebook.com): Facebook Login for Business → Settings, at App settings → Basic.</p>
+        <p class="text-xs text-gray-500">Ilagay ang mga ito sa Meta app (developers.facebook.com): Redirect URI sa Facebook Login for Business → Settings; App Domain, Privacy Policy URL at Data Deletion Callback URL sa App settings → Basic.</p>
         <div class="grid gap-2 sm:grid-cols-2">
-          @foreach (['Redirect URI' => $app['redirect_uri'], 'App Domain' => $app['app_domain']] as $label => $val)
+          @foreach (['Redirect URI' => $app['redirect_uri'], 'App Domain' => $app['app_domain'], 'Privacy Policy URL' => $app['privacy_url'], 'Data Deletion Callback URL' => $app['deletion_url']] as $label => $val)
             <div class="text-xs min-w-0">{{ $label }}
               <div class="flex gap-2 items-center">
                 <code class="font-mono border rounded p-1 bg-gray-50 break-all">{{ $val }}</code>
@@ -82,6 +82,15 @@
           <label class="text-xs">Configuration ID (optional)
             <input type="text" name="config_id" value="{{ old('config_id', $app['config_id']) }}" inputmode="numeric" class="border rounded p-1 block w-48 font-mono">
             <span class="text-gray-500">{{ $appSource('config_id') }}</span>
+          </label>
+          {{-- Spec 282: lumalabas sa public na /privacy. Blangko: config('app.name') ang pangalan, walang email line. --}}
+          <label class="text-xs">Company name (optional)
+            <input type="text" name="company_name" value="{{ old('company_name', $app['company_name']) }}" maxlength="150" class="border rounded p-1 block w-56">
+            <span class="text-gray-500">{{ $app['company_name'] !== null ? 'saved here' : 'blank: ' . config('app.name') }} · shown on /privacy</span>
+          </label>
+          <label class="text-xs">Contact email (optional)
+            <input type="email" name="contact_email" value="{{ old('contact_email', $app['contact_email']) }}" maxlength="150" class="border rounded p-1 block w-56">
+            <span class="text-gray-500">{{ $app['contact_email'] !== null ? 'saved here' : 'blank: no email line' }} · shown on /privacy</span>
           </label>
           <button class="bg-gray-800 hover:bg-gray-900 text-white text-sm px-3 py-1.5 rounded">Save Meta app</button>
         </form>
