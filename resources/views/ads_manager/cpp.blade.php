@@ -137,7 +137,7 @@
 
           @foreach (array_keys($matrix) as $page)
             <div class="page-dd-item" data-value="{{ $page }}">
-              <input type="checkbox" {{ in_array($page, $selPages, true) ? 'checked' : '' }}>
+              <input type="checkbox" {{ (empty($selPages) || in_array($page, $selPages, true)) ? 'checked' : '' }}>
               <span class="page-dd-item-label">{{ $page }}</span>
             </div>
           @endforeach
@@ -151,7 +151,7 @@
         </div>
 
         <div class="text-[11px] text-gray-500 mt-2">
-          Check para mag-add ng page. Pag walang naka-check = All Pages. URL persists via ?pages=.
+          Click All Pages para ma-check lahat, tapos i-uncheck ang ayaw isama. Pag lahat o walang naka-check = All Pages. URL persists via ?pages=.
         </div>
       </div>
     </div>
@@ -1125,23 +1125,42 @@
         pageDdEmpty?.classList.toggle('hidden', shown > 0);
       }
 
-      // Currently checked PAGE items (excludes "All Pages" toggle).
-      function checkedPages() {
+      // PAGE items (excludes the "All Pages" toggle row).
+      function pageItems() {
         return Array.from(pageDdList.querySelectorAll('.page-dd-item'))
-          .filter(i => i.dataset.value !== 'all')
+          .filter(i => i.dataset.value !== 'all');
+      }
+
+      // Currently checked PAGE items.
+      function checkedPages() {
+        return pageItems()
           .filter(i => i.querySelector('input[type="checkbox"]')?.checked)
           .map(i => i.dataset.value);
       }
 
+      // Every page checked is the same as no filter, so the link stays short.
+      function selectedForFilter() {
+        const sel = checkedPages();
+        return sel.length === pageItems().length ? [] : sel;
+      }
+
+      function syncAllBox() {
+        if (!cbAll) return;
+        const total = pageItems().length;
+        cbAll.checked = total > 0 && checkedPages().length === total;
+      }
+
       function updateCountLabel() {
         const sel = checkedPages();
-        if (sel.length === 0)      countLabel.textContent = 'All pages will be shown (no filter active)';
-        else if (sel.length === 1) countLabel.textContent = `1 page selected · ${sel[0]}`;
-        else                       countLabel.textContent = `${sel.length} pages selected`;
+        const total = pageItems().length;
+        if (sel.length === 0)          countLabel.textContent = 'All pages will be shown (no filter active)';
+        else if (sel.length === total) countLabel.textContent = `All ${total} pages checked (no filter active)`;
+        else if (sel.length === 1)     countLabel.textContent = `1 page selected · ${sel[0]}`;
+        else                           countLabel.textContent = `${sel.length} of ${total} pages selected`;
       }
 
       function applyAndClose() {
-        const sel = checkedPages();
+        const sel = selectedForFilter();
         const newVal = sel.length === 0 ? 'all' : sel.join(',');
         const currentVal = pageHidden.value;
         pageHidden.value = newVal;
@@ -1168,14 +1187,13 @@
         if (e.target !== cb) cb.checked = !cb.checked;
 
         if (item.dataset.value === 'all') {
-          if (cb.checked) {
-            pageDdList.querySelectorAll('.page-dd-item input[type="checkbox"]').forEach(c => {
-              if (c !== cb) c.checked = false;
-            });
-          }
+          // "All Pages" checks (or unchecks) every page below, so a few can be unticked.
+          pageItems().forEach(i => {
+            const c = i.querySelector('input[type="checkbox"]');
+            if (c) c.checked = cb.checked;
+          });
         } else {
-          if (cb.checked && cbAll) cbAll.checked = false;
-          if (!cb.checked && checkedPages().length === 0 && cbAll) cbAll.checked = true;
+          syncAllBox();
         }
         updateCountLabel();
       });
@@ -1183,7 +1201,6 @@
       btnApply?.addEventListener('click', applyAndClose);
       btnClear?.addEventListener('click', () => {
         pageDdList.querySelectorAll('.page-dd-item input[type="checkbox"]').forEach(c => c.checked = false);
-        if (cbAll) cbAll.checked = true;
         updateCountLabel();
       });
 
