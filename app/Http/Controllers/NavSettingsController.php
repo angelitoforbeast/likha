@@ -7,6 +7,8 @@ use App\Models\NavLinkRoleVisibility;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
+use Illuminate\Validation\Rule;
 
 /**
  * CEO-managed nav settings. Controls which roles see which navlinks via a
@@ -58,6 +60,8 @@ class NavSettingsController extends Controller
         return view('owner.nav_settings', [
             'links'              => $links,
             'roles'              => self::ROLES,
+            // Sidebar sections (spec 295); null while the section migration has not run.
+            'sections'           => Schema::hasColumn('nav_links', 'section') ? \App\Support\NavSections::names() : null,
             'visibilityMap'      => $visibilityMap,
             'saved'              => session('nav_settings_saved', false),
             'unregisteredRoutes' => NavLink::unregisteredRoutes(),
@@ -77,13 +81,17 @@ class NavSettingsController extends Controller
             // sort_order[link_id] = integer (from drag-reorder or manual input)
             'sort_order' => 'nullable|array',
             'sort_order.*' => 'nullable|integer|min:0|max:9999',
+            // section[link_id] = one of the sidebar sections (spec 295).
+            'section' => 'nullable|array',
+            'section.*' => ['nullable', 'string', Rule::in(\App\Support\NavSections::names())],
         ]);
 
         $visibilityPayload = $validated['visibility'] ?? [];
         $sortPayload       = $validated['sort_order'] ?? [];
+        $sectionPayload    = Schema::hasColumn('nav_links', 'section') ? array_filter($validated['section'] ?? []) : [];
         $now = now();
 
-        DB::transaction(function () use ($visibilityPayload, $sortPayload, $now) {
+        DB::transaction(function () use ($visibilityPayload, $sortPayload, $sectionPayload, $now) {
             // Iterate ALL nav_links — para mag-save din yung "all-unchecked" rows.
             // If the row's id isn't sa $visibilityPayload, we treat it as
             // "everything false" (which is the correct intent: user unchecked all
@@ -104,6 +112,11 @@ class NavSettingsController extends Controller
             foreach ($sortPayload as $linkId => $order) {
                 NavLink::where('id', (int) $linkId)
                     ->update(['sort_order' => (int) $order, 'updated_at' => $now]);
+            }
+
+            // Section per link (spec 295). Only touches rows present sa payload.
+            foreach ($sectionPayload as $linkId => $section) {
+                NavLink::where('id', (int) $linkId)->update(['section' => $section, 'updated_at' => $now]);
             }
         });
         // The storage banner caches each role's access for 60 s; a saved checkbox should count from the next page view.
@@ -164,6 +177,8 @@ class NavSettingsController extends Controller
             'icon'           => \App\Services\NavIconGuesser::guess($url),
             'active_pattern' => ltrim($url, '/') . '*',
             'sort_order'     => $maxSort + 1,
+            // Its sidebar section from the url (More when unknown); the CEO can move it in the table.
+            ...(Schema::hasColumn('nav_links', 'section') ? ['section' => \App\Support\NavSections::forUrl($url)] : []),
             'is_active'      => true,
         ]);
 
@@ -198,7 +213,9 @@ class NavSettingsController extends Controller
         $now = now();
         $allRoles = self::ROLES;
 
-        DB::transaction(function () use ($defaults, $now, $allRoles) {
+        $hasSection = Schema::hasColumn('nav_links', 'section');
+
+        DB::transaction(function () use ($defaults, $now, $allRoles, $hasSection) {
             $sort = 1;
             foreach ($defaults as $d) {
                 $visible = $d['visible'];
@@ -208,6 +225,7 @@ class NavSettingsController extends Controller
                     'icon'           => $d['icon'],
                     'active_pattern' => $d['active_pattern'],
                     'sort_order'     => $sort,
+                    ...($hasSection ? ['section' => $d['section']] : []),
                     'is_active'      => true,
                     'updated_at'     => $now,
                 ];
