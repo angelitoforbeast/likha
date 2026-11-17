@@ -5,6 +5,7 @@ namespace Tests\Feature\Checklist;
 use App\Models\AppSetting;
 use App\Models\ChecklistAiFollowup;
 use App\Services\AiFollowups;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -26,7 +27,7 @@ class AiFollowupReviewTest extends AiFollowupTestCase
         ];
     }
 
-    /** @dataProvider notCeo */
+    #[DataProvider('notCeo')]
     public function test_the_page_and_every_action_are_ceo_only(string $role): void
     {
         $joy = $this->marketer();
@@ -156,7 +157,7 @@ class AiFollowupReviewTest extends AiFollowupTestCase
         ];
     }
 
-    /** @dataProvider badEdits */
+    #[DataProvider('badEdits')]
     public function test_edit_has_the_same_limits_as_the_ai(array $input, string $field): void
     {
         $joy = $this->marketer();

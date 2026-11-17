@@ -5,6 +5,7 @@ namespace Tests\Feature\Checklist;
 use App\Models\AppSetting;
 use App\Models\ChecklistAiFollowup;
 use App\Services\AiFollowups;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
@@ -181,7 +182,7 @@ class AiFollowupDraftTest extends AiFollowupTestCase
         $this->assertCount(1, $this->openAi);
     }
 
-    /** @dataProvider badAnswers */
+    #[DataProvider('badAnswers')]
     public function test_a_failed_or_bad_answer_makes_no_draft_logs_one_line_and_goes_on(string $case): void
     {
         $this->enable();
