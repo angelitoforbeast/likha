@@ -13,7 +13,8 @@ use Illuminate\Support\Facades\Schema;
  */
 class StaffEvents
 {
-    public static function record(int $userId, string $kind, ?string $method = null, ?int $status = null, ?string $ref = null): void
+    /** $source: saan galing ang event (hal. 'ai_followups'); naitatala lang kapag nandoon na ang column. */
+    public static function record(int $userId, string $kind, ?string $method = null, ?int $status = null, ?string $ref = null, ?string $source = null): void
     {
         try {
             if (!Schema::hasTable('staff_events')) {
@@ -21,7 +22,7 @@ class StaffEvents
             }
             $role = DB::table('employee_profiles')->where('user_id', $userId)->value('role');
 
-            DB::table('staff_events')->insert([
+            DB::table('staff_events')->insert(array_merge([
                 'user_id'    => $userId,
                 'role'       => $role,
                 'kind'       => mb_substr($kind, 0, 191),
@@ -29,7 +30,7 @@ class StaffEvents
                 'status'     => $status,
                 'ref'        => $ref !== null ? mb_substr($ref, 0, 64) : null,
                 'created_at' => now(),
-            ]);
+            ], $source !== null && Schema::hasColumn('staff_events', 'source') ? ['source' => mb_substr($source, 0, 32)] : []));
         } catch (\Throwable $e) {
             Log::warning('staff_events: hindi na-record ang event', ['kind' => $kind, 'error' => $e->getMessage()]);
         }

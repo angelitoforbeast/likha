@@ -28,7 +28,7 @@ class AiFollowupDraftTest extends AiFollowupTestCase
         $this->assertSame('draft', $f->review_status);
         $this->assertSame('late', $f->follows_reason);
         $this->assertSame($task->id, (int) $f->follows_task_id);
-        $this->assertSame('2026-11-18', $f->follows_date->toDateString());
+        $this->assertSame('2026-11-18', $f->follows_date);
         $this->assertSame([$joy->id], $f->assignedUsers()->pluck('users.id')->all());
         $this->assertFalse($f->is_active);
         $this->assertSame('once', $f->frequency);
