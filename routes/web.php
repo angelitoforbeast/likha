@@ -936,6 +936,9 @@ Route::post('/ads_manager/meta/compare', [\App\Http\Controllers\MetaAdsControlle
 Route::post('/ads_manager/meta/sync', [\App\Http\Controllers\MetaAdsController::class, 'sync'])->name('ads_manager.meta.sync');
 Route::post('/ads_manager/meta/write-mode', [\App\Http\Controllers\MetaAdsController::class, 'writeMode'])->name('ads_manager.meta.write_mode');
 Route::post('/ads_manager/meta/accounts', [\App\Http\Controllers\MetaAdsController::class, 'accounts'])->name('ads_manager.meta.accounts');
+// Spec 281: ang Meta app (App ID, App Secret, Configuration ID) ng site, CEO lang.
+Route::post('/ads_manager/meta/app', [\App\Http\Controllers\MetaAdsController::class, 'saveApp'])->name('ads_manager.meta.app');
+Route::post('/ads_manager/meta/app/test', [\App\Http\Controllers\MetaAdsController::class, 'testApp'])->name('ads_manager.meta.app.test');
 
     Route::get('/ads_manager/cpp', [\App\Http\Controllers\CPPController::class, 'index'])->name('ads_manager.cpp');
     Route::get('/ads_manager/cpp/data', [\App\Http\Controllers\CPPController::class, 'data'])

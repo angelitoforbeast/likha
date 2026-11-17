@@ -12,7 +12,7 @@
   @enderror
 
   @if (!$meta['set_up'])
-    <p class="text-sm text-gray-600">Meta app not set up yet. Kapag naka-set na ang app, dito magko-connect ng Facebook.</p>
+    <p class="text-sm text-gray-600">Meta app not set up yet. Kapag naka-set na ang app, dito magko-connect ng Facebook.@if ($meta['app']) Ilagay ang Meta app sa ibaba.@endif</p>
   @else
     <div class="flex gap-2 flex-wrap">
       @if ($meta['mine'])
@@ -24,6 +24,87 @@
         <a href="{{ route('ads_manager.meta.connect') }}" class="bg-blue-600 hover:bg-blue-700 text-white text-sm px-3 py-1.5 rounded">Connect Facebook</a>
       @endif
     </div>
+  @endif
+
+  {{-- Ang Meta app ng site (spec 281), CEO lang. Ang App Secret ay hindi kailanman ipinapakita: Set / Not set at Replace lang. --}}
+  @if ($meta['app'])
+    @php
+      $app = $meta['app'];
+      $appErrors = ['app_id', 'app_secret', 'config_id', 'meta_app'];
+      $appOpen = !$meta['set_up'] || $errors->hasAny($appErrors) || session('meta_app_warning');
+      $appSource = fn ($f) => ['saved' => 'saved here', 'env' => 'from the server file (.env)'][$app['sources'][$f] ?? ''] ?? 'none';
+    @endphp
+    <details id="meta-app-settings" class="border-t pt-3"{{ $appOpen ? ' open' : '' }}>
+      <summary class="font-semibold text-sm cursor-pointer select-none">
+        Meta app (CEO): {{ $app['app_id'] ? 'App ID ' . $app['app_id'] : 'not set' }}
+        <span class="meta-app-caret inline-block transition-transform">▸</span>
+      </summary>
+      <style>#meta-app-settings[open] .meta-app-caret { transform: rotate(90deg); }</style>
+      <div class="pt-2 space-y-3 text-sm">
+        @if (session('meta_app_warning'))
+          <div class="rounded bg-yellow-100 text-yellow-800 px-3 py-2">{{ session('meta_app_warning') }}</div>
+        @endif
+        @if ($errors->hasAny($appErrors))
+          <div class="rounded bg-red-100 text-red-800 px-3 py-2">
+            @foreach ($appErrors as $f)
+              @foreach ($errors->get($f) as $m)<div>{{ $m }}</div>@endforeach
+            @endforeach
+          </div>
+        @endif
+
+        <p class="text-xs text-gray-500">Ilagay ang dalawang ito sa Meta app (developers.facebook.com): Facebook Login for Business → Settings, at App settings → Basic.</p>
+        <div class="grid gap-2 sm:grid-cols-2">
+          @foreach (['Redirect URI' => $app['redirect_uri'], 'App Domain' => $app['app_domain']] as $label => $val)
+            <div class="text-xs min-w-0">{{ $label }}
+              <div class="flex gap-2 items-center">
+                <code class="font-mono border rounded p-1 bg-gray-50 break-all">{{ $val }}</code>
+                <button type="button" data-copy="{{ $val }}" class="meta-app-copy bg-gray-200 hover:bg-gray-300 text-gray-800 text-xs px-2 py-1 rounded shrink-0">Copy</button>
+              </div>
+            </div>
+          @endforeach
+        </div>
+
+        <form method="POST" action="{{ route('ads_manager.meta.app') }}" class="flex gap-3 flex-wrap items-end" autocomplete="off">
+          @csrf
+          <label class="text-xs">App ID
+            <input type="text" name="app_id" value="{{ old('app_id', $app['app_id']) }}" inputmode="numeric" class="border rounded p-1 block w-48 font-mono">
+            <span class="text-gray-500">{{ $appSource('app_id') }}</span>
+          </label>
+          <label class="text-xs">App Secret:
+            @if ($app['secret_set'])
+              <span class="px-1.5 rounded bg-green-100 text-green-800">Set</span>
+            @else
+              <span class="px-1.5 rounded bg-red-100 text-red-800">Not set</span>
+            @endif
+            <input type="password" name="app_secret" value="" placeholder="Replace: 32 hex characters" autocomplete="new-password" class="border rounded p-1 block w-64 font-mono">
+            <span class="text-gray-500">{{ $app['secret_set'] ? 'Replace: iwanang blangko para hindi palitan' : 'Required' }} · {{ $appSource('app_secret') }}</span>
+          </label>
+          <label class="text-xs">Configuration ID (optional)
+            <input type="text" name="config_id" value="{{ old('config_id', $app['config_id']) }}" inputmode="numeric" class="border rounded p-1 block w-48 font-mono">
+            <span class="text-gray-500">{{ $appSource('config_id') }}</span>
+          </label>
+          <button class="bg-gray-800 hover:bg-gray-900 text-white text-sm px-3 py-1.5 rounded">Save Meta app</button>
+        </form>
+        <form method="POST" action="{{ route('ads_manager.meta.app.test') }}" class="flex gap-2 items-center flex-wrap">
+          @csrf
+          <button class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm px-3 py-1.5 rounded" onclick="this.disabled=true;this.form.submit();">Test</button>
+          <span class="text-xs text-gray-500">Sinusubok ang naka-save na App ID at App Secret (humihingi ng app token sa Facebook).</span>
+        </form>
+        @if ($app['connections'] > 0)
+          <p class="text-xs text-yellow-800">Kapag pinalitan ang App ID, ang {{ $app['connections'] }} naka-connect na Facebook ay ginawa sa lumang app: kailangan nilang mag-Connect ulit. Hindi sila binubura.</p>
+        @endif
+      </div>
+    </details>
+    <script>
+      document.querySelectorAll('#meta-app-settings .meta-app-copy').forEach(function (b) {
+        b.addEventListener('click', function () {
+          navigator.clipboard.writeText(b.dataset.copy).then(function () {
+            b.textContent = 'Copied';
+            setTimeout(function () { b.textContent = 'Copy'; }, 1500);
+          });
+        });
+      });
+    </script>
   @endif
 
   {{-- Mga naka-connect --}}

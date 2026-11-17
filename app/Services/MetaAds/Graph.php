@@ -38,7 +38,7 @@ class Graph
         if ($full && !self::isGraphUrl($pathOrUrl)) throw new GraphException('Not followed: a paging link to another host.');
         $url = $full ? $this->stripToken($pathOrUrl) : $this->base() . '/' . ltrim($pathOrUrl, '/');
 
-        $secret = (string) config('services.meta_ads.app_secret');
+        $secret = (string) AppConfig::appSecret();
         if ($token !== null && $proof && $secret !== '') {
             $hash = hash_hmac('sha256', $token, $secret);
             // Ang URL ng paging.next ay may sariling query: idinudugtong dito, dahil ang query option ay papalit sa buong query.

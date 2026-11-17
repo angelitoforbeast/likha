@@ -25,19 +25,22 @@ class Connections
     {
     }
 
+    /** Ang Meta app: ang naka-save sa /ads_manager/report (AppConfig), o ang .env kapag walang row. */
     public function appId(): ?string
     {
-        $id = trim((string) config('services.meta_ads.app_id'));
-
-        return $id !== '' ? $id : null;
+        return AppConfig::appId();
     }
 
     /** Facebook Login for Business: ang configuration (permissions) sa Meta app. Kapag wala, scope=ads_read pa rin. */
     public function configId(): ?string
     {
-        $id = trim((string) config('services.meta_ads.config_id'));
+        return AppConfig::configId();
+    }
 
-        return $id !== '' ? $id : null;
+    /** Ang host ng APP_URL: ang App Domain na ilalagay sa Meta app. */
+    public function appDomain(): string
+    {
+        return (string) parse_url((string) config('app.url'), PHP_URL_HOST);
     }
 
     public function redirectUri(): string
@@ -66,7 +69,7 @@ class Connections
      */
     public function connect(int $userId, string $code): array
     {
-        $app = ['client_id' => $this->appId(), 'client_secret' => (string) config('services.meta_ads.app_secret')];
+        $app = ['client_id' => $this->appId(), 'client_secret' => (string) AppConfig::appSecret()];
 
         $short = $this->graph->get('oauth/access_token', $app + ['redirect_uri' => $this->redirectUri(), 'code' => $code]);
         $from  = 'fb_exchange_token';
