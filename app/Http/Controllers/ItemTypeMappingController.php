@@ -12,16 +12,20 @@ class ItemTypeMappingController extends Controller
     /**
      * Ibang item family na ang mga row ng mga pangalang ito → i-recompute ang main item ng mga
      * araw nila (huling 90 araw) at huwag ipakita ang naka-cache na /owner/private numbers.
+     * Sa queue ito (spec 289): sa loob ng request lumampas ito sa 60 s ng nginx (504) kahit na-save na
+     * ang mappings. Isang pending job lang kahit sunod-sunod ang save; pinagsasama ang mga pangalan.
      */
     private function aliasesChanged(array $itemNames): void
     {
         try {
-            app(\App\Services\DailyPrimaryItemService::class)->recomputeForItemNames($itemNames);
+            \App\Jobs\RecomputePrimaryItemsForAliases::forItemNames($itemNames);
         } catch (\Throwable $e) {
-            \Illuminate\Support\Facades\Log::warning('daily_page_primary_item recompute after alias change failed (non-fatal): ' . $e->getMessage());
+            // Naka-save na ang mappings; ang pag-queue lang ang pumalya, kaya hindi dapat masira ang sagot.
+            \Illuminate\Support\Facades\Log::error('RecomputePrimaryItemsForAliases dispatch failed: ' . get_class($e) . ': ' . $e->getMessage());
         }
-        OwnerPrivateController::bumpCacheVersion();
     }
+
+    public const BACKGROUND_NOTE = 'Updating owner reports in the background (a few minutes).';
 
     /**
      * Read-only consolidated view: each item_type and ALL its mapped item_names
@@ -200,7 +204,7 @@ class ItemTypeMappingController extends Controller
         if ($skipped)  $parts[] = "{$skipped} skipped (no change)";
 
         if ($inserted || $updated) {
-            return back()->with('success', implode(', ', $parts) . '.');
+            return back()->with('success', 'Saved. ' . implode(', ', $parts) . '. ' . self::BACKGROUND_NOTE);
         }
 
         return back()->with('error', implode(', ', $parts) ?: 'Nothing saved.');
@@ -233,7 +237,7 @@ class ItemTypeMappingController extends Controller
 
         $this->aliasesChanged([$itemName]);
 
-        return response()->json(['ok' => true]);
+        return response()->json(['ok' => true, 'message' => 'Saved. ' . self::BACKGROUND_NOTE]);
     }
 
     // ── Delete (shared by both UIs) ──────────────────────────────────────────
@@ -242,6 +246,6 @@ class ItemTypeMappingController extends Controller
         $itemName = DB::table('item_type_mappings')->where('id', $id)->value('item_name');
         DB::table('item_type_mappings')->where('id', $id)->delete();
         if ($itemName !== null) $this->aliasesChanged([$itemName]);
-        return back()->with('success', 'Mapping deleted.');
+        return back()->with('success', 'Mapping deleted. ' . self::BACKGROUND_NOTE);
     }
 }

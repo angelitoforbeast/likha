@@ -93,7 +93,7 @@
                   <span class="text-xs whitespace-nowrap w-12 text-center"
                         :class="{ 'text-green-600': status==='saved', 'text-red-500': status==='error', 'text-gray-400': status==='saving' }">
                     <span x-show="status==='saving'">saving…</span>
-                    <span x-show="status==='saved'">✓ saved</span>
+                    <span x-show="status==='saved'">✓ saved, owner reports update in a few minutes</span>
                     <span x-show="status==='error'">✗ error</span>
                   </span>
                 </div>
