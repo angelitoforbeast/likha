@@ -172,7 +172,7 @@ The page also contains the same rows as cards, which show below `md` (768 px). N
 
 `test_AA_3_E_api_blocked_...` shows that a failed attempt also counts for the 10 minutes. `test_AA_3_another_read_in_progress_...` shows that, while the lock is held, neither the page nor Refresh now calls Meta. `test_AA_2_H_...` shows that the report page makes no Graph call.
 
-**4. Branch pushed.** PUSH_EVIDENCE
+**4. Branch pushed.** `git push -u origin feat/284-ad-accounts-health`: new branch on github.com:angelitoforbeast/likha; remote head `a26400fd` matched local HEAD (`git ls-remote`) before this evidence line was committed. Code is `707d9a27`; the later commits are tests and docs.
 
 ## Story changes
 
