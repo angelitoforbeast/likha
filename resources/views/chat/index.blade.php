@@ -14,6 +14,7 @@
     --lc-text: #111827; --lc-muted: #4b5563; --lc-faint: #5b6270; --lc-hover: #f3f4f6; --lc-selected: #eef2ff;
     --lc-accent: #2563eb; --lc-accent-hover: #1d4ed8; --lc-accent-soft: #dbeafe; --lc-on-accent: #ffffff;
     --lc-other: #f3f4f6; --lc-danger: #b91c1c; --lc-ai-bg: #fffbeb; --lc-ai-text: #92400e;
+    --lc-field-edge: #868e9a;
     --lc-top: 64px;
     position: fixed; top: var(--lc-top); left: 0; right: 0; bottom: 0; z-index: 40;
     display: flex; background: var(--lc-bg); color: var(--lc-text);
@@ -33,7 +34,7 @@
   /* ── side: list ── */
   .lc-side { width: 340px; flex: none; display: flex; flex-direction: column; background: var(--lc-panel); border-right: 1px solid var(--lc-line); min-height: 0; }
   .lc-side-head { padding: 14px 16px 10px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-  .lc-side-head h1 { font-size: 20px; font-weight: 700; margin: 0; letter-spacing: -.01em; }
+  .lc-side-head .lc-h { font-size: 20px; font-weight: 700; margin: 0; letter-spacing: -.01em; }
   .lc-btn { display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--lc-line-strong); background: var(--lc-panel); border-radius: 9px; padding: 7px 12px; font-size: 14px; font-weight: 600; color: var(--lc-text); }
   .lc-btn:hover { background: var(--lc-hover); }
   .lc-btn.primary { background: var(--lc-accent); border-color: var(--lc-accent); color: var(--lc-on-accent); }
@@ -43,8 +44,8 @@
   .lc-icon-btn:hover { background: var(--lc-hover); color: var(--lc-text); }
   .lc-seg { margin: 0 16px 10px; display: grid; grid-template-columns: 1fr 1fr; background: var(--lc-hover); border-radius: 9px; padding: 3px; }
   .lc-seg button { border: 0; background: transparent; border-radius: 7px; padding: 5px 8px; font-size: 13px; font-weight: 600; color: var(--lc-muted); }
-  .lc-seg button[aria-pressed="true"] { background: var(--lc-panel); color: var(--lc-text); box-shadow: 0 1px 2px rgba(17, 24, 39, .08); }
-  .lc-field { width: 100%; border: 1px solid var(--lc-line-strong); border-radius: 9px; padding: 8px 11px; background: var(--lc-panel); font-size: 14px; }
+  .lc-seg button[aria-pressed="true"] { background: var(--lc-panel); color: var(--lc-text); box-shadow: inset 0 0 0 1px var(--lc-field-edge), 0 1px 2px rgba(17, 24, 39, .08); }
+  .lc-field { width: 100%; border: 1px solid var(--lc-field-edge); border-radius: 9px; padding: 8px 11px; background: var(--lc-panel); font-size: 14px; }
   .lc-field::placeholder { color: var(--lc-faint); }
   .lc-filter { padding: 0 16px 8px; }
   .lc-list { list-style: none; margin: 0; padding: 0 8px 8px; overflow-y: auto; flex: 1; min-height: 0; }
@@ -103,6 +104,7 @@
   .lc-bubble { position: relative; padding: 8px 12px; border-radius: 18px; background: var(--lc-other); color: var(--lc-text); overflow-wrap: anywhere; word-break: break-word; max-width: 100%; }
   .lc-msg.me .lc-bubble { background: var(--lc-accent); color: var(--lc-on-accent); }
   .lc-msg.me .lc-bubble a { color: var(--lc-on-accent); }
+  .lc-msg.me .lc-bubble :focus-visible { outline-color: var(--lc-on-accent); outline-offset: 1px; }
   .lc-bubble a { color: var(--lc-accent-hover); text-decoration: underline; text-underline-offset: 2px; }
   .lc-bubble.removed { background: transparent; border: 1px solid var(--lc-line-strong); color: var(--lc-faint); font-style: italic; }
   .lc-msg.me .lc-bubble.removed { background: transparent; color: var(--lc-faint); }
@@ -154,7 +156,7 @@
   .lc-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .lc-chip button { border: 0; background: transparent; width: 24px; height: 24px; border-radius: 6px; color: var(--lc-muted); }
   .lc-row-compose { display: flex; align-items: flex-end; gap: 6px; }
-  .lc-input { flex: 1; min-width: 0; resize: none; border: 1px solid var(--lc-line-strong); border-radius: 20px; padding: 9px 14px; max-height: 150px; line-height: 1.4; background: var(--lc-bg); }
+  .lc-input { flex: 1; min-width: 0; resize: none; border: 1px solid var(--lc-field-edge); border-radius: 20px; padding: 9px 14px; max-height: 150px; line-height: 1.4; background: var(--lc-bg); }
   .lc-input::placeholder { color: var(--lc-faint); }
   .lc-input:focus-visible { outline-offset: 0; border-radius: 20px; }
   .lc-send { width: 40px; height: 40px; border-radius: 50%; border: 0; background: var(--lc-accent); color: var(--lc-on-accent); display: grid; place-items: center; flex: none; }
@@ -199,7 +201,8 @@
     #lc[data-view="thread"] .lc-side { display: none; }
     .lc-col { max-width: 80%; }
     .lc-act { opacity: 1; width: 40px; height: 40px; }
-    .lc-msg:not(.show) .lc-act { display: none; }
+    /* Hidden until the message is tapped, but still reachable with the keyboard. */
+    .lc-msg:not(.show) .lc-act:not(:focus-visible):not([aria-expanded="true"]) { opacity: 0; pointer-events: none; }
     /* 16 px: iOS Safari zooms into any smaller field on focus. */
     .lc-input, .lc-field { font-size: 16px; }
   }
@@ -210,7 +213,7 @@
   {{-- ── list ── --}}
   <section class="lc-side" aria-label="Conversations" style="position: relative">
     <div class="lc-side-head">
-      <h1>Chats</h1>
+      <h2 class="lc-h">Chats</h2>
       <button type="button" class="lc-btn primary" id="lc-new-btn"><i class="fa-solid fa-pen-to-square" aria-hidden="true"></i> New chat</button>
     </div>
     @if ($boot['me']['ceo'])
@@ -324,7 +327,7 @@
 <div class="lc-lightbox" id="lc-lightbox" hidden role="dialog" aria-modal="true" aria-label="Photo">
   <a id="lc-lightbox-open" href="#" target="_blank" rel="noopener">Open original</a>
   <button type="button" class="lc-icon-btn" id="lc-lightbox-close" aria-label="Close photo"><i class="fa-solid fa-xmark fa-lg" aria-hidden="true"></i></button>
-  <img id="lc-lightbox-img" alt="">
+  <div id="lc-lightbox-frame" style="display: contents"></div>
 </div>
 
 <template id="lc-ai-mark"><span class="lc-ai" data-ai-mark title="AI member">AI</span></template>
@@ -409,7 +412,7 @@
     if (banner) top = Math.max(top, banner.getBoundingClientRect().bottom);
     root.style.setProperty('--lc-top', Math.max(0, Math.round(top)) + 'px');
   }
-  fitTop(); window.addEventListener('resize', fitTop);
+  fitTop(); window.addEventListener('resize', fitTop); window.addEventListener('load', fitTop);
 
   // ── list ──
   function setRows(rows, replace) {
@@ -423,7 +426,10 @@
       .filter((r) => !q || (r.title || '').toLowerCase().includes(q))
       .sort((a, b) => (b.at || '').localeCompare(a.at || '') || b.id - a.id);
     const list = $('lc-list');
+    const focusedRow = document.activeElement && document.activeElement.closest && document.activeElement.closest('.lc-row');
+    const keepRow = focusedRow ? focusedRow.dataset.id : null;
     list.replaceChildren(...rows.map(rowEl));
+    if (keepRow) { const again = list.querySelector(`.lc-row[data-id="${keepRow}"]`); if (again) again.focus({ preventScroll: true }); }
     $('lc-list-loading').hidden = true;
     $('lc-list-empty').hidden = S.rows.size > 0;
     list.hidden = S.rows.size === 0;
@@ -440,7 +446,7 @@
     const lastText = last ? (showSender ? `${last.sender}: ${last.text}` : last.text) : (r.kind === 'group' ? 'Group created' : 'No messages yet');
     return h('li', {},
       h('button', {
-        type: 'button', class: 'lc-row' + (r.unread ? ' unread' : '') + (r.left ? ' left' : ''),
+        type: 'button', class: 'lc-row' + (r.unread ? ' unread' : '') + (r.left ? ' left' : ''), 'data-id': r.id,
         'aria-current': S.open === r.id ? 'true' : 'false', onclick: () => openConv(r.id),
       },
         avatar(r.avatar),
@@ -470,7 +476,7 @@
   // ── thread ──
   async function openConv(id, opts = {}) {
     closeNew(); closeInfo();
-    S.open = id;
+    S.open = id; S.conv = null;
     root.dataset.view = 'thread';
     if (!opts.keepUrl) {
       const st = history.state || {};
@@ -550,7 +556,18 @@
       out.push(msgEl(m, cont, arrivedIds.has(m.id)));
       prev = m;
     }
+    const active = document.activeElement;
+    const keepLi = active && active.closest && active.closest('#lc-msgs > li');
+    const keep = keepLi ? { id: keepLi.dataset.id, cls: ['lc-act', 'lc-quote', 'lc-file'].find((c) => active.classList.contains(c)) } : null;
+    const openMenu = list.querySelector('.lc-menu');
+    const menuId = openMenu ? openMenu.closest('li').dataset.id : null;
     list.replaceChildren(...out);
+    if (menuId) { const li = list.querySelector(`li[data-id="${menuId}"]`); const mm = byId(Number(menuId)); if (li && mm && !mm.removed) { li.classList.add('show'); menu(li, mm, false); } }
+    else if (keep) {
+      const li = list.querySelector(`li[data-id="${keep.id}"]`);
+      const el = li && (keep.cls ? li.querySelector('.' + keep.cls) : null);
+      if (el) el.focus({ preventScroll: true });
+    }
     $('lc-earlier').hidden = !S.hasMore;
     const empty = $('lc-thread-empty');
     empty.hidden = S.msgs.length > 0;
@@ -564,7 +581,8 @@
     if (m.pending) cls.push('pending'); if (m.failed) cls.push('failed');
     const showName = !me && !cont && (S.conv.kind === 'group' || m.sender.kind === 'ai');
     const col = h('div', { class: 'lc-col' });
-    if (showName) col.append(h('div', { class: 'lc-name' }, m.sender.name, m.sender.kind === 'ai' ? aiMark() : null));
+    col.append(h('span', { class: 'lc-sr', text: `${me ? 'You' : (m.sender.name || '')}${m.sender.kind === 'ai' ? ' (AI)' : ''}, ${fullTime(m.at)}: ` }));
+    if (showName) col.append(h('div', { class: 'lc-name' }, m.sender.name, m.sender.kind === 'ai' ? [' ', aiMark()] : null));
 
     const bubble = h('div', { class: 'lc-bubble' + (m.removed ? ' removed' : '') });
     if (m.removed) bubble.textContent = 'Message removed';
@@ -591,7 +609,7 @@
     const li = h('li', { class: cls.join(' '), 'data-id': m.id });
     li.append(h('div', { class: 'lc-av-slot' }, !me && !cont ? avatar({ ...m.sender, ai: m.sender.kind === 'ai' }, 'sm') : null), col);
     if (!m.pending && !m.failed && !m.removed && (S.conv.me.can_post)) {
-      li.append(h('button', { type: 'button', class: 'lc-icon-btn lc-act', 'aria-label': 'Message actions', 'aria-haspopup': 'menu', onclick: (e) => { e.stopPropagation(); menu(li, m); } }, icon('fa-solid fa-ellipsis')));
+      li.append(h('button', { type: 'button', class: 'lc-icon-btn lc-act', 'aria-label': `Actions for ${me ? 'your message' : 'the message from ' + m.sender.name}`, 'aria-haspopup': 'menu', 'aria-expanded': 'false', onclick: (e) => { e.stopPropagation(); menu(li, m); } }, icon('fa-solid fa-ellipsis')));
     }
     li.addEventListener('click', (e) => { if (e.target.closest('a,button')) return; li.classList.toggle('show'); });
     if (!m.pending && !m.failed && !m.removed && S.conv.me.can_post) {
@@ -599,13 +617,27 @@
     }
     return li;
   }
-  function closeMenus() { root.querySelectorAll('.lc-menu').forEach((x) => x.remove()); }
-  function menu(li, m) {
-    const had = li.querySelector('.lc-menu'); closeMenus(); if (had) return;
+  function closeMenus(refocus) {
+    root.querySelectorAll('.lc-menu').forEach((x) => {
+      const btn = x.closest('li') && x.closest('li').querySelector('.lc-act');
+      if (btn) { btn.setAttribute('aria-expanded', 'false'); if (refocus) btn.focus(); }
+      x.remove();
+    });
+  }
+  function menu(li, m, focusFirst = true) {
+    const had = li.querySelector('.lc-menu'); closeMenus(); if (had && focusFirst) return;
     const items = [h('button', { type: 'button', role: 'menuitem', onclick: () => { closeMenus(); startReply(m); } }, icon('fa-solid fa-reply'), 'Reply')];
     if (m.sender.me) items.push(h('button', { type: 'button', role: 'menuitem', class: 'danger', style: 'color:var(--lc-danger)', onclick: () => { closeMenus(); removeMsg(m); } }, icon('fa-regular fa-trash-can'), 'Remove'));
     const box = h('div', { class: 'lc-menu', role: 'menu' }, items);
-    li.append(box); items[0].focus();
+    box.addEventListener('keydown', (e) => {
+      const i = items.indexOf(document.activeElement);
+      if (e.key === 'ArrowDown') { e.preventDefault(); items[(i + 1) % items.length].focus(); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); items[(i - 1 + items.length) % items.length].focus(); }
+      else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeMenus(true); }
+      else if (e.key === 'Tab') closeMenus();
+    });
+    const btn = li.querySelector('.lc-act'); if (btn) btn.setAttribute('aria-expanded', 'true');
+    li.append(box); if (focusFirst) items[0].focus();
   }
   document.addEventListener('click', (e) => { if (!e.target.closest('.lc-menu')) closeMenus(); });
   function jumpTo(id) {
@@ -736,7 +768,7 @@
       S.fails = 0; $('lc-reconnect').hidden = true;
       S.since = data.now;
       if (data.conversations.length) setRows(data.conversations.map((r) => (r.id === S.open ? { ...r, unread: 0 } : r)));
-      if (data.thread && S.open === conv) {
+      if (data.thread && S.open === conv && S.conv && S.conv.id === conv) {
         const stick = nearBottom();
         const fresh = data.thread.messages.filter((m) => !byId(m.id));
         for (const id of data.thread.removed) { const m = byId(id); if (m) { m.removed = true; m.html = null; m.text = null; m.files = []; } }
@@ -765,10 +797,10 @@
     closeInfo(); $('lc-new').hidden = false; S.picked.clear(); setMode('direct');
     $('lc-people-q').value = ''; $('lc-new-err').hidden = true; searchPeople(); $('lc-people-q').focus();
   }
-  function closeNew() { $('lc-new').hidden = true; }
+  function closeNew(refocus) { const was = !$('lc-new').hidden; $('lc-new').hidden = true; if (was && refocus) $('lc-new-btn').focus(); }
   $('lc-new-btn').addEventListener('click', openNew);
   root.querySelectorAll('[data-open-new]').forEach((b) => b.addEventListener('click', openNew));
-  root.querySelectorAll('[data-close-new]').forEach((b) => b.addEventListener('click', closeNew));
+  root.querySelectorAll('[data-close-new]').forEach((b) => b.addEventListener('click', () => closeNew(true)));
   function setMode(mode) {
     S.mode = mode;
     root.querySelectorAll('[data-mode]').forEach((x) => x.setAttribute('aria-pressed', String(x.dataset.mode === mode)));
@@ -816,8 +848,12 @@
   });
 
   // ── group info ──
-  function closeInfo() { $('lc-info').hidden = true; }
-  $('lc-info-close').addEventListener('click', closeInfo);
+  function closeInfo(refocus) {
+    const was = !$('lc-info').hidden;
+    $('lc-info').hidden = true; $('lc-thread').inert = false;
+    if (was && refocus) $('lc-info-btn').focus();
+  }
+  $('lc-info-close').addEventListener('click', () => closeInfo(true));
   $('lc-info-btn').addEventListener('click', renderInfo);
   function renderInfo() {
     const c = S.conv; const me = c.me; const body = $('lc-info-body');
@@ -847,7 +883,7 @@
     if (me.can_leave) parts.push(h('button', { type: 'button', class: 'lc-btn danger', onclick: () => { if (confirm('Leave this group? You will not get new messages.')) act('POST', `/chat/${c.id}/leave`); } }, icon('fa-solid fa-arrow-right-from-bracket'), 'Leave group'));
     parts.push(h('p', { class: 'lc-msg-err', id: 'lc-info-err', hidden: true }));
     body.replaceChildren(...parts);
-    $('lc-info').hidden = false;
+    $('lc-info').hidden = false; $('lc-thread').inert = true; $('lc-info-close').focus();
   }
   async function act(method, url, payload) {
     try { await api(method, url, payload); await openConv(S.open, { keepUrl: true }); poll(); }
@@ -858,10 +894,10 @@
   let lastFocus = null;
   function lightbox(f) {
     lastFocus = document.activeElement;
-    $('lc-lightbox-img').src = f.url; $('lc-lightbox-img').alt = f.name; $('lc-lightbox-open').href = f.url;
+    $('lc-lightbox-frame').replaceChildren(h('img', { src: f.url, alt: f.name })); $('lc-lightbox-open').href = f.url;
     $('lc-lightbox').hidden = false; $('lc-lightbox-close').focus();
   }
-  function closeLightbox() { $('lc-lightbox').hidden = true; $('lc-lightbox-img').src = ''; lastFocus && lastFocus.focus(); }
+  function closeLightbox() { $('lc-lightbox').hidden = true; $('lc-lightbox-frame').replaceChildren(); if (lastFocus && lastFocus.isConnected) lastFocus.focus(); }
   $('lc-lightbox-close').addEventListener('click', closeLightbox);
   $('lc-lightbox').addEventListener('click', (e) => { if (e.target.id === 'lc-lightbox') closeLightbox(); });
   $('lc-lightbox').addEventListener('keydown', (e) => {
@@ -872,9 +908,9 @@
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
     if (!$('lc-lightbox').hidden) closeLightbox();
-    else if (root.querySelector('.lc-menu')) closeMenus();
-    else if (!$('lc-info').hidden) closeInfo();
-    else if (!$('lc-new').hidden) closeNew();
+    else if (root.querySelector('.lc-menu')) closeMenus(true);
+    else if (!$('lc-info').hidden) closeInfo(true);
+    else if (!$('lc-new').hidden) closeNew(true);
     else if (S.reply) { S.reply = null; renderReply(); }
   });
 
