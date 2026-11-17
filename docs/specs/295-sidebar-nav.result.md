@@ -30,10 +30,73 @@ Read first: `components/layout.blade.php`, `components/navlink.blade.php`, `NavL
 
 ## What shipped
 
+**Migration** `database/migrations/2026_11_27_100000_add_nav_sections_and_pins.php`
+- `nav_links.section` (string 30, nullable, after `icon`) and `users.nav_pins` (json, nullable), each behind `Schema::hasColumn`.
+- Fills `section` for every row that has none, by `route_url` (leading/trailing `/` normalised) from the spec's inventory, frozen in the migration; any other url gets `More`. Rows that already have a section are left alone, so a rerun keeps the CEO's choices. Visibility rows are not touched.
+- `down()` drops both columns.
+
+**Code**
+- `app/Support/NavSections.php` (new): section order and icons (Home, Orders, Shipping, Marketing, Chat, AI, Money, Settings, More), the live url map, `of($link)` (stored section if valid, else the url map, else More), `group()`.
+- `app/Support/NavMenu.php` (new): the links a role sees (`NavLink::visibleFor` + `ChatblastNav::mainLinks`, as the old layout did), the pins among them (max 6, hidden ones dropped), palette entries.
+- `app/Http/Controllers/NavPinsController.php` (new) + `POST /nav/pins` (`nav.pins`, same auth + allowed-IP group as `/nav/view-as`): saves the signed-in person's own list; `pins` must be an array of at most 6 integers (else 422); ids their own role cannot see and repeats are dropped silently.
+- `NavLink`: `section` fillable; `defaultData()` gains the 9 links the migrations added after May 2026 (users_admin, supply_finance, playbook, chatblast, chatbot, botcake_accounts, storage, encoding_timetable, ads_daily_output) with their migration visibility, and every row carries its `section`.
+- `NavSettingsController`: Section select per row on `/owner/nav-settings`, saved and validated against the section list (CEO only, the existing check); Reset writes each default's section; "Add to nav" gives a new link its url's section (More when unknown). All section writes skip themselves while the column does not exist.
+- `User`: `nav_pins` cast to array.
+
+**Components**
+- `components/sidebar.blade.php` (new): Likha mark, Pinned group (drag or Alt+↑/↓ to reorder, pin/unpin on hover or focus, inline error and revert when saving fails), sections with collapsible uppercase headers (remembered per browser), icon + label rows, one `aria-current` row, checklist badge (same `data-badge` / `data-count` / `data-tone` attributes), empty state for a role with no links, 64 px rail with tooltips, drawer under 1024 px (focus moves in, Tab is kept inside, Esc / scrim / close returns focus).
+- `components/nav-palette.blade.php` (new): Ctrl/Cmd+K or the search button; every visible link grouped by section, last 5 visited (localStorage) on top; every typed word must match label, section or url; ↑ ↓ Enter Esc; focus returns to where it was.
+- `components/layout.blade.php`: the dark icon bar and the h1 band are replaced by the sidebar and a slim white fixed top bar (page title, search, avatar menu with name, role, View as for the CEO, Profile, Log out). Content sits beside the sidebar; the full-width list is unchanged. Sidebar state is applied before paint by a small head script.
+- `components/navlink.blade.php`: now one sidebar row.
+
 ## Evidence per done-when item
 
 ## Story changes
 
+- **NV-2, checklist badge:** the old layout drew the badge twice (desktop bar and phone panel). The one sidebar now serves both, so the badge appears once per page. `tests/Feature/Checklist/ChecklistBadgeTest.php` `test_S_051_20` changes its count from 2 to 1; its other assertions (count, tone, title, team badge on `/checklist` and any layout page) are unchanged and pass.
+- **NV-2, top bar:** the separate red Logout button became a "Log out" row in the avatar menu, as the spec's avatar menu lists it. The page heading band became the bar's title.
+- **NV-4:** pinning is off while the CEO uses View as (ruling 7).
+- No other story changed.
+
 ## Rulings
 
+Choices the spec left open, each with its reason:
+1. **The grouping does not depend on the stored column alone.** `NavSections::of()` uses the stored section when it is a valid name, else the url's place in the inventory, else More. Specs 293 (`/checklist/ai-followups`) and 296 (`/chat`) add links in parallel, and their migrations may run before or after mine, or (293) not set `section` at all. With this fallback those links still land in AI and Chat.
+2. **The migration fills only empty sections.** A rerun, or a deploy after the CEO has moved links, keeps the CEO's choices.
+3. **The migration keeps its own frozen copy of the url list**, and `NavSections::BY_URL` holds the live one. A migration should not change meaning when app code changes later.
+4. **`/chatblast/page-settings` → Chat.** `ChatblastNav::mainLinks` rewrites the Page Settings link to this url for roles without `/chatblast`. It is in the live map; no stored row has this url.
+5. **Hidden JNT config links (`/jnt/accounts`, `/jnt/orders` …) go to More.** They are not in the inventory, and no role sees them (the JNT Config hub replaced them in May), so More is invisible to everyone for them. The CEO can move them in Nav settings.
+6. **Spec says "10 links added after May 2026" that Reset misses; I found 9 in the migrations.** These are: users_admin, supply_finance, playbook, chatblast, chatbot, botcake_accounts, storage, encoding_timetable, ads_daily_output. prompt_generator and jnt_config were already in the catalogue. The rows production has that no migration made (Checklist, Chat, Astra, Boardroom, Page Settings, Access Report …) cannot go into `defaultData()` because their keys are unknown. Reset leaves them alone, as it always did. A test asserts that every migration-made link is in the catalogue with the same url and visibility.
+7. **Pins are validated against the person's own role, not the View as role.** In preview the pin buttons are hidden, because pinning there would save a list based on another role's links. Pins to links hidden in the previewed role are not shown (the test covers this).
+8. **Hidden or unknown pin ids are dropped silently, not refused.** A link can be hidden between page load and save. The sidebar would otherwise fail on an honest click. More than 6 ids, or non-integers, return 422.
+9. **The top bar stays 64 px.** About 10 pages offset themselves with `mt-16` / `top-16` (checklist, boardroom …). A shorter bar would leave gaps or hide content under it.
+10. **The page h1 band is removed and the title moves into the top bar.** The spec asks for a slim top bar with the page title. Pages that draw their own header (checklist, J&T RTS, prompt generator, boardroom) keep it, and the bar shows their title as plain text so the page keeps one h1.
+11. **Likha's mark is a blue "L" tile plus the word Likha.** The repository has no logo file. The old layout loaded a Facebook logo from vecteezy.com, which was someone else's mark.
+12. **The accent is blue-600**, already the primary button colour on the pages.
+13. **One sidebar serves desktop and phone.** The old layout drew the links twice (bar + phone panel). The checklist badge therefore appears once, so I changed `ChecklistBadgeTest::test_S_051_20` from 2 to 1 (see Story changes).
+14. **Local screenshot data.** The screenshots were taken against a scratchpad sqlite built by an uncommitted throwaway test that ran this repo's migrations on it (13 MySQL-only migrations were skipped). It was seeded with three users and the hand-made production rows (Checklist, Astra, Boardroom, Page Settings, a Profit Calculator link to show More). It was served by `php artisan serve` on 127.0.0.1 and captured by headless Chrome. `.env` in the worktree (git-ignored, copied from `.env.example`) points at that file.
+15. **Base run.** My first base run shared this worktree while I edited it, so I stopped it. The base totals come from a read-only export of 8164024f (`git archive` into the scratchpad, vendor copied from this worktree).
+
 ## Merge danger
+
+**What ships**
+- One migration (two nullable columns plus a data fill).
+- Three new PHP classes (`NavSections`, `NavMenu`, `NavPinsController`) and one new route, `POST /nav/pins`.
+- Changes to `NavLink`, `NavSettingsController`, `User` and `owner/nav_settings.blade.php`.
+- Two new components; `layout.blade.php` and `navlink.blade.php` rewritten.
+- The layout change reaches all 174 `<x-layout>` pages. `layouts/chatblast.blade.php` is untouched.
+
+**Risk points**
+- Content now starts 248 px from the left at ≥ 1024 px, or 64 px in the rail. A page with its own `position: fixed` full-width bar under the top bar, or a `100vw` width, could run under the sidebar. I found none among the five pages checked. Wide tables still scroll inside their own boxes.
+- Pages lose the white h1 band; the title is in the bar.
+- **Conflicts with parallel specs:**
+  - 296 adds a `/chat` link and sets `section` if the column exists.
+  - 293 adds `/checklist/ai-followups`.
+  - Both land in the right section whatever the migration order (ruling 1).
+  - 294 does not touch these files.
+  - A textual merge conflict is possible only if another branch also edits `layout.blade.php`, `NavLink.php`, `NavSettingsController.php`, `nav_settings.blade.php` or the `/nav/view-as` lines of `routes/web.php`.
+- `defaultData()` now contains 9 more rows. Pressing Reset in nav settings will create or reset those links with their migration visibility. That is the purpose of the change, but anything the CEO customised on those 9 is reset like every other row.
+
+**How to revert to the old nav**
+- Revert the UI commits. The layout reads `section` and `nav_pins` only through `NavSections` / `NavMenu`, so the old layout works with the columns still present.
+- To remove the columns too: `php artisan migrate:rollback --path=database/migrations/2026_11_27_100000_add_nav_sections_and_pins.php`. It drops both columns. Visibility rows were never changed, so nothing else needs undoing.

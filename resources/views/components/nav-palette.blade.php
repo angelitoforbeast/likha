@@ -22,7 +22,7 @@
     <ul class="lk-pal-list" id="lk-pal-list" role="listbox" aria-label="Pages" x-ref="list">
       <template x-for="(r, i) in rows()" :key="r.key">
         <li role="presentation">
-          <p class="lk-pal-group" x-show="r.group" x-text="r.group"></p>
+          <p class="lk-pal-group" x-show="r.group" x-text="r.group" aria-hidden="true"></p>
           <a :href="r.url" class="lk-pal-opt" role="option" :id="'lk-pal-opt-' + i" :aria-selected="(i === sel).toString()"
              :class="i === sel && 'is-sel'" x-on:mousemove="sel = i" tabindex="-1">
             <span class="lk-icon" aria-hidden="true"><i :class="r.icon"></i></span>
@@ -64,10 +64,14 @@
       rows() {
         const terms = words(this.q);
         if (terms.length) {
+          // Label starts with a word first, then label contains it, then section or url only.
+          const rank = e => { const l = e.label.toLowerCase(); return terms.some(t => l.startsWith(t)) ? 0 : terms.some(t => l.includes(t)) ? 1 : 2; };
           return entries.filter(e => terms.every(t => hay(e).includes(t)))
+            .map((e, i) => [rank(e), i, e]).sort((a, b) => a[0] - b[0] || a[1] - b[1]).map(x => x[2])
             .map((e, i) => ({ ...e, key: 'm' + e.id, group: i === 0 ? 'Pages' : '' }));
         }
-        const recent = read().map(u => entries.find(e => e.url === u)).filter(Boolean);
+        // The page you are on is not "back": Recent starts with the one before it.
+        const recent = read().filter(u => path(u) !== here).map(u => entries.find(e => e.url === u)).filter(Boolean);
         const out = recent.map((e, i) => ({ ...e, key: 'r' + e.id, group: i === 0 ? 'Recent' : '' }));
         let last = null;
         for (const e of entries) { // already in sidebar order, section by section

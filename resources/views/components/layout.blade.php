@@ -93,10 +93,18 @@
     .lk-pin { position: absolute; top: .25rem; right: .25rem; display: grid; place-items: center; width: 1.75rem; height: 1.75rem;
       border-radius: .375rem; color: var(--lk-faint); background: var(--lk-hover); opacity: 0; font-size: .75rem; transition: opacity .15s, color .15s; }
     .lk-row:hover .lk-pin, .lk-pin:focus-visible { opacity: 1; }
+    .lk-row.has-pin .lk-link { padding-right: 2.25rem; }
+    @media (hover: none) { .lk-pin { opacity: 1; background: transparent; color: #d1d5db; } .lk-pin.is-on { color: var(--lk-accent); } }
     .lk-pin:hover { color: var(--lk-accent); }
     .lk-pin.is-on { color: var(--lk-accent); }
     .lk-pinned .lk-pin { background: transparent; }
-    .lk-pinned .lk-row:not(:hover) .lk-pin:not(:focus-visible) { opacity: 0; }
+    @media (hover: hover) { .lk-pinned .lk-row:not(:hover) .lk-pin:not(:focus-visible) { opacity: 0; } }
+    /* The current page reached from a pin: a quieter mark than the section row, which carries aria-current. */
+    .lk-pinned .lk-link.is-here { color: var(--lk-accent-ink); }
+    .lk-pinned .lk-link.is-here .lk-icon { color: var(--lk-accent); }
+    /* A closed section that holds the current page says so. */
+    .lk-section.has-current .lk-section-head { color: var(--lk-accent-ink); }
+    .lk-pin-note { margin: .25rem .5rem 0; font-size: .75rem; line-height: 1.4; color: var(--lk-muted); }
     .lk-pin:disabled { cursor: not-allowed; color: #d1d5db; }
     .lk-pinned .lk-link { cursor: grab; }
     .lk-pin-error { margin: .25rem .5rem 0; font-size: .75rem; color: #b91c1c; }
@@ -133,7 +141,7 @@
     .lk-pal-scrim { position: fixed; inset: 0; z-index: 60; background: rgb(17 24 39 / .4); }
     .lk-pal { position: fixed; z-index: 61; top: 1rem; left: 1rem; right: 1rem; max-width: 35rem; margin: 0 auto; display: flex; flex-direction: column;
       max-height: calc(100dvh - 2rem); border-radius: .75rem; background: #fff; box-shadow: 0 24px 48px -12px rgb(17 24 39 / .35); overflow: hidden; }
-    .lk-pal-search { display: flex; align-items: center; gap: .75rem; padding: 0 1rem; height: 3.25rem; border-bottom: 1px solid var(--lk-line); color: var(--lk-muted); }
+    .lk-pal-search { flex-shrink: 0; display: flex; align-items: center; gap: .75rem; padding: 0 1rem; height: 3.25rem; border-bottom: 1px solid var(--lk-line); color: var(--lk-muted); }
     .lk-pal-search input { flex: 1; min-width: 0; height: 100%; border: 0; outline: 0; background: transparent; font-size: 1rem; color: var(--lk-ink); }
     .lk-pal-search input::placeholder { color: var(--lk-muted); }
     .lk-pal-list { flex: 1; overflow-y: auto; margin: 0; padding: .375rem; list-style: none; scrollbar-width: thin; }
@@ -144,7 +152,7 @@
     .lk-pal-label { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
     .lk-pal-section { flex-shrink: 0; font-size: .75rem; color: var(--lk-muted); }
     .lk-pal-empty { padding: 2rem 1rem; text-align: center; font-size: .875rem; color: var(--lk-muted); }
-    .lk-pal-foot { display: none; gap: 1rem; padding: .5rem 1rem; border-top: 1px solid var(--lk-line); background: #f9fafb; font-size: .75rem; color: var(--lk-muted); }
+    .lk-pal-foot { flex-shrink: 0; display: none; gap: 1rem; padding: .5rem 1rem; border-top: 1px solid var(--lk-line); background: #f9fafb; font-size: .75rem; color: var(--lk-muted); }
     .lk-pal-foot .lk-kbd { margin-right: .125rem; }
 
     @media (min-width: 640px) {
@@ -152,7 +160,7 @@
       .lk-search { width: 15rem; }
       .lk-search-text { display: inline; flex: 1; text-align: left; }
       .lk-search .lk-kbd { display: inline-block; }
-      .lk-pal { top: 12vh; max-height: 70vh; }
+      .lk-pal { top: 15vh; max-height: 70vh; }
       .lk-pal-foot { display: flex; }
     }
     @media (min-width: 1024px) {
@@ -185,7 +193,7 @@
     html[data-nav-closed~="{{ $sectionName }}"] [data-nav-toggle="{{ $sectionName }}"] .lk-chevron { transform: rotate(-90deg); }
     @endforeach
     @media (prefers-reduced-motion: reduce) {
-      .lk-sidebar, .lk-scrim, .lk-topbar, .lk-main, .lk-chevron { transition: none !important; }
+      .lk-sidebar, .lk-scrim, .lk-topbar, .lk-main, .lk-chevron, .lk-pal, .lk-pal-scrim, .lk-menu { transition: none !important; }
     }
   </style>
 </head>
@@ -244,7 +252,7 @@
     @if($navUser)
       <div class="relative" x-data="{ open: false }" x-on:click.outside="open = false" x-on:keydown.escape="open && (open = false, $refs.btn.focus())">
         <button type="button" x-ref="btn" class="flex items-center gap-2 rounded-full p-0.5 hover:bg-gray-100" x-on:click="open = !open"
-                :aria-expanded="open.toString()" aria-haspopup="menu" aria-label="Account menu for {{ $navUser->name }}">
+                :aria-expanded="open.toString()" aria-controls="lk-account" aria-label="Account menu for {{ $navUser->name }}">
           @if($navUser->profile_picture)
             <img src="{{ $navUser->profile_picture }}" class="lk-avatar" alt="">
           @else
@@ -254,7 +262,7 @@
             <span class="lk-chip hidden sm:inline-block" data-nav-preview>Preview</span>
           @endif
         </button>
-        <div class="lk-menu" role="menu" x-show="open" x-cloak x-transition.opacity.duration.150ms>
+        <div class="lk-menu" id="lk-account" x-show="open" x-cloak x-transition.opacity.duration.150ms>
           <div class="px-2.5 pb-2 pt-1.5">
             <div class="truncate text-sm font-semibold text-gray-900">{{ $navUser->name }}</div>
             <div class="text-xs text-gray-500">{{ $actualRole ?? 'No role' }}</div>
@@ -280,10 +288,10 @@
           @endif
 
           <div class="border-t border-gray-100 pt-1">
-            <a href="{{ url('/profile') }}" class="lk-menu-item" role="menuitem"><i class="fa-regular fa-user" aria-hidden="true"></i>Profile</a>
+            <a href="{{ url('/profile') }}" class="lk-menu-item"><i class="fa-solid fa-user" aria-hidden="true"></i>Profile</a>
             <form method="POST" action="{{ route('logout') }}">
               @csrf
-              <button type="submit" class="lk-menu-item" role="menuitem"><i class="fa-solid fa-arrow-right-from-bracket" aria-hidden="true"></i>Log out</button>
+              <button type="submit" class="lk-menu-item"><i class="fa-solid fa-arrow-right-from-bracket" aria-hidden="true"></i>Log out</button>
             </form>
           </div>
         </div>
@@ -302,7 +310,7 @@
 @endphp
 @if ($storageBanner)
   <div data-storage-banner="{{ $storageBanner['tone'] }}" role="alert"
-       class="mt-16 border-b px-4 py-2 text-sm font-medium sm:px-6 lg:px-8 {{ $storageBanner['tone'] === 'red' ? 'border-red-300 bg-red-600 text-white' : 'border-amber-300 bg-amber-100 text-amber-900' }}">
+       class="mt-16 {{ $ownHeader ? '-mb-16' : '' }} border-b px-4 py-2 text-sm font-medium sm:px-6 lg:px-8 {{ $storageBanner['tone'] === 'red' ? 'border-red-300 bg-red-600 text-white' : 'border-amber-300 bg-amber-100 text-amber-900' }}">
     {{ $storageBanner['text'] }}
     <a href="{{ route('system.monitor.storage') }}" class="ml-2 underline">View storage</a>
   </div>

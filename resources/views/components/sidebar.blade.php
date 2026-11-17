@@ -57,7 +57,7 @@
               x-on:dragstart="dragFrom = i; $event.dataTransfer.effectAllowed = 'move'"
               x-on:drop.prevent="move(dragFrom, i)" x-on:dragend="dragFrom = null"
               :class="dragFrom === i && 'is-dragging'">
-            <a :href="p.url" class="lk-link" :class="p.id === {{ $activeId ?? 'null' }} && 'is-active'"
+            <a :href="p.url" class="lk-link" :class="p.id === {{ $activeId ?? 'null' }} && 'is-here'"
                :data-nav-tip="p.label" x-on:keydown.alt.arrow-up.prevent="move(i, i - 1, $event)"
                x-on:keydown.alt.arrow-down.prevent="move(i, i + 1, $event)">
               <span class="lk-icon" aria-hidden="true"><i :class="p.icon"></i></span>
@@ -69,12 +69,14 @@
           </li>
         </template>
       </ul>
+      <p class="lk-pin-note" x-show="pins.length >= 6 && !error" x-cloak>Six pins is the most. Unpin one to pin another.</p>
       <p class="lk-pin-error" role="status" x-show="error" x-text="error" x-cloak></p>
     </section>
 
     @foreach($sections as $section)
       @php $sid = 'lk-sec-' . strtolower($section['name']); @endphp
-      <section class="lk-section" data-nav-section="{{ $section['name'] }}">
+      @php $hasCurrent = $section['links']->contains(fn ($l) => (int) $l->id === $activeId); @endphp
+      <section class="lk-section {{ $hasCurrent ? 'has-current' : '' }}" data-nav-section="{{ $section['name'] }}">
         <h2 class="lk-section-head-wrap">
           <button type="button" class="lk-section-head" data-nav-toggle="{{ $section['name'] }}" aria-expanded="true" aria-controls="{{ $sid }}">
             <span class="lk-label">{{ $section['name'] }}</span>
@@ -84,7 +86,7 @@
         <ul class="lk-list" id="{{ $sid }}" data-section-body="{{ $section['name'] }}">
           @foreach($section['links'] as $link)
             @php $cb = $checklistBadge && $isChecklistLink($link) ? $checklistBadge : null; @endphp
-            <li class="lk-row">
+            <li class="lk-row {{ $canPin ? 'has-pin' : '' }}">
               <x-navlink
                 :href="$link->route_url"
                 :active="(int) $link->id === $activeId"
