@@ -111,7 +111,7 @@ Full suite: `php -d memory_limit=2G vendor/bin/phpunit`
 | | Tests | Failures |
 |---|---|---|
 | base 9fa8ed84 | 5,294 | 3 |
-| branch (284 + 280 + 281) | 5,343 (+20 from 284, +29 from 280 and 281) | 3 |
+| branch (284 + 280 + 281) | 5,343 (+20 from 284, +29 cases from 280 and 281: 23 test methods, some with data sets) | 3 |
 
 The 3 base failures:
 - `ExampleTest::test_the_application_returns_a_successful_response`
