@@ -46,13 +46,13 @@ class MetaAdsCompareTest extends MetaAdsTestCase
         $this->seedTwoAccounts();
         $before = $this->reportRows();
 
-        // Naka-queue: habang hindi pa tumatakbo ang job, "running…" ang nasa page.
+        // Naka-queue. Compare is hidden from the page, so not even "running…" shows; the route and job still work.
         Queue::fake();
         $this->post('/ads_manager/meta/compare', ['from' => self::DAY, 'to' => self::DAY])->assertRedirect('/ads_manager/report');
         Queue::assertPushed(CompareMetaAds::class);
         $log = UploadLog::where('type', 'ads_manager_api_compare')->firstOrFail();
         $this->assertSame(['queued', null], [$log->status, $log->protected_details]);
-        $this->get('/ads_manager/report')->assertSee('Compare running…');
+        $this->get('/ads_manager/report')->assertDontSee('Compare running…');
 
         // Ang job: ang report ay nasa upload_logs row niya.
         app()->call([new CompareMetaAds($log->id, self::DAY, self::DAY), 'handle']);
@@ -76,7 +76,7 @@ class MetaAdsCompareTest extends MetaAdsTestCase
         $this->assertNotContains('act_111/ads', $this->graphCalls);
         $this->assertEquals($before, $this->reportRows());
 
-        $this->get('/ads_manager/report')->assertSee('Only in API: 1')->assertSee('amount_spent_php API 100 vs upload 90 (+11.1%)', false);
+        $this->get('/ads_manager/report')->assertDontSee('Only in API: 1')->assertDontSee('API vs uploads');
     }
 
     public function test_S_154_3_the_compare_command_prints_the_same_report_and_writes_nothing(): void

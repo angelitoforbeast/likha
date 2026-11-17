@@ -32,7 +32,7 @@ class MetaAdsAccountsTest extends MetaAdsTestCase
         return array_values(array_unique($out));
     }
 
-    public function test_S_173_1_the_meta_section_lists_each_account_once_with_the_latest_compare_numbers_and_a_checkbox(): void
+    public function test_S_173_1_the_meta_section_lists_each_account_once_with_a_checkbox_and_no_compare_numbers(): void
     {
         $this->seedFive();
         UploadLog::create([
@@ -55,9 +55,11 @@ class MetaAdsAccountsTest extends MetaAdsTestCase
         }
         $this->assertStringContainsString('Marketing User FB', substr($html, strpos($html, 'value="333"'), 600));
         $this->assertStringContainsString('Marketing - OIC User FB', substr($html, strpos($html, 'value="333"'), 600));
-        $this->assertStringContainsString('upload 6 rows · ₱1,200.25', $html);
-        $this->assertStringContainsString('API 7 rows · ₱1,234.50', $html);
-        $this->assertStringContainsString('not in uploads', substr($html, strpos($html, 'value="444"'), 600));
+        // Compare is hidden from the page: its numbers stay in upload_logs but are not shown per account.
+        $this->assertStringNotContainsString('upload 6 rows', $html);
+        $this->assertStringNotContainsString('API 7 rows', $html);
+        $this->assertStringNotContainsString('not in uploads', $html);
+        $this->assertStringNotContainsString('Wala pa sa huling Compare.', $html);
     }
 
     public function test_S_173_1_a_ceo_saves_two_of_five_accounts_and_the_change_is_logged(): void

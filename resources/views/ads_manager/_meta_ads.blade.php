@@ -1,10 +1,11 @@
-{{-- Facebook (Meta Ads API): connect, Compare with uploads, Sync now, write mode. Walang token dito, kahit kailan. --}}
+{{-- Facebook (Meta Ads API): connect, Sync now, write mode. Walang token dito, kahit kailan.
+     Compare with uploads is hidden: the API sync is the main source now. Its route, job and data stay so it can come back. --}}
 <div class="border rounded p-4 space-y-4" id="meta-ads-card">
   <div class="flex items-center justify-between flex-wrap gap-2">
     <h2 class="font-semibold">Facebook (Meta Ads API)</h2>
     <a href="{{ route('ads_manager.meta.ad_accounts') }}" id="ad-accounts-link" class="text-sm text-blue-700 underline">Ad Accounts: balance, spend cap, payment</a>
     <span class="text-xs px-2 py-0.5 rounded {{ $meta['write_mode'] ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-700' }}">
-      Write mode: {{ $meta['write_mode'] ? 'ON' : 'OFF (compare only)' }}
+      Write mode: {{ $meta['write_mode'] ? 'ON' : 'OFF (no writes)' }}
     </span>
   </div>
 
@@ -151,7 +152,7 @@
     </table>
   </div>
 
-  {{-- Mga ad account na binabasa ng Sync at Compare (CEO, Marketing, Marketing - OIC ang pumipili); ang numero ay mula sa huling Compare --}}
+  {{-- Mga ad account na binabasa ng Sync (CEO, Marketing, Marketing - OIC ang pumipili) --}}
   @if ($meta['accounts'])
     {{-- Collapsed to one line (spec 246); open again after a save that came back with an error, so the error is seen. --}}
     @php
@@ -170,27 +171,17 @@
         <div class="rounded bg-red-100 text-red-800 px-3 py-2 text-sm">{{ $errors->first('accounts') ?: $errors->first('accounts.*') }}</div>
       @endif
       <p class="text-xs text-gray-500">
-        Sync now at ang schedule: ang may check lang. Compare: ang may check, o lahat kapag walang may check.
+        Sync now at ang schedule: ang may check lang.
         Ang bagong account ay naka-check na; ang inalisan ng check ay hindi na babalik.
       </p>
       <div class="divide-y border rounded">
         @foreach ($meta['accounts'] as $a)
-          @php $n = $a['compare']; @endphp
           <label class="flex items-start gap-3 p-2 text-sm {{ $meta['can_choose_accounts'] ? 'cursor-pointer' : '' }}">
             <input type="checkbox" name="accounts[]" value="{{ $a['id'] }}" @checked($a['selected']) @disabled(!$meta['can_choose_accounts']) class="mt-1 h-5 w-5 shrink-0">
             <span class="min-w-0">
               <span class="font-medium break-words">{{ $a['name'] !== '' ? $a['name'] : 'Ad account' }}</span>
               <span class="font-mono text-xs text-gray-500 break-all">{{ $a['id'] }}</span>
               <span class="block text-xs text-gray-500 break-words">Facebook: {{ implode(', ', $a['who']) }}</span>
-              @if ($n)
-                <span class="block text-xs">
-                  upload {{ $n['upload_rows'] }} rows · ₱{{ number_format($n['upload_spend'], 2) }} ·
-                  API {{ $n['api_rows'] }} rows · ₱{{ number_format($n['api_spend'], 2) }}
-                  @if ((float) $n['upload_spend'] == 0.0)<span class="ml-1 px-1.5 rounded bg-yellow-100 text-yellow-800">not in uploads</span>@endif
-                </span>
-              @else
-                <span class="block text-xs text-gray-400">Wala pa sa huling Compare.</span>
-              @endif
             </span>
           </label>
         @endforeach
@@ -204,14 +195,8 @@
     </details>
   @endif
 
-  {{-- Compare / Sync now --}}
+  {{-- Sync now --}}
   <div class="flex gap-3 flex-wrap items-end">
-    <form method="POST" action="{{ route('ads_manager.meta.compare') }}" class="flex gap-2 flex-wrap items-end">
-      @csrf
-      <label class="text-xs">From<input type="date" name="from" value="{{ $meta['range'][0] }}" class="border rounded p-1 block"></label>
-      <label class="text-xs">To<input type="date" name="to" value="{{ $meta['range'][1] }}" class="border rounded p-1 block"></label>
-      <button class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm px-3 py-1.5 rounded" onclick="this.disabled=true;this.form.submit();">Compare with uploads</button>
-    </form>
     @if ($meta['write_mode'])
       <form method="POST" action="{{ route('ads_manager.meta.sync') }}">
         @csrf
@@ -225,7 +210,7 @@
       @csrf
       <label class="text-xs">Write mode (CEO)
         <select name="write_mode" class="border rounded p-1 block">
-          <option value="off" @selected(!$meta['write_mode'])>Off: compare only</option>
+          <option value="off" @selected(!$meta['write_mode'])>Off: no writes</option>
           <option value="on" @selected($meta['write_mode'])>On: schedule + Sync now write the report</option>
         </select>
       </label>
@@ -236,56 +221,6 @@
     </form>
   @else
     <p class="text-xs text-gray-500">Schedule (kapag naka-on ang write mode): {{ implode(', ', $meta['schedule']) }} Manila.</p>
-  @endif
-
-  {{-- Resulta ng Compare --}}
-  @php $cmpLog = $meta['compare']; @endphp
-  @if ($cmpLog && in_array($cmpLog->status, ['queued', 'processing'], true))
-    <div class="border-t pt-3 text-sm text-indigo-700" id="meta-compare-running">
-      Compare running… ({{ $cmpLog->original_name }}). Nagre-refresh ang page kada 5 segundo.
-    </div>
-    <script>setTimeout(() => location.reload(), 5000);</script>
-  @elseif ($cmpLog && $cmpLog->status === 'failed')
-    <div class="border-t pt-3 text-xs text-red-700">Compare #{{ $cmpLog->id }} failed: {{ $cmpLog->error_message }}</div>
-  @elseif ($cmpLog && is_array($cmpLog->protected_details))
-    @php $cmp = $cmpLog->protected_details; @endphp
-    <div class="border-t pt-3 space-y-3" id="meta-compare">
-      <h3 class="font-semibold text-sm">Compare: API vs uploads, {{ $cmp['from'] }} to {{ $cmp['to'] }} (walang isinulat)</h3>
-      @foreach ($cmp['problems'] as $pr)
-        <div class="text-xs text-red-700">{{ $pr }}</div>
-      @endforeach
-      @forelse ($cmp['accounts'] as $a)
-        <div class="border rounded p-2 text-xs space-y-1">
-          <div class="font-semibold">{{ $a['name'] }} <span class="font-mono text-gray-500">{{ $a['account_id'] }}</span> · {{ $a['who'] }}</div>
-          <div>API rows {{ $a['api_rows'] }} · upload rows {{ $a['upload_rows'] }} · same {{ $a['matched'] }} ·
-            spend API {{ number_format($a['api_spend'], 2) }} vs upload {{ number_format($a['upload_spend'], 2) }}</div>
-          <div>Only in API: {{ $a['only_api_count'] }} · only in upload: {{ $a['only_upload_count'] }} · differing: {{ $a['differ_count'] }}</div>
-          @if ($a['only_api'])
-            <details><summary>Only in API</summary>
-              @foreach ($a['only_api'] as $r)<div class="font-mono">{{ $r['day'] }} ad {{ $r['ad_id'] }} · spend {{ number_format($r['spend'], 2) }}</div>@endforeach
-            </details>
-          @endif
-          @if ($a['only_upload'])
-            <details><summary>Only in upload</summary>
-              @foreach ($a['only_upload'] as $r)<div class="font-mono">{{ $r['day'] }} ad {{ $r['ad_id'] }} · spend {{ number_format($r['spend'], 2) }}</div>@endforeach
-            </details>
-          @endif
-          @if ($a['differ'])
-            <details open><summary>Differing</summary>
-              @foreach ($a['differ'] as $r)
-                <div class="font-mono">{{ $r['day'] }} ad {{ $r['ad_id'] }}:
-                  @foreach ($r['fields'] as $f => $d)
-                    {{ $f }} API {{ $d['api'] }} vs upload {{ $d['upload'] }} ({{ $d['pct'] === null ? 'n/a' : (($d['pct'] > 0 ? '+' : '') . $d['pct'] . '%') }})@if (!$loop->last); @endif
-                  @endforeach
-                </div>
-              @endforeach
-            </details>
-          @endif
-        </div>
-      @empty
-        <div class="text-xs text-gray-500">Walang ad account na nabasa.</div>
-      @endforelse
-    </div>
   @endif
 
   {{-- Mga huling API run at event --}}
