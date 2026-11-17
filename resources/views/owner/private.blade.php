@@ -2589,10 +2589,24 @@
         }
         return L.length ? L.join('\n') : null;
       },
+      // Item sort: the "N x " count prefix is not part of the name, so sorting the full text split one item
+      // into all its "1 x" rows, then all its "2 x" rows. The name without the count decides (case ignored),
+      // then the smaller count. A name with no count sorts as count 0. Equal names and counts return 0, so
+      // the stable sort keeps their current order.
+      itemSortCmp(a, b){
+        const split = (s) => {
+          s = s == null ? '' : String(s);
+          const m = s.match(/^\s*(\d+)\s*x\s*/i);
+          return { name: (m ? s.slice(m[0].length) : s).toLowerCase(), n: m ? Number(m[1]) : 0 };
+        };
+        const x = split(a), y = split(b);
+        return x.name.localeCompare(y.name) || (x.n - y.n);
+      },
       sortedRows(){
         const base = this.filteredRows();
         if(!this.sortCol) return base;
         const c=this.sortCol, d=this.sortDir==='asc'?1:-1;
+        if (c === 'item_name') return [...base].sort((a,b)=>d*this.itemSortCmp(a.item_name, b.item_name));
 
         // Computed-value sort handler — for columns na hindi naka-stored as direct field
         // (e.g., proj_pct = projected_profit / gross_sales × 100, computed inline sa view).
