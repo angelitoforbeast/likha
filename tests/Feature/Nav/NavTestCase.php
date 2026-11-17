@@ -90,8 +90,10 @@ abstract class NavTestCase extends TestCase
 
         if ($this->runsSectionsMigration()) $this->migrateSections();
 
-        Route::middleware(['web', 'auth'])->get('/nav-probe', fn () => Blade::render('<x-layout><x-slot name="heading">Probe</x-slot>probe body</x-layout>'));
-        Route::middleware(['web', 'auth'])->get('/ads_manager/report-probe', fn () => Blade::render('<x-layout><x-slot name="heading">Ads</x-slot>ads</x-layout>'));
+        Route::middleware(['web', 'auth'])->get('/nav-probe', fn () => Blade::render('<x-layout><x-slot name="heading">Probe</x-slot>
+<p>probe body</p></x-layout>'));
+        Route::middleware(['web', 'auth'])->get('/ads_manager/report-probe', fn () => Blade::render('<x-layout><x-slot name="heading">Ads</x-slot>
+<p>ads</p></x-layout>'));
     }
 
     protected function runsSectionsMigration(): bool

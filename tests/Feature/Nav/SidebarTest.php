@@ -124,7 +124,8 @@ class SidebarTest extends NavTestCase
     public function test_NV2_E_every_branch_of_the_layout_renders_with_the_sidebar(string $path): void
     {
         if ($path !== '/nav-probe') {
-            Route::middleware(['web', 'auth'])->get($path, fn () => Blade::render('<x-layout><x-slot name="heading">Branch</x-slot>branch body</x-layout>'));
+            Route::middleware(['web', 'auth'])->get($path, fn () => Blade::render('<x-layout><x-slot name="heading">Branch</x-slot>
+<p>branch body</p></x-layout>'));
         }
         foreach (['CEO', 'Data Encoder'] as $role) {
             $html = $this->actingAs($this->user($role))->get($path)->assertOk()->getContent();

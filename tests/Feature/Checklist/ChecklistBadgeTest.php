@@ -135,8 +135,8 @@ class ChecklistBadgeTest extends ChecklistTestCase
         foreach (['/badge-probe', '/checklist'] as $uri) {
             $this->assertSame([2, 'red', '1 late, 1 open'], $this->badge($this->page($me, $uri)), $uri);
         }
-        // pati sa mobile nav
-        $this->assertSame(2, substr_count($this->page($me), 'title="1 late, 1 open"'));
+        // Iisang sidebar na ang desktop nav at ang drawer sa phone (spec 295), kaya isang beses lang ang badge.
+        $this->assertSame(1, substr_count($this->page($me), 'title="1 late, 1 open"'));
     }
 
     public function test_S_051_21_a_marketing_oic_sees_the_late_tasks_of_their_department_and_a_marketing_user_does_not(): void
