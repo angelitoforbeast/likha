@@ -28,6 +28,12 @@ class ChatbotAiQueue
     public const CREATED_INDEX = 'chatbot_ai_requests_created_at_index';
     public const TEXTS_FROM = 'chatbot-ai-sweep:texts-from'; // hanggang saan na nasuri ang pagbura ng text (created_at)
 
+    /** Ang table, binabasa sa $index (USE INDEX, kapag mayroon ang index). */
+    private static function on(string $index): \Illuminate\Database\Query\Builder
+    {
+        return SweepLimit::useIndex(DB::table(self::TABLE), self::TABLE, $index);
+    }
+
     /**
      * Hindi naghihintay ang AI step: naka-on ang switch, live na takbo ng chat o ng wait-skip (hindi Test o sequence), may
      * table na, at may buhay na chatbot:ai-pool (heartbeat). Kapag wala pa ang pool (hal. bago mailagay sa supervisor, o
@@ -141,7 +147,7 @@ class ChatbotAiQueue
     {
         if ($n <= 0) return [];
         // Sa index (status, next_at): ang pending lang ang binabasa at inaayos; sa id (PRIMARY), maaaring basahin ng database ang buong table.
-        $ids = DB::table(self::TABLE)->useIndex(self::STATUS_INDEX)->where('status', 'pending')->where(fn ($q) => $q->whereNull('next_at')->orWhere('next_at', '<=', now()))
+        $ids = self::on(self::STATUS_INDEX)->where('status', 'pending')->where(fn ($q) => $q->whereNull('next_at')->orWhere('next_at', '<=', now()))
             ->where('deadline_at', '>', now())->orderBy('id')->limit($n)->pluck('id');
         $out = [];
         foreach ($ids as $id) {
@@ -221,7 +227,7 @@ class ChatbotAiQueue
     private static function sweepWithin(SweepLimit $limit, array &$out): void
     {
         // Sa index (status, next_at): ang mga nasa himpapawid lang ang binabasa at inaayos sa id, hindi ang buong table sa PRIMARY.
-        $late = $limit->cap(DB::table(self::TABLE)->useIndex(self::STATUS_INDEX)->whereIn('status', ['pending', 'sending'])->where('deadline_at', '<=', now())->orderBy('id')->limit(500))->get();
+        $late = $limit->cap(self::on(self::STATUS_INDEX)->whereIn('status', ['pending', 'sending'])->where('deadline_at', '<=', now())->orderBy('id')->limit(500))->get();
         foreach ($late as $row) {
             $ok = DB::table(self::TABLE)->where('id', $row->id)->whereIn('status', ['pending', 'sending'])->update([
                 'status' => 'failed', 'error' => self::late($row), 'answered_at' => now(), 'updated_at' => now(),
@@ -233,7 +239,7 @@ class ChatbotAiQueue
         }
 
         // Ang Encode order na lampas na sa "Wait up to": ang resulta ng encode kapag naitabi na (si Astra ang hindi natapos), kung wala ay failed.
-        $late = $limit->cap(DB::table(self::TABLE)->useIndex(self::STATUS_INDEX)->where('status', FlowEncode::STATUS)->where('deadline_at', '<=', now())->orderBy('id')->limit(500))->get();
+        $late = $limit->cap(self::on(self::STATUS_INDEX)->where('status', FlowEncode::STATUS)->where('deadline_at', '<=', now())->orderBy('id')->limit(500))->get();
         foreach ($late as $row) {
             $encoded = $row->answer !== null;
             $ok = DB::table(self::TABLE)->where('id', $row->id)->where('status', FlowEncode::STATUS)->update([
@@ -245,7 +251,7 @@ class ChatbotAiQueue
             }
         }
 
-        $stuck = $limit->cap(DB::table(self::TABLE)->useIndex(self::STATUS_INDEX)->whereIn('status', ['answered', 'failed'])->where('updated_at', '<=', now()->subSeconds(self::REDISPATCH_SECONDS))
+        $stuck = $limit->cap(self::on(self::STATUS_INDEX)->whereIn('status', ['answered', 'failed'])->where('updated_at', '<=', now()->subSeconds(self::REDISPATCH_SECONDS))
             ->orderBy('id')->limit(500))->get();
         foreach ($stuck as $row) {
             DB::table(self::TABLE)->where('id', $row->id)->update(['updated_at' => now()]);
@@ -275,7 +281,7 @@ class ChatbotAiQueue
      */
     private static function prune(SweepLimit $limit, string $index, string $order, \Closure $rule): int
     {
-        $q = DB::table(self::TABLE)->useIndex($index)->where($rule)->orderBy($order);
+        $q = self::on($index)->where($rule)->orderBy($order);
         if ($order !== 'id') $q->orderBy('id');
         $ids = $limit->cap($q->limit(5000), ['id'])->pluck('id');
 
@@ -299,7 +305,7 @@ class ChatbotAiQueue
         $left = 5000;
         while ($left > 0 && $from->lessThan($to)) {
             $end = $from->copy()->addHour()->min($to);
-            $rows = $limit->cap(DB::table(self::TABLE)->useIndex(self::CREATED_INDEX)->whereBetween('created_at', [$from, $end])->whereIn('status', ['resumed', 'sync'])
+            $rows = $limit->cap(self::on(self::CREATED_INDEX)->whereBetween('created_at', [$from, $end])->whereIn('status', ['resumed', 'sync'])
                 ->where(fn ($q) => $q->whereNotNull('messages')->orWhereNotNull('answer')->orWhereNotNull('context'))->orderBy('created_at')->orderBy('id')->limit($left), ['id', 'created_at'])->get();
             if ($rows->isNotEmpty()) DB::table(self::TABLE)->whereIn('id', $rows->pluck('id')->all())->update(['messages' => null, 'answer' => null, 'context' => null]);
             $left -= $rows->count();

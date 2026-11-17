@@ -35,6 +35,12 @@ class BotcakeSendQueue
     public const STATUS_PRIORITY_INDEX = 'botcake_send_requests_status_priority_id_index';
     public const CREATED_INDEX = 'botcake_send_requests_created_at_index';
 
+    /** Ang table, binabasa sa $index (USE INDEX, kapag mayroon ang index). */
+    private static function on(string $index): \Illuminate\Database\Query\Builder
+    {
+        return SweepLimit::useIndex(DB::table(self::TABLE), self::TABLE, $index);
+    }
+
     /** Naka-on, may buhay na botcake:send-pool, at may table na. */
     public static function enabled(): bool
     {
@@ -295,7 +301,7 @@ class BotcakeSendQueue
         if (!BotcakeSendPool::alive(self::DEAD_POOL_SECONDS)) self::recover(null, $limit);
 
         // Sa index (status, priority, id): ang pending na hindi sequence lang ang binabasa, hindi ang buong table.
-        foreach ($limit->cap(DB::table(self::TABLE)->useIndex(self::STATUS_PRIORITY_INDEX)->where('status', 'pending')->where('priority', '<', self::SEQUENCE_PRIORITY)
+        foreach ($limit->cap(self::on(self::STATUS_PRIORITY_INDEX)->where('status', 'pending')->where('priority', '<', self::SEQUENCE_PRIORITY)
             ->where('kind', '!=', self::SEQUENCE)->where('deadline_at', '<=', now())->orderBy('id')->limit(500))->get() as $row) {
             if ($row->kind === 'chatblast') {
                 if (DB::table(self::TABLE)->where('id', $row->id)->where('status', 'pending')->update(['status' => 'failed', 'error' => 'Not sent in time; queued again', 'done_at' => now(), 'updated_at' => now()]) !== 1) continue;
@@ -328,7 +334,7 @@ class BotcakeSendQueue
         // parehong kondisyon; ang DELETE na naka-ayos sa id ay maaaring basahin ang buong table at walang MAX_EXECUTION_TIME.
         $old = now()->subDays(self::KEEP_DAYS);
         $rule = fn ($q) => $q->where('created_at', '<', $old)->where('kind', '!=', self::SEQUENCE)->whereIn('status', ['resumed', 'failed', 'done']);
-        $ids = $limit->cap(DB::table(self::TABLE)->useIndex(self::CREATED_INDEX)->where($rule)->orderBy('created_at')->orderBy('id')->limit(5000), ['id'])->pluck('id');
+        $ids = $limit->cap(self::on(self::CREATED_INDEX)->where($rule)->orderBy('created_at')->orderBy('id')->limit(5000), ['id'])->pluck('id');
         if ($ids->isNotEmpty()) $out['pruned'] = DB::table(self::TABLE)->whereIn('id', $ids->all())->where($rule)->delete();
     }
 
@@ -559,7 +565,7 @@ class BotcakeSendQueue
     {
         // Kada status, sa index (status, priority, id), na naka-ayos na sa id: hindi binabasa ang buong table.
         foreach (['done', 'failed'] as $status) {
-            foreach ($limit->cap(DB::table(self::TABLE)->useIndex(self::STATUS_PRIORITY_INDEX)->where('status', $status)->where('priority', self::SEQUENCE_PRIORITY)->where('updated_at', '<=', now()->subSeconds(self::REDISPATCH_SECONDS))
+            foreach ($limit->cap(self::on(self::STATUS_PRIORITY_INDEX)->where('status', $status)->where('priority', self::SEQUENCE_PRIORITY)->where('updated_at', '<=', now()->subSeconds(self::REDISPATCH_SECONDS))
                 ->orderBy('id')->limit(500))->get() as $row) {
                 DB::table(self::TABLE)->where('id', $row->id)->update(['updated_at' => now()]);
                 ResumeChatbotSequenceSend::dispatch(self::sequenceTicket($row));
@@ -569,9 +575,9 @@ class BotcakeSendQueue
         // Ang luma (tapos, pumalya, skipped o kinansela = resumed) ay binubura nang paunti-unti, isang beses kada minuto: hanggang sa
         // pinakabagong id na lampas KEEP_DAYS (isang basa sa index ng created_at), saka kada status sa index (status, priority, id).
         if (Cache::add('sequence-prune:' . ChatbotSequences::site(), 1, 60)) {
-            $cutoff = $limit->cap(DB::table(self::TABLE)->useIndex(self::CREATED_INDEX)->where('created_at', '<', now()->subDays(self::KEEP_DAYS))->orderByDesc('created_at')->orderByDesc('id'), ['id'])->value('id');
+            $cutoff = $limit->cap(self::on(self::CREATED_INDEX)->where('created_at', '<', now()->subDays(self::KEEP_DAYS))->orderByDesc('created_at')->orderByDesc('id'), ['id'])->value('id');
             foreach ($cutoff === null ? [] : ['resumed', 'failed', 'done'] as $status) {
-                $ids = $limit->cap(DB::table(self::TABLE)->useIndex(self::STATUS_PRIORITY_INDEX)->where('status', $status)->where('priority', self::SEQUENCE_PRIORITY)->where('id', '<=', $cutoff)
+                $ids = $limit->cap(self::on(self::STATUS_PRIORITY_INDEX)->where('status', $status)->where('priority', self::SEQUENCE_PRIORITY)->where('id', '<=', $cutoff)
                     ->orderBy('id')->limit(5000), ['id'])->pluck('id');
                 if ($ids->isNotEmpty()) $out['pruned'] += DB::table(self::TABLE)->whereIn('id', $ids->all())->delete();
             }

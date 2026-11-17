@@ -55,6 +55,18 @@ final class SweepLimit
         return $q->select(array_merge([DB::raw('/*+ MAX_EXECUTION_TIME(' . $left . ') */ ' . $q->getGrammar()->wrap($first))], $columns));
     }
 
+    /**
+     * Ang USE INDEX ($index ng $table) kapag mayroon ang index sa database na ito: ang pangalang wala ay error ng MySQL sa
+     * bawat query. Isang tingin kada proseso (naka-memo sa app), dahil tinatawag ito sa bawat ikot ng pool.
+     */
+    public static function useIndex(Builder $q, string $table, string $index): Builder
+    {
+        $key = 'sweep-limit.index.' . $table . '.' . $index;
+        if (!app()->bound($key)) app()->instance($key, \Illuminate\Support\Facades\Schema::hasIndex($table, $index));
+
+        return app($key) ? $q->useIndex($index) : $q;
+    }
+
     /** Ang error ba ay ang hangganan ng oras (ng MySQL o ng cap)? */
     public static function timedOut(Throwable $e): bool
     {

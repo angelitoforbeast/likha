@@ -383,6 +383,10 @@ class SweepFastTest extends ChatblastTestCase
         $this->assertGreaterThan(4000, (int) $m[1]);
         $this->assertLessThanOrEqual(5000, (int) $m[1]);
 
+        // An index this database does not have is never named (MySQL would refuse every query).
+        $this->assertNull(SweepLimit::useIndex(DB::table(ChatbotAiQueue::TABLE), ChatbotAiQueue::TABLE, 'chatbot_ai_requests_no_such_index')->indexHint);
+        $this->assertSame(ChatbotAiQueue::STATUS_INDEX, SweepLimit::useIndex(DB::table(ChatbotAiQueue::TABLE), ChatbotAiQueue::TABLE, ChatbotAiQueue::STATUS_INDEX)->indexHint->index);
+
         config(['queue.pools.sweep_ms' => 0]);
         $this->assertSame(100, SweepLimit::ms());
         config(['queue.pools.sweep_ms' => 3600000]);
