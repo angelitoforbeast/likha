@@ -4,14 +4,14 @@ Base: live 1302bdfc. Branch `fix/286-item-sort-ignores-count`. View and tests on
 
 ## What changed
 
-- `resources/views/owner/private.blade.php`: new component method `itemSortCmp(a, b)`. It strips a leading `/^\s*(\d+)\s*x\s*/i` count, compares the rest lower-cased with `localeCompare`, then the count (a name with no count counts as 0). `sortedRows()` uses it when `sortCol === 'item_name'`, times the direction. Equal name and count return 0, so the stable sort keeps the current order in both directions. Every other column goes through the old code unchanged; the cell still shows `sq(row.item_name)`.
+- `resources/views/owner/private.blade.php`: new component method `itemSortCmp(a, b)`. It strips a leading `/^\s*(\d+)\s*x\s+/i` count (a space after the x is required, since real names are always "N x NAME"), compares the rest lower-cased with `localeCompare`, then the count (a name with no count counts as 0). `sortedRows()` uses it when `sortCol === 'item_name'`, times the direction. Equal name and count return 0, so the stable sort keeps the current order in both directions. Every other column goes through the old code unchanged; the cell still shows `sq(row.item_name)`.
 - `tests/js/private-sort.cjs` (new): node runner that takes the inline `privateUI()` script from a real render of the page, stubs the browser objects it touches at load, and runs `sortedRows()` on given rows and sort settings.
 - `tests/Feature/OwnerPrivate/ItemSortTest.php` (new): renders /owner/private as CEO and checks, through the runner:
-  - Item asc: `AB ROLLER`, `1 x hand grip`, `1 x HAND GRIP`, `2 x HAND GRIP`, `1 x YOGA MAT`, `2 x Yoga Mat`, `10x Yoga Mat`; desc is the reverse with equal rows kept in current order.
+  - Item asc: `3XL Shirt`, `AB ROLLER`, `1 x hand grip`, `1 x HAND GRIP`, `2 x HAND GRIP`, `1 x YOGA MAT`, `2 x Yoga Mat`, `10 x Yoga Mat`; desc is the reverse with equal rows kept in current order. `3XL Shirt` sorts as its full name, not as count 3 of "L Shirt".
   - Page (text) and Orders (number) sort as before; Page still compares the full text, count prefix included.
   - The item cell still renders `x-text="sq(row.item_name)"`.
 
-Note: the regex is the one in the spec, so a name that starts with digits and an "x" (e.g. "3XL Shirt") would also lose that start for sorting only. None seen as a concern; display is unaffected.
+Edge case: the spec's first regex (`x\s*`) would have read "3XL Shirt" as count 3 of "L Shirt". Per review, a space after the x is now required, and the test covers it.
 
 ## Test output
 
@@ -19,7 +19,7 @@ Note: the regex is the one in the spec, so a name that starts with digits and an
 vendor/bin/phpunit tests/Feature/OwnerPrivate/ItemSortTest.php
 OK (3 tests, 10 assertions)
 ```
-On the base view (fix stashed) the Item-order test fails, the other two pass.
+Re-run after the whitespace fix: same result. On the base view (fix stashed) the Item-order test fails, the other two pass.
 
 ```
 vendor/bin/phpunit tests/Feature/OwnerPrivate

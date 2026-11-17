@@ -2592,11 +2592,12 @@
       // Item sort: the "N x " count prefix is not part of the name, so sorting the full text split one item
       // into all its "1 x" rows, then all its "2 x" rows. The name without the count decides (case ignored),
       // then the smaller count. A name with no count sorts as count 0. Equal names and counts return 0, so
-      // the stable sort keeps their current order.
+      // the stable sort keeps their current order. The count is always written "N x NAME", so a space after
+      // the x is required: a name that only starts with digits and an x (e.g. "3XL Shirt") is left whole.
       itemSortCmp(a, b){
         const split = (s) => {
           s = s == null ? '' : String(s);
-          const m = s.match(/^\s*(\d+)\s*x\s*/i);
+          const m = s.match(/^\s*(\d+)\s*x\s+/i);
           return { name: (m ? s.slice(m[0].length) : s).toLowerCase(), n: m ? Number(m[1]) : 0 };
         };
         const x = split(a), y = split(b);

@@ -48,7 +48,8 @@ class ItemSortTest extends OwnerPrivateTestCase
         ['item_name' => '2 x Yoga Mat',  'page_name' => '1 x Shop B', 'orders' => 7],
         ['item_name' => 'AB ROLLER',     'page_name' => 'Shop D', 'orders' => 1],
         ['item_name' => '1 x HAND GRIP', 'page_name' => 'Shop E', 'orders' => 9],
-        ['item_name' => '10x Yoga Mat',  'page_name' => 'Shop F', 'orders' => 2],
+        ['item_name' => '10 x Yoga Mat', 'page_name' => 'Shop F', 'orders' => 2],
+        ['item_name' => '3XL Shirt',     'page_name' => 'Shop G', 'orders' => 4],
     ];
 
     private function html(): string
@@ -89,17 +90,20 @@ class ItemSortTest extends OwnerPrivateTestCase
         [$asc, $desc] = $this->sorted([['col' => 'item_name', 'dir' => 'asc'], ['col' => 'item_name', 'dir' => 'desc']]);
 
         // A name with no count sorts as count 0; same name and count (case ignored) keep their current order.
+        // "3XL Shirt" has no space after the x, so it is a name, not a count of 3: it sorts as "3XL Shirt".
         $this->assertSame([
+            '3XL Shirt',
             'AB ROLLER',
             '1 x hand grip', '1 x HAND GRIP', '2 x HAND GRIP',
-            '1 x YOGA MAT', '2 x Yoga Mat', '10x Yoga Mat',
+            '1 x YOGA MAT', '2 x Yoga Mat', '10 x Yoga Mat',
         ], $asc);
 
         // Descending reverses names and counts; equal rows still keep their current order.
         $this->assertSame([
-            '10x Yoga Mat', '2 x Yoga Mat', '1 x YOGA MAT',
+            '10 x Yoga Mat', '2 x Yoga Mat', '1 x YOGA MAT',
             '2 x HAND GRIP', '1 x hand grip', '1 x HAND GRIP',
             'AB ROLLER',
+            '3XL Shirt',
         ], $desc);
     }
 
@@ -108,8 +112,8 @@ class ItemSortTest extends OwnerPrivateTestCase
         [$page, $orders] = $this->sorted([['col' => 'page_name', 'dir' => 'asc'], ['col' => 'orders', 'dir' => 'desc']]);
 
         // Text columns still compare the full text, count prefix included.
-        $this->assertSame(['1 x Shop B', '2 x Shop', 'Shop A', 'Shop C', 'Shop D', 'Shop E', 'Shop F'], array_column($page, 1));
-        $this->assertSame([12, 9, 7, 5, 3, 2, 1], array_column($orders, 1));
+        $this->assertSame(['1 x Shop B', '2 x Shop', 'Shop A', 'Shop C', 'Shop D', 'Shop E', 'Shop F', 'Shop G'], array_column($page, 1));
+        $this->assertSame([12, 9, 7, 5, 4, 3, 2, 1], array_column($orders, 1));
     }
 
     public function test_the_item_cell_still_shows_the_full_name(): void
