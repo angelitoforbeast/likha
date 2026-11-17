@@ -31,18 +31,72 @@ Base: live 3647457f. Branch `feat/287-many-fb-per-user`.
 
 ## What shipped
 
-(after the build)
+Commit d2cbf777 (code and tests), on top of the plan commit 30399488. No route, middleware, migration or config change.
+
+- `app/Services/MetaAds/Connections.php`
+  - `key(userId, fbUserId)` builds the key.
+  - `save()` writes the per-account row, and in the same transaction deletes the user's old-form row when it is the same account or has no fb_user_id. It returns `user_id` and `ref`.
+  - `update()`, `disconnect()` and the new `find()` take a ref.
+  - `of(userId)` is new. `get(userId)` now returns the user's newest connection.
+  - `all()` parses both key forms (`<uid>` and `<uid>.<fb>`; anything else is ignored), is keyed by ref, and is ordered by user id, then row.
+  - `accounts()` no longer relies on the array key.
+- `Sync.php`, `Compare.php` and `AccountHealth.php` loop by value, mark expiry and last sync through `$c['ref']`, and log `$c['user_id']`. `DataHealth`, `AdGroups`, `FacebookName` and the `meta-ads:accounts` command already read `all()`/`accounts()` by value, so they are unchanged and now see every connection.
+- `MetaAdsController`
+  - The panel has one row per connection, and user names are looked up by `user_id`.
+  - `disconnect` takes `ref` and only accepts your own: another user's ref or an unknown ref gives a 404. With no ref it removes your only connection; it is refused with a message when you have several, and says "No Facebook connection to disconnect" when you have none.
+  - The connect and disconnect events add `fb_user_id` and `fb_user_name` to protected_details. No token is stored there.
+- `_meta_ads.blade.php`
+  - "Connect Facebook" always shows, and becomes "Connect another Facebook" once you have one.
+  - Each row has `data-connection="<ref>"`, and your own rows have their own Disconnect (hidden `ref`).
+  - A Reconnect row says which Facebook account to be signed in as. Rows show status per row as before (OK / Token expired / Expires within 7 days).
+- Tests:
+  - New `tests/Feature/MetaAds/MetaAdsManyConnectionsTest.php` (9 tests).
+  - `MetaAdsConnectTest` and `MetaAdsLoginConfigTest` read the row at the new key `meta_ads.connection.<id>.fb-ana` instead of the old key. Without that, one test errored and the other's "token not in the stored row" check would pass on a null row.
+- FB-5: there is no Meta data-deletion or deauthorize callback on this base, so nothing was added.
 
 ## Evidence
 
-(after the build)
+New tests (`vendor/bin/phpunit tests/Feature/MetaAds/MetaAdsManyConnectionsTest.php`): `OK (9 tests)`.
+- FB-1:
+  - Two Facebook accounts connected through the callback with one login keep two rows, `<id>.fb-a` and `<id>.fb-b`, with both tokens decrypting. The card shows both, each with its name, expiry, OK and its own Disconnect, and no token appears on the page.
+  - Connecting fb-a again leaves two rows, and refreshes fb-a's token, name, accounts and status.
+  - Disconnecting fb-a leaves fb-b and logs `disconnect` with fb-a's id and name.
+  - The CEO gets a 404 on another user's ref and sees no Disconnect on others' rows. A bare disconnect with several connections is refused and nothing is deleted.
+- FB-2:
+  - Sync with one user holding two connections (111+333 and 222+333) imports a1, a2 and a3. It calls `act_333/insights` once, reads 222 with the second token, and stamps last_sync_at on both rows.
+  - `accounts()` lists 111, 222 and 333 once, with 333 naming both connections, and `Sync::current()` gives `['111','222','333']`.
+  - The Ad Accounts page shows one row for 333 naming "Ana A, Ana B", and calls me/adaccounts once per token.
+- FB-3:
+  - A hand-written old-form row `meta_ads.connection.<id>` is listed with ref `<id>`, shows on the card with its Disconnect, syncs with its token, gets last_sync_at, and disconnects.
+  - Reconnecting that same Facebook account replaces it with `<id>.fb-old`, leaving one row.
+  - Another user connecting a different account keeps that user's old row next to the new one.
+- FB-4: with the second token answering 190 on insights, only that row turns `expired` and the first stays `ok`. The card shows OK on row A, and "Token expired" with the Reconnect hint and Disconnect on row B.
+- Against the base code (app/ and resources/ stashed): all 9 fail (6 failures, 3 errors).
+
+MetaAds folder (`vendor/bin/phpunit tests/Feature/MetaAds`): `OK (263 tests, 1287 assertions)`.
+
+Full suite (`vendor/bin/phpunit`): `Tests: 5356, Assertions: 83507, Failures: 3, Skipped: 6`. The three failures are the known base failures and nothing else:
+1. `ExampleTest::test_the_application_returns_a_successful_response`
+2. `ItemTableFitScriptTest::test_every_catalog_column_id_has_a_minimum_width_and_a_place_in_the_drop_order`
+3. `SharedPagesBasePinTest::test_S_42_4_...` with data set "/owner/private"
 
 ## Rulings
 
 1. Read both forms instead of a migration: no data job on deploy, and revert stays a plain code revert while no one has reconnected.
-2. The same Facebook account connected by two different site users stays two rows (one per site user), as today.
-3. An old-form row is replaced when its owner connects the same fb_user_id, or any account when the old row has no fb_user_id (it cannot be matched, and today a connect replaced it).
+2. Two site users who connect the same Facebook account keep two rows, one per user, the same as today. Account de-duplication stays as is.
+3. Users can disconnect only their own connections, the same as today. A CEO cannot remove other users' connections in this spec.
+4. An old-form row is replaced when its owner connects the same fb_user_id. It is also replaced by any account the owner connects when the old row has no fb_user_id, because it cannot be matched and today any connect replaced it.
 
 ## Merge danger
 
-(after the build: how existing connections behave after deploy, and how to revert)
+**After deploy.**
+- Every existing `meta_ads.connection.<user id>` row keeps working with no reconnect: it is listed, synced, marked expired and disconnected through its ref (`<user id>`). Nothing is rewritten on deploy.
+- An old row changes only when its owner connects again. If it is the same Facebook account, it becomes `meta_ads.connection.<user id>.<fb_user_id>` (the old row is deleted in the same transaction). If it is a different account, the old row stays and a second row is added.
+- The ad-account selection (`meta_ads.accounts`) is keyed by ad account id, not by user, so it is unchanged.
+- Users with an old open report page whose Disconnect has no ref still disconnect, as long as they have only one connection.
+
+**Revert.** `git revert d2cbf777`. The spec and plan docs can stay. While nobody has connected after the deploy, there are only old-form rows and the revert is clean.
+- If new-form rows exist, the old code reads `meta_ads.connection.12.fb-a` as user 12, because it casts the key suffix to int. With several rows per user, the last row wins in the list, and sync still reads through it.
+- But the old `update(12)` and `disconnect(12)` only touch `meta_ads.connection.12`. So for new-form rows, expiry and last sync would not be saved and Disconnect would not remove them.
+- Before or right after reverting, check with a plain SELECT: `SELECT id, `key` FROM app_settings WHERE `key` LIKE 'meta_ads.connection.%.%'`.
+- For each user, rename the one row to keep to `meta_ads.connection.<user id>`, after deleting any old-form row that user still has, because the key is unique. Then delete the user's other new-form rows. Those Facebook accounts would have to be reconnected as separate site users, as before 287.
