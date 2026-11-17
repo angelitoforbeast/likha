@@ -111,6 +111,8 @@ class MetaAdsController extends Controller
             'logs'       => $logs,
             'refused'    => \App\Services\MetaAds\DataHealth::refusals($logs->where('type', Sync::LOG_TYPE)->pluck('id')->all()),
             'compare'    => $compare,
+            // The latest sync run, manual or scheduled; the card polls its status while it is queued or running.
+            'last_run'   => ($last = UploadLog::where('type', Sync::LOG_TYPE)->orderByDesc('id')->first()) ? self::runSummary($last) : null,
             // Spec 284: from the stored read only, so the report page never waits on Meta.
             'account_health' => self::accountWarnings(),
         ];
@@ -236,6 +238,71 @@ class MetaAdsController extends Controller
         SyncMetaAdsReports::dispatch($log->id, $from, $to);
 
         return $this->back()->with('status', '📥 Sync queued: #' . $log->id . " ({$from} to {$to})");
+    }
+
+    /**
+     * The live state of one sync run (?id=) or of the latest one, manual or scheduled, for the card's poll: the summary
+     * and the card's own HTML for it, so the page and the poll draw the same box.
+     */
+    public function syncStatus(Request $request)
+    {
+        $this->checkAccess();
+        $id  = (int) $request->query('id');
+        $log = UploadLog::where('type', Sync::LOG_TYPE)->when($id > 0, fn ($q) => $q->where('id', $id))->orderByDesc('id')->first();
+        if (!$log) return response()->json(['run' => null, 'html' => '']);
+        $run = self::runSummary($log);
+
+        return response()->json(['run' => $run, 'html' => view('ads_manager._meta_sync_run', ['run' => $run])->render()]);
+    }
+
+    /**
+     * One sync run for people: queued / running (accounts done of total, rows so far) / done / partial / failed, counts,
+     * duration and one problem per line, each ad account with its name when known.
+     */
+    public static function runSummary(UploadLog $log): array
+    {
+        $state = match ((string) $log->status) {
+            'queued' => 'queued', 'processing' => 'running', 'done' => 'done', 'partial' => 'partial', default => 'failed',
+        };
+        $progress = in_array($state, ['queued', 'running'], true) ? (Sync::progress((int) $log->id) ?? []) : [];
+        $names    = array_column(app(Connections::class)->accounts(), 'name', 'id');
+
+        $problems = [];
+        // Runs before spec 288 joined their lines with "; ".
+        foreach (preg_split('/\n|; (?=act_\d+:|No page name)/', (string) $log->error_message, -1, PREG_SPLIT_NO_EMPTY) as $line) {
+            $line = trim($line);
+            if ($line === '') continue;
+            if (preg_match('/^act_(\d+): (.*)$/s', $line, $m)) {
+                $problems[] = ['account' => 'act_' . $m[1], 'name' => ($names[$m[1]] ?? '') !== '' ? $names[$m[1]] : null, 'error' => $m[2]];
+            } else {
+                $problems[] = ['account' => null, 'name' => null, 'error' => $line];
+            }
+        }
+
+        $end = $log->finished_at ?? ($state === 'running' ? now() : null);
+        $secs = $log->started_at && $end ? max(0, (int) $log->started_at->diffInSeconds($end, true)) : null;
+        $who  = $log->user_id ? (\App\Models\User::whereKey($log->user_id)->value('name') ?? ('user ' . $log->user_id)) : 'scheduled';
+        $fmt  = fn ($t) => $t?->copy()->timezone('Asia/Manila')->format('M j, g:i A');
+
+        return [
+            'id'             => (int) $log->id,
+            'state'          => $state,
+            'range'          => preg_replace('/^Meta API /', '', (string) $log->original_name),
+            'who'            => $who,
+            'accounts_done'  => isset($progress['accounts_done']) ? (int) $progress['accounts_done'] : null,
+            'accounts_total' => isset($progress['accounts_total']) ? (int) $progress['accounts_total'] : null,
+            'account'        => $progress['account'] ?? null,
+            'rows'           => (int) $log->processed_rows,
+            'inserted'       => (int) $log->inserted,
+            'updated'        => (int) $log->updated,
+            'skipped'        => (int) $log->skipped,
+            'queued_at'      => $fmt($log->created_at),
+            'started_at'     => $fmt($log->started_at),
+            'finished_at'    => $fmt($log->finished_at),
+            'duration_s'     => $secs,
+            'duration'       => $secs === null ? null : ($secs >= 60 ? intdiv($secs, 60) . ' min ' . ($secs % 60) . ' s' : $secs . ' s'),
+            'problems'       => $problems,
+        ];
     }
 
     public function writeMode(Request $request)

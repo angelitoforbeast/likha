@@ -58,7 +58,7 @@
       transition: background .15s;
       line-height: 1.5;
     }
-    .tl-cell:hover { background: #fafafa; }
+    .tl-cell:hover { filter: brightness(0.97); }
     /* Empty / no-data */
     .tl-cell-empty {
       background: white;
@@ -67,11 +67,10 @@
     }
     .tl-cell-empty:hover { background: white; }
     /* Inferred (past) — very light amber, still mostly black text */
-    .tl-cell-inferred { background: #fffdf6; }
-    .tl-cell-inferred:hover { background: #fefce8; }
+    /* The cell's state is a thin inner border (the fill is the CPP colour): amber = inferred, dashed blue = estimate. */
+    .tl-cell-inferred { box-shadow: inset 0 0 0 2px #f59e0b; }
     /* Estimate (future today) — very light blue, still mostly black text */
-    .tl-cell-estimate { background: #f8fafc; cursor: default; }
-    .tl-cell-estimate:hover { background: #f1f5f9; }
+    .tl-cell-estimate { outline: 2px dashed #60a5fa; outline-offset: -3px; cursor: default; }
     /* Badges — small, low-contrast, informational only */
     .tl-cell .est-badge {
       display: inline-block;
@@ -114,6 +113,30 @@
       letter-spacing: 0.02em;
     }
 
+    /* CPP colours by amount (the team's CPP report cut-offs): green below ₱30, cyan ₱30 to under ₱50, orange ₱50 to
+       under ₱70, red ₱70 and up; grey = no orders yet. Used by both views. */
+    .tl-grid td.cpp-g, .tl-hour td.cpp-g, .swatch.cpp-g { background: #bbf7d0; }
+    .tl-grid td.cpp-c, .tl-hour td.cpp-c, .swatch.cpp-c { background: #a5f3fc; }
+    .tl-grid td.cpp-o, .tl-hour td.cpp-o, .swatch.cpp-o { background: #fed7aa; }
+    .tl-grid td.cpp-r, .tl-hour td.cpp-r, .swatch.cpp-r { background: #fecaca; }
+    .tl-grid td.cpp-n, .tl-hour td.cpp-n, .swatch.cpp-n { background: #f3f4f6; }
+
+    /* Hourly view: 24 hour columns always fit the box. table-layout: fixed with width 100% sizes the columns from the
+       <colgroup> only (page 128 px, the hours share the rest, about 44 px each at a 1280 px window), never from the
+       content, so the table cannot be wider than its box; long text is cut with an ellipsis and shown in the tooltip.
+       The wrapper has no overflow-x, so there is no horizontal scroll bar. */
+    .tl-hour-wrap { width: 100%; overflow-x: hidden; }
+    .tl-hour { table-layout: fixed; width: 100%; border-collapse: collapse; font-size: 11px; color: #000;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    .tl-hour col.tl-hour-page { width: 128px; }
+    .tl-hour th, .tl-hour td { border: 1px solid #e5e7eb; padding: 3px 1px; text-align: center; overflow: hidden;
+      text-overflow: ellipsis; white-space: nowrap; }
+    .tl-hour thead th { background: #f9fafb; font-weight: 700; font-size: 10px; }
+    .tl-hour th.tl-hour-name { text-align: left; padding-left: 4px; font-weight: 600; background: #f9fafb; }
+    .tl-hour td { font-family: 'SFMono-Regular', Consolas, monospace; font-size: 10px; cursor: default; }
+    .tl-hour td.tl-hour-orders { box-shadow: inset 0 0 0 1px #f59e0b; }
+    .tl-hour tr.tl-hour-total th, .tl-hour tr.tl-hour-total td { font-weight: 700; border-top: 2px solid #9ca3af; }
+    .tl-hour td.tl-hour-empty { color: #d1d5db; background: #fff; }
     /* Modal */
     .tl-modal-backdrop {
       position: fixed; inset: 0; background: rgba(15, 23, 42, 0.55);
@@ -160,6 +183,75 @@
   </style>
 
   <div class="max-w-7xl mx-auto" x-data="cppTimeline()" x-init="init()">
+
+    {{-- Spec 288: Buckets (many days, the 4 snapshot times) or Hourly (one day, every hour). --}}
+    <div class="flex items-center gap-2 mb-3" id="tl-view-toggle">
+      <span class="text-xs font-semibold text-gray-600">View</span>
+      <button type="button" @click="setView('buckets')" class="text-sm px-3 py-1 rounded border"
+              :class="view === 'buckets' ? 'bg-gray-800 text-white border-gray-800' : 'bg-white text-gray-700 border-gray-300'">Buckets</button>
+      <button type="button" @click="setView('hourly')" class="text-sm px-3 py-1 rounded border"
+              :class="view === 'hourly' ? 'bg-gray-800 text-white border-gray-800' : 'bg-white text-gray-700 border-gray-300'">Hourly</button>
+      <span class="tl-legend ml-auto">
+        <span><span class="swatch cpp-g"></span> CPP below ₱30</span>
+        <span><span class="swatch cpp-c"></span> ₱30–49</span>
+        <span><span class="swatch cpp-o"></span> ₱50–69</span>
+        <span><span class="swatch cpp-r"></span> ₱70 and up</span>
+        <span><span class="swatch cpp-n"></span> No orders yet</span>
+      </span>
+    </div>
+
+    {{-- ── Hourly view: rows = page, columns = hour 00–23 (Manila) ── --}}
+    <div x-show="view === 'hourly'" x-cloak class="bg-white border border-gray-200 rounded-lg p-4 mb-4" id="tl-hourly">
+      <div class="flex flex-wrap items-end gap-3 mb-2">
+        <div>
+          <label class="block text-xs font-semibold text-gray-600 mb-1">Day</label>
+          <input type="date" x-model="hourDate" @change="loadHourly()" class="border border-gray-300 rounded px-2 py-1 text-sm">
+        </div>
+        <div class="text-xs text-gray-600">
+          Each cell is CPP from 00:00 to the end of that hour (cumulative, so 15 matches the 3PM bucket). Hover for spend,
+          orders, CPI, CPM and what the hour added. Amber edge = orders but no hourly spend stored yet.
+          <template x-if="hourly.stored_at"><span> · Meta hourly spend as of <span x-text="fmtSavedAt(hourly.stored_at)"></span></span></template>
+        </div>
+        <div class="text-xs text-gray-500" x-show="hourLoading">⏳ Loading…</div>
+      </div>
+      <div class="tl-hour-wrap">
+        <table class="tl-hour" id="tl-hour-table">
+          <colgroup>
+            <col class="tl-hour-page">
+            @for ($h = 0; $h < 24; $h++)<col class="tl-hour-col">@endfor
+          </colgroup>
+          <thead>
+            <tr>
+              <th class="tl-hour-name">Page</th>
+              @for ($h = 0; $h < 24; $h++)<th class="tl-hour-h" title="{{ sprintf('%02d:00–%02d:59', $h, $h) }}">{{ sprintf('%02d', $h) }}</th>@endfor
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="row in hourly.pages" :key="row.page">
+              <tr>
+                <th class="tl-hour-name" x-text="row.page" :title="row.page"></th>
+                <template x-for="(c, h) in row.cells" :key="row.page + '|' + h">
+                  <td :class="hourClass(c)" :title="hourTip(row.page, c, h)" x-text="c && c.cpp != null ? Math.round(c.cpp) : (c ? '·' : '')"></td>
+                </template>
+              </tr>
+            </template>
+            <template x-if="hourly.pages.length">
+              <tr class="tl-hour-total">
+                <th class="tl-hour-name">Total</th>
+                <template x-for="(c, h) in hourly.total" :key="'total|' + h">
+                  <td :class="hourClass(c)" :title="hourTip('Total', c, h)" x-text="c && c.cpp != null ? Math.round(c.cpp) : (c ? '·' : '')"></td>
+                </template>
+              </tr>
+            </template>
+            <template x-if="!hourLoading && !hourly.pages.length">
+              <tr><td colspan="25" class="text-center text-gray-400 py-6">Walang data sa araw na ito.</td></tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div x-show="view === 'buckets'">
 
     {{-- ── Filter bar ──────────────────────────────────────────────── --}}
     <div class="bg-white border border-gray-200 rounded-lg p-4 mb-4">
@@ -221,9 +313,9 @@
         </span>
       </div>
       <div class="mt-3 tl-legend">
-        <span><span class="swatch" style="background:#ffffff;"></span> Saved snapshot — Adspent + Orders + CPP</span>
-        <span><span class="swatch" style="background:#fffdf6;"></span> Inferred — Orders only (from macro_output)</span>
-        <span><span class="swatch" style="background:#f8fafc;"></span> Estimate — projected from earlier-today × historical ratio</span>
+        <span><span class="swatch" style="background:#ffffff;"></span> Saved snapshot — Adspent + Orders + CPP (no edge)</span>
+        <span><span class="swatch" style="box-shadow: inset 0 0 0 2px #f59e0b;"></span> Inferred — Orders only (from macro_output)</span>
+        <span><span class="swatch" style="outline: 2px dashed #60a5fa; outline-offset: -3px;"></span> Estimate — projected from earlier-today × historical ratio</span>
         <span><span class="swatch" style="background:#ffffff;border-color:#e5e7eb;"></span> No data</span>
       </div>
     </div>
@@ -252,7 +344,7 @@
               <tr>
                 <th class="tl-date-col" x-text="fmtDate(d)"></th>
                 <template x-for="b in buckets" :key="d + '|' + b">
-                  <td x-bind:class="cellClass(b, d)"
+                  <td x-bind:class="cellClass(b, d)" :title="cellState(b, d)"
                       @click="cellOf(b, d) && !cellOf(b, d).inferred && !cellOf(b, d).is_estimate && openDetail(d, b)">
                     <template x-if="cellOf(b, d)">
                       <div>
@@ -303,6 +395,8 @@
         </table>
       </div>
     </div>
+
+    </div>{{-- /bucket view --}}
 
     {{-- ── Detail Modal ───────────────────────────────────────────── --}}
     <template x-if="modal.open">
@@ -409,6 +503,10 @@
         start:      @json($start),
         end:        @json($end),
         preset:     'last7',
+        view:       'buckets', // 'buckets' | 'hourly' (spec 288)
+        hourDate:   @json(\Carbon\Carbon::now('Asia/Manila')->toDateString()),
+        hourly:     { pages: [], total: [], stored_at: null, last_hour: 23 },
+        hourLoading: false,
         cutoffMode: 'upload', // 'upload' | 'clock' — controls inferred cell cutoff
         showInferredBadge: 'hide', // 'hide' | 'show' — toggle the ⚠ inferred badge text
 
@@ -525,12 +623,70 @@
           return (this.cells[bucket] && this.cells[bucket][date]) || null;
         },
 
+        // The fill is the CPP colour; the state (saved / inferred / estimate) is a thin edge and the tooltip.
         cellClass(bucket, date) {
           const c = this.cellOf(bucket, date);
           if (!c) return 'tl-cell-empty';
-          if (c.is_estimate) return 'tl-cell tl-cell-estimate'; // future projection (blue)
-          if (c.inferred)    return 'tl-cell tl-cell-inferred'; // past inferred (amber)
-          return 'tl-cell'; // saved snapshot (white)
+          const tone = this.cppTone(c.cpp);
+          if (c.is_estimate) return 'tl-cell tl-cell-estimate ' + tone; // future projection (dashed blue edge)
+          if (c.inferred)    return 'tl-cell tl-cell-inferred ' + tone; // past inferred (amber edge)
+          return 'tl-cell ' + tone; // saved snapshot
+        },
+        cellState(bucket, date) {
+          const c = this.cellOf(bucket, date);
+          if (!c) return '';
+          if (c.is_estimate) return 'Estimate: projected from earlier today × historical ratio';
+          if (c.inferred) return 'Inferred: orders from macro_output';
+          return 'Saved snapshot';
+        },
+
+        // CPP colours by amount (the team's CPP report): below ₱30 green, ₱30–49 cyan, ₱50–69 orange, ₱70+ red, no CPP grey.
+        cppTone(cpp) {
+          if (cpp == null || cpp === '' || isNaN(Number(cpp))) return 'cpp-n';
+          const v = Number(cpp);
+          if (v < 30) return 'cpp-g';
+          if (v < 50) return 'cpp-c';
+          if (v < 70) return 'cpp-o';
+          return 'cpp-r';
+        },
+
+        setView(v) {
+          this.view = v;
+          if (v === 'hourly' && !this.hourly.loaded) this.loadHourly();
+        },
+        async loadHourly() {
+          this.hourLoading = true;
+          try {
+            const qs = new URLSearchParams({ date: this.hourDate });
+            const res = await fetch(`{{ route('ads_manager.cpp.timeline.hourly') }}?${qs.toString()}`);
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            const j = await res.json();
+            this.hourly = { pages: j.pages || [], total: j.total || [], stored_at: j.stored_at || null, last_hour: j.last_hour, loaded: true };
+          } catch (e) {
+            console.error('Hourly load failed:', e);
+          } finally {
+            this.hourLoading = false;
+          }
+        },
+        hourClass(c) {
+          if (!c) return 'tl-hour-empty';
+          return this.cppTone(c.cpp) + (c.source === 'orders' ? ' tl-hour-orders' : '');
+        },
+        // Tooltip: cumulative to the end of the hour, then what the hour itself added.
+        hourTip(page, c, h) {
+          const hh = String(h).padStart(2, '0');
+          if (!c) return `${page} · ${hh}:00–${hh}:59 · no data`;
+          const lines = [
+            `${page} · 00:00–${hh}:59 (cumulative)`,
+            `CPP: ${c.cpp != null ? this.money(c.cpp) : 'no orders yet'}`,
+            `Spend: ${c.spend != null ? this.money(c.spend) : 'no hourly spend stored yet'}`,
+            `Orders: ${this.num(c.orders)}`,
+            `CPI (per 1k impressions): ${c.cpi != null ? this.money(c.cpi) : '—'}`,
+            `CPM (per message): ${c.cpm != null ? this.money(c.cpm) : '—'}`,
+            `This hour: ${c.add_spend != null ? '+' + this.money(c.add_spend) : '—'} spend, +${this.num(c.add_orders)} orders`,
+          ];
+          if (c.source === 'orders') lines.push('Orders only: Meta hourly spend not stored yet');
+          return lines.join('\n');
         },
 
         // Compose the inferred-cell badge text — shows the cutoff time used.

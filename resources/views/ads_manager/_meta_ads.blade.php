@@ -213,6 +213,35 @@
     @endif
   </div>
 
+  {{-- The latest run, manual or scheduled. While it is queued or running the box asks the status route every 3 s and
+       redraws itself, so nobody has to refresh the page to see it end. --}}
+  @if (!empty($meta['last_run']))
+    <div id="meta-sync-run-box">
+      @include('ads_manager._meta_sync_run', ['run' => $meta['last_run']])
+    </div>
+    <script>
+      (function () {
+        const box = document.getElementById('meta-sync-run-box');
+        if (!box) return;
+        function next() {
+          const run = box.querySelector('#meta-sync-run');
+          if (!run || (run.dataset.state !== 'queued' && run.dataset.state !== 'running')) return;
+          setTimeout(async function () {
+            try {
+              const res = await fetch(run.dataset.statusUrl, { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
+              if (res.ok) {
+                const j = await res.json();
+                if (j && j.html) box.innerHTML = j.html;
+              }
+            } catch (e) { /* a missed poll is tried again on the next tick */ }
+            next();
+          }, 3000);
+        }
+        next();
+      })();
+    </script>
+  @endif
+
   @if ($meta['is_ceo'])
     <form method="POST" action="{{ route('ads_manager.meta.write_mode') }}" class="flex gap-2 flex-wrap items-end text-sm border-t pt-3">
       @csrf
@@ -243,7 +272,17 @@
                 <td class="p-1 font-mono">#{{ $l->id }}</td>
                 <td class="p-1">{{ $l->original_name }}</td>
                 <td class="p-1">{{ $l->type === 'ads_manager_api' ? strtoupper($l->status) . ' · +' . $l->inserted . ' / ~' . $l->updated . ' / skip ' . $l->skipped : '' }}</td>
-                <td class="p-1 text-red-700">{{ $l->error_message }}
+                @php
+                  // One line per account; runs before spec 288 joined them with "; ". More than 3 lines collapse.
+                  $lines = preg_split('/\n|; (?=act_\d+:|No page name)/', (string) $l->error_message, -1, PREG_SPLIT_NO_EMPTY);
+                @endphp
+                <td class="p-1 text-red-700" data-log-errors>
+                  @foreach (array_slice($lines, 0, 3) as $line)<div>{{ $line }}</div>@endforeach
+                  @if (count($lines) > 3)
+                    <details><summary class="cursor-pointer">{{ count($lines) - 3 }} more</summary>
+                      @foreach (array_slice($lines, 3) as $line)<div>{{ $line }}</div>@endforeach
+                    </details>
+                  @endif
                   @if (!empty($meta['refused'][$l->id]))
                     @include('ads_manager._refused', ['ref' => $meta['refused'][$l->id]])
                   @endif

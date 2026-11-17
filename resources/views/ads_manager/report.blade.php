@@ -208,7 +208,7 @@
                   @endif
                 </td>
 
-                <td class="p-2 text-xs text-red-700 max-w-xs whitespace-normal break-words" data-col="error_message">{{ $log->error_message }}</td>
+                <td class="p-2 text-xs text-red-700 max-w-xs whitespace-pre-line break-words" data-col="error_message">{{ $log->error_message }}</td>
 
                 <td class="p-2 font-mono text-xs" data-col="started_at">{{ $log->started_at }}</td>
                 <td class="p-2 font-mono text-xs" data-col="finished_at">{{ $log->finished_at }}</td>

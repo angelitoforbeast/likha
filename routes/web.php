@@ -934,6 +934,8 @@ Route::get('/ads_manager/meta/callback', [\App\Http\Controllers\MetaAdsControlle
 Route::post('/ads_manager/meta/disconnect', [\App\Http\Controllers\MetaAdsController::class, 'disconnect'])->name('ads_manager.meta.disconnect');
 Route::post('/ads_manager/meta/compare', [\App\Http\Controllers\MetaAdsController::class, 'compare'])->name('ads_manager.meta.compare');
 Route::post('/ads_manager/meta/sync', [\App\Http\Controllers\MetaAdsController::class, 'sync'])->name('ads_manager.meta.sync');
+// Spec 288: the live state of a sync run (polled by the card while it is queued or running).
+Route::get('/ads_manager/meta/sync/status', [\App\Http\Controllers\MetaAdsController::class, 'syncStatus'])->name('ads_manager.meta.sync.status');
 Route::post('/ads_manager/meta/write-mode', [\App\Http\Controllers\MetaAdsController::class, 'writeMode'])->name('ads_manager.meta.write_mode');
 Route::post('/ads_manager/meta/accounts', [\App\Http\Controllers\MetaAdsController::class, 'accounts'])->name('ads_manager.meta.accounts');
 // Spec 281: ang Meta app (App ID, App Secret, Configuration ID) ng site, CEO lang.
@@ -958,6 +960,9 @@ Route::post('/ads_manager/meta/ad-accounts/refresh', [\App\Http\Controllers\Meta
         ->name('ads_manager.cpp.timeline');
     Route::get('/ads_manager/cpp/timeline/data',   [\App\Http\Controllers\CPPController::class, 'timelineData'])
         ->name('ads_manager.cpp.timeline.data');
+    // Spec 288: CPP per page per hour of one day (the hourly view of the timeline).
+    Route::get('/ads_manager/cpp/timeline/hourly', [\App\Http\Controllers\CPPController::class, 'timelineHourly'])
+        ->name('ads_manager.cpp.timeline.hourly');
     Route::get('/ads_manager/cpp/timeline/detail', [\App\Http\Controllers\CPPController::class, 'timelineDetail'])
         ->name('ads_manager.cpp.timeline.detail');
     Route::get(

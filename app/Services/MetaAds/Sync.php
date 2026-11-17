@@ -6,6 +6,7 @@ use App\Jobs\ProcessAdsManagerReportsUpload;
 use App\Models\AppSetting;
 use App\Models\UploadLog;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -178,7 +179,8 @@ class Sync
     private function runAccounts(UploadLog $log, string $from, string $to): UploadLog
     {
         $importer = new ProcessAdsManagerReportsUpload('');
-        $problems = [];
+        $problems = [];   // connection lines ("<who>: needs Reconnect")
+        $accLines = [];   // account id => its one line: the days without data and the last error
         $seen     = [];
         $all      = $this->connections->all();
         $current  = self::current($all);
@@ -188,9 +190,12 @@ class Sync
             return $log;
         }
         self::rememberNew($current, $selected);
+        $days     = self::days($from, $to);
+        $progress = ['accounts_total' => count($selected), 'accounts_done' => 0, 'days_total' => count($days), 'account' => null];
+        self::progress($log->id, $progress);
         $selected = array_flip($selected);
         $tot      = ['processed' => 0, 'inserted' => 0, 'updated' => 0, 'skipped' => 0, 'protected' => []];
-        $noPage   = []; // "ad <id> (page <id>)" ng mga row na nilaktawan dahil walang page_name
+        $noPage   = []; // ad id => page id ng mga row na nilaktawan dahil walang page_name
         $refused  = []; // ang mga row na tinanggihan dahil may numerong bumaba (DataHealth)
 
         foreach ($all as $c) {
@@ -205,33 +210,64 @@ class Sync
             foreach ($c['ad_accounts'] ?? [] as $acc) {
                 $accId = (string) ($acc['id'] ?? '');
                 if ($accId === '' || isset($seen[$accId]) || !isset($selected[$accId])) continue;
-                try {
-                    $rows = $this->withPageNames($this->insights->rows($accId, $from, $to, $token, true));
-                    $seen[$accId] = true;
-                    $res  = $importer->importRows($rows['rows']);
-                    $tot['processed'] += count($rows['rows']);
-                    $tot['skipped']   += count($rows['skipped']) + $res['skipped'];
-                    $noPage = array_merge($noPage, $rows['skipped']);
-                    $tot['inserted']  += $res['inserted'];
-                    $tot['updated']   += $res['updated'];
-                    foreach ($res['protected'] as $f => $n) $tot['protected'][$f] = ($tot['protected'][$f] ?? 0) + $n;
-                    foreach ($res['refused'] as $x) $refused[] = ['account' => $x['account'] ?? $accId] + $x;
-                    $synced = true;
-                } catch (GraphException $e) {
-                    if ($e->tokenExpired()) {
-                        $this->connections->update($c['ref'], ['status' => 'expired', 'last_error' => $e->getMessage()]);
-                        $problems[] = "{$who}: token expired (Reconnect)";
+                $progress['account'] = (string) ($acc['name'] ?? '') ?: "act_{$accId}";
+                self::progress($log->id, $progress);
+
+                $adCache = [];
+                $missing = [];
+                $error   = null;
+                $expired = false;
+                foreach ($days as $i => $day) {
+                    try {
+                        $rows = $this->withPageNames($this->insights->dayRows($accId, $day, $token, $adCache));
+                        $res  = $importer->importRows($rows['rows']);
+                        $tot['processed'] += count($rows['rows']);
+                        $tot['skipped']   += count($rows['skipped']) + $res['skipped'];
+                        $noPage += $rows['skipped'];
+                        $tot['inserted']  += $res['inserted'];
+                        $tot['updated']   += $res['updated'];
+                        foreach ($res['protected'] as $f => $n) $tot['protected'][$f] = ($tot['protected'][$f] ?? 0) + $n;
+                        foreach ($res['refused'] as $x) $refused[] = ['account' => $x['account'] ?? $accId] + $x;
+                        $seen[$accId] = true;
+                        $synced = true;
+                        // Rows so far, for the live status on the report page.
+                        $log->update(['processed_rows' => $tot['processed'], 'inserted' => $tot['inserted'], 'updated' => $tot['updated'], 'skipped' => $tot['skipped']]);
+                    } catch (GraphException $e) {
+                        if ($e->tokenExpired()) {
+                            $this->connections->update($c['ref'], ['status' => 'expired', 'last_error' => $e->getMessage()]);
+                            $problems[] = "{$who}: token expired (Reconnect)";
+                            $expired = true;
+                            break;
+                        }
+                        if ($e->transient()) {
+                            // Already tried again and as an async job: this day stays without data, the next day may work.
+                            $missing[] = $day;
+                            $error = $e->getMessage();
+                            continue;
+                        }
+                        // A rate limit (after its waits), a block or a permanent error (400, permission) would answer the
+                        // same for the other days, so they are not asked and are named as without data.
+                        $missing = array_merge($missing, array_slice($days, $i));
+                        $error = $e->rateLimited() ? 'rate limited, skipped' : $e->getMessage();
                         break;
+                    } catch (Throwable $e) {
+                        Log::error('MetaAds sync: account day failed', ['account' => $accId, 'day' => $day, 'error' => Graph::clean($e->getMessage())]);
+                        $missing[] = $day;
+                        $error = 'failed';
                     }
-                    $problems[] = "act_{$accId}: " . ($e->rateLimited() ? 'rate limited, skipped' : $e->getMessage());
-                } catch (Throwable $e) {
-                    Log::error('MetaAds sync: account failed', ['account' => $accId, 'error' => Graph::clean($e->getMessage())]);
-                    $problems[] = "act_{$accId}: failed";
                 }
+                if ($expired) break; // the account may still be read through another connection, as before
+
+                if ($missing) $accLines[$accId] = self::accountLine($accId, $missing, $days, (string) $error);
+                else unset($accLines[$accId]); // read in full through this connection after another one failed
+                $progress['accounts_done'] = min($progress['accounts_total'], $progress['accounts_done'] + 1);
+                self::progress($log->id, $progress);
             }
             if ($synced) $this->connections->update($c['ref'], ['last_sync_at' => now()->toIso8601String()]);
         }
 
+        $problems = array_merge($problems, array_values($accLines));
+        self::progress($log->id, ['accounts_done' => $progress['accounts_total'], 'account' => null] + $progress);
         $log->update([
             'status'            => $problems ? 'partial' : 'done',
             'processed_rows'    => $tot['processed'],
@@ -239,14 +275,69 @@ class Sync
             'updated'           => $tot['updated'],
             'skipped'           => $tot['skipped'],
             'protected_details' => $tot['protected'] ?: null,
-            'error_message'     => ($problems || $noPage) ? mb_substr(implode('; ', array_merge($problems,
-                $noPage ? ['No page name, skipped: ' . implode(', ', array_unique($noPage))] : [])), 0, 2000) : null,
+            // One line per account (or per Facebook page for the skipped ads), so a long run reads as a short list.
+            'error_message'     => ($problems || $noPage) ? mb_substr(implode("\n", array_merge($problems, self::noPageLines($noPage))), 0, 2000) : null,
             'finished_at'       => now(),
         ]);
         DataHealth::recordRefusals($log, 'sync', $refused);
         if ($tot['inserted'] + $tot['updated'] > 0) \App\Http\Controllers\OwnerPrivateController::bumpCacheVersion();
 
         return $log;
+    }
+
+    /** @return list<string> every day from..to (Y-m-d) */
+    public static function days(string $from, string $to): array
+    {
+        $out = [];
+        for ($d = Carbon::parse($from); $d->lte(Carbon::parse($to)); $d->addDay()) $out[] = $d->format('Y-m-d');
+
+        return $out;
+    }
+
+    /**
+     * "act_<id>: <reason>" for an account with days without data. A rate limit over the whole range keeps the short
+     * "rate limited, skipped"; otherwise the days are named ("no data for Nov 12, Nov 13" or "Nov 11 to Nov 17").
+     */
+    public static function accountLine(string $accId, array $missing, array $days, string $error): string
+    {
+        $all = count($missing) === count($days);
+        if ($all && $error === 'rate limited, skipped') return "act_{$accId}: {$error}";
+        $fmt  = fn ($d) => Carbon::parse($d)->format('M j');
+        $when = $all && count($days) > 2 ? $fmt($days[0]) . ' to ' . $fmt(end($days)) : implode(', ', array_map($fmt, $missing));
+
+        return "act_{$accId}: no data for {$when} ({$error})";
+    }
+
+    /** @param array<string, string> $noPage ad id => page id @return list<string> one line per Facebook page */
+    private static function noPageLines(array $noPage): array
+    {
+        $byPage = [];
+        foreach ($noPage as $ad => $page) $byPage[$page][] = (string) $ad;
+        $out = [];
+        foreach ($byPage as $page => $ads) {
+            $out[] = 'No page name, skipped: ' . (count($ads) === 1 ? "ad {$ads[0]} (page {$page})"
+                : count($ads) . " ads of page {$page} (" . implode(', ', array_slice($ads, 0, 3)) . (count($ads) > 3 ? ', …' : '') . ')');
+        }
+
+        return $out;
+    }
+
+    public const PROGRESS_KEY = 'meta_ads.sync.progress.';
+
+    /**
+     * The live progress of a run (accounts done of total, the account being read), for the status poll. Kept in the
+     * cache, which is the database on both sites, so the queue worker writes what the web request reads. Best effort:
+     * the run never fails over it.
+     */
+    public static function progress(int $logId, ?array $set = null): ?array
+    {
+        try {
+            if ($set !== null) Cache::put(self::PROGRESS_KEY . $logId, $set, now()->addHours(2));
+
+            return Cache::get(self::PROGRESS_KEY . $logId);
+        } catch (Throwable) {
+            return null;
+        }
     }
 
     /**
@@ -267,7 +358,7 @@ class Sync
     /**
      * Ang row na walang page_name (walang Likha page na may ganitong Facebook page ID) ay kumukuha ng page_name ng dating
      * row ng parehong ad; kung wala, laktaw (page_name ay NOT NULL sa ads_manager_reports), at nakalista sa run log para
-     * maayos (hal. idagdag ang botcake.page_id sa /page-settings). @return array{rows: array, skipped: list<string>}
+     * maayos (hal. idagdag ang botcake.page_id sa /page-settings). @return array{rows: array, skipped: array<string, string>} (skipped: ad id => page id)
      */
     private function withPageNames(array $rows): array
     {
@@ -283,7 +374,7 @@ class Sync
             $pageId = $r['page_id'] ?? null;
             unset($r['page_id']);
             if (empty($r['page_name'])) $r['page_name'] = $known[$r['ad_id']] ?? null;
-            if (empty($r['page_name'])) { $skipped[] = 'ad ' . $r['ad_id'] . ' (page ' . ($pageId ?? 'unknown') . ')'; continue; }
+            if (empty($r['page_name'])) { $skipped[(string) $r['ad_id']] = (string) ($pageId ?? 'unknown'); continue; }
             $out[] = $r;
         }
 

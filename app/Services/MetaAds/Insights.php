@@ -5,6 +5,7 @@ namespace App\Services\MetaAds;
 use App\Models\BotcakeChat;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Sleep;
 use Throwable;
 
 /**
@@ -27,6 +28,13 @@ class Insights
      * - 50% watched: `video_p50_watched_actions`.
      */
     public const VIDEO_VIEW = 'video_view';
+
+    /** Rows per page of a one-day request (was 500 for a 7-day request): a smaller answer is less likely to time out at Meta. */
+    public const DAY_LIMIT = 100;
+    /** Async report job: poll every 5 s, at most 24 times (2 minutes) per account/day. */
+    public const ASYNC_POLLS = 24;
+    public const ASYNC_WAIT  = 5;
+    public const HOURLY = 'hourly_stats_aggregated_by_advertiser_time_zone';
 
     public const AD_FIELDS = 'id,effective_status,'
         . 'adset{id,effective_status,daily_budget,lifetime_budget,start_time,end_time,optimization_goal},'
@@ -106,12 +114,123 @@ class Insights
         return $out;
     }
 
+    /**
+     * One account, one day, mapped with details, for the sync. A 7-day ad-level request with these fields is heavy
+     * enough that Meta answers code 1/2 for busy accounts; one day per request with a smaller page is light.
+     * $adCache (ad id => detail) is kept by the caller across the days of one run, so each ad is asked once.
+     * @throws GraphException
+     */
+    public function dayRows(string $accountId, string $day, string $token, array &$adCache): array
+    {
+        $insights = $this->dayInsights($accountId, $day, $token);
+        $ids = array_values(array_unique(array_filter(array_map(fn ($r) => (string) ($r['ad_id'] ?? ''), $insights))));
+        $new = array_values(array_diff($ids, array_map('strval', array_keys($adCache))));
+        if ($new) $adCache += $this->ads($accountId, $new, $token, true);
+        $pages = $this->pageNames(array_intersect_key($adCache, array_flip($ids)));
+
+        $out = [];
+        foreach ($insights as $r) {
+            $row = $this->map($accountId, $r, $adCache[(string) ($r['ad_id'] ?? '')] ?? null, $pages);
+            if ($row !== null) $out[] = $row;
+        }
+
+        return $out;
+    }
+
+    /**
+     * The raw insights rows of one account and day. A transient failure (code 1/2, 5xx, no answer) is tried
+     * Graph::TRANSIENT_TRIES times, then handed to Meta's async report job, which Meta runs without the time limit of
+     * a direct request. A permanent error or a rate limit is thrown as it is. @throws GraphException
+     */
+    public function dayInsights(string $accountId, string $day, string $token): array
+    {
+        $query = [
+            'level'          => 'ad',
+            'time_increment' => 1,
+            'time_range'     => json_encode(['since' => $day, 'until' => $day]),
+            'fields'         => self::FIELDS,
+            'limit'          => self::DAY_LIMIT,
+        ];
+        try {
+            return $this->graph->retrying()->all('act_' . $accountId . '/insights', $query, $token);
+        } catch (GraphException $e) {
+            if (!$e->transient()) throw $e;
+            $first = $e;
+        }
+
+        try {
+            return $this->asyncReport($accountId, $query, $token);
+        } catch (GraphException $e) {
+            if ($e->tokenExpired() || $e->rateLimited() || $e->blocked()) throw $e;
+            // The day's line keeps Meta's first answer, which is what staff can look up; the async reason follows it.
+            throw new GraphException($first->getMessage() . '; async report: ' . $e->getMessage(), $first->graphCode, true, $first->httpStatus);
+        }
+    }
+
+    /**
+     * Meta's async insights report: POST the query, poll the job every ASYNC_WAIT seconds (ASYNC_POLLS times at most),
+     * then read its rows. @throws GraphException
+     */
+    public function asyncReport(string $accountId, array $query, string $token): array
+    {
+        unset($query['limit']);
+        $graph = $this->graph->retrying();
+        $job = $graph->post('act_' . $accountId . '/insights', $query, $token);
+        $id  = (string) ($job['report_run_id'] ?? '');
+        if (preg_match('/^\d+$/D', $id) !== 1) throw new GraphException('no report id');
+
+        for ($i = 0; $i < self::ASYNC_POLLS; $i++) {
+            Sleep::for(self::ASYNC_WAIT)->seconds();
+            $job    = $graph->get($id, ['fields' => 'async_status,async_percent_completion'], $token, Graph::TRIES, 60);
+            $status = (string) ($job['async_status'] ?? '');
+            if ($status === 'Job Completed') {
+                return $graph->all($id . '/insights', ['limit' => self::DAY_LIMIT], $token);
+            }
+            if (in_array($status, ['Job Failed', 'Job Skipped'], true)) throw new GraphException(strtolower($status));
+        }
+
+        throw new GraphException('not finished after ' . (self::ASYNC_POLLS * self::ASYNC_WAIT) . ' s');
+    }
+
+    /**
+     * Spend, impressions and messages per ad per hour (Asia/Manila when the ad account is set to it) of one account
+     * and day, ads with spend only. One request (plus pages). A rate limit or block is not waited on: the hourly run
+     * is skipped and the next hour tries again. @return list<array{ad_id: string, hour: int, spend: float, impressions: int, messages: int}>
+     * @throws GraphException
+     */
+    public function hourly(string $accountId, string $day, string $token): array
+    {
+        $rows = $this->graph->retrying()->all('act_' . $accountId . '/insights', [
+            'level'      => 'ad',
+            'time_range' => json_encode(['since' => $day, 'until' => $day]),
+            'breakdowns' => self::HOURLY,
+            'fields'     => 'ad_id,spend,impressions,actions',
+            'filtering'  => json_encode([['field' => 'spend', 'operator' => 'GREATER_THAN', 'value' => 0]]),
+            'limit'      => 500,
+        ], $token, 1);
+
+        $out = [];
+        foreach ($rows as $r) {
+            $adId = trim((string) ($r['ad_id'] ?? ''));
+            if ($adId === '' || !preg_match('/^(\d{1,2}):/', (string) ($r[self::HOURLY] ?? ''), $m) || (int) $m[1] > 23) continue;
+            $out[] = [
+                'ad_id'       => $adId,
+                'hour'        => (int) $m[1],
+                'spend'       => (float) (self::dec($r['spend'] ?? null) ?? 0),
+                'impressions' => (int) (self::int($r['impressions'] ?? null) ?? 0),
+                'messages'    => (int) (self::action(is_array($r['actions'] ?? null) ? $r['actions'] : [], [self::MESSAGING]) ?? 0),
+            ];
+        }
+
+        return $out;
+    }
+
     /** ad id => detalye, 50 kada tawag. */
-    private function ads(string $accountId, array $adIds, string $token): array
+    private function ads(string $accountId, array $adIds, string $token, bool $retry = false): array
     {
         $out = [];
         foreach (array_chunk(array_filter($adIds), 50) as $chunk) {
-            $list = $this->graph->all('act_' . $accountId . '/ads', [
+            $list = ($retry ? $this->graph->retrying() : $this->graph)->all('act_' . $accountId . '/ads', [
                 'fields'    => self::AD_FIELDS,
                 'filtering' => json_encode([['field' => 'ad.id', 'operator' => 'IN', 'value' => $chunk]]),
                 'limit'     => 100,

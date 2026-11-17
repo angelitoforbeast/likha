@@ -299,6 +299,15 @@ Schedule::command('meta-ads:sync --scheduled')
     ->withoutOverlapping(120)
     ->runInBackground();
 
+// Spec 288: spend per page per hour (Meta hourly breakdown) for the hourly CPP timeline, every hour at :10 Manila, only
+// behind write mode like the sync. A rate limit or block skips that run; the next hour tries again.
+Schedule::command('meta-ads:hourly --scheduled')
+    ->timezone('Asia/Manila')
+    ->hourlyAt(10)
+    ->when(fn () => \App\Services\MetaAds\Sync::writeMode())
+    ->withoutOverlapping(50)
+    ->runInBackground();
+
 // Spec 284: balance, spend cap at status ng bawat ad account (read-only), para sa paalala sa /ads_manager/report. Kada oras;
 // walang binabasa kapag walang connection o wala pang 10 minuto ang huling read. Pagkatapos din ng bawat scheduled meta-ads:sync.
 Schedule::command('meta-ads:account-health')
