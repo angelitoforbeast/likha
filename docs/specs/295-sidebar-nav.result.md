@@ -51,6 +51,62 @@ Read first: `components/layout.blade.php`, `components/navlink.blade.php`, `NavL
 
 ## Evidence per done-when item
 
+**1. Tests** (`tests/Feature/Nav/`, 89 tests, all written before the code and seen failing first in commit 01290a49; all pass):
+- Section migration (`NavSectionMigrationTest`): each of the 49 inventory urls lands in its section, one test per url. Also covered:
+  - an unknown link lands in More;
+  - a url stored without its leading `/` is still found;
+  - every role's visible set is identical before and after, and no row is left without a section;
+  - the columns are added once and a rerun keeps a section the CEO chose;
+  - rollback drops both columns;
+  - a link added later without a section is still placed by its url.
+- Sidebar per role (`SidebarTest`):
+  - the CEO sees all eight sections in order, with More last;
+  - a Data Encoder sees only Home, Orders, Shipping, Chat and Settings;
+  - every role sees exactly the links it saw before;
+  - a role with no links, and a user with no role, get the empty state and the page body;
+  - a section the CEO moved a link to is used.
+- View as (`SidebarTest`, `NavPaletteTest`, `NavPinsTest`):
+  - it changes the nav (sidebar, palette, shown pins) only; the CEO's name, the selector and the Preview mark stay;
+  - it is ignored for anyone but the CEO.
+- Active link and top bar: exactly one `aria-current`; the title, search and avatar are in the bar, and the old dark bar and the vecteezy logo are gone.
+- Layout branches: each branch of the layout renders with the sidebar for the CEO and a Data Encoder (no header + full width, full width, padded wide, default), and `/owner/nav-settings` renders in the new layout.
+- Palette per role (`NavPaletteTest`):
+  - the list equals the sidebar's links for each of the 5 roles;
+  - each entry carries id, label, section, url and icon;
+  - a Data Encoder cannot find CEO pages;
+  - View as gives the previewed role's list;
+  - the dialog and the search button are present.
+- Pins (`NavPinsTest`):
+  - a user saves their own pins in order;
+  - 7 pins are refused (422) and 6 are accepted;
+  - only the signed-in user's row changes, even with a `user_id` in the body;
+  - a guest gets 401;
+  - hidden or unknown ids are dropped, junk gets 422, repeats are dropped, an empty list is allowed;
+  - a pin to a link hidden later is not shown;
+  - View as shows only the pins the previewed role could see.
+- Nav settings' section field (`NavSettingsSectionTest`):
+  - there is a select per link with the current section selected;
+  - the CEO moves a link and visibility is unchanged;
+  - an unknown section is refused;
+  - the four other roles get 403 on GET and POST;
+  - "Add to nav" sets a section;
+  - `defaultData()` has a section on every row and every migration-made link with the same url and the same visibility;
+  - Reset writes each default's section and visibility and re-creates a deleted default link.
+- Full suite against base 8164024f: see "Full suite" below.
+
+**2. Design evidence** in `docs/design/295-sidebar-nav/`:
+- `brief.md`, written before the build, with the critique and audit findings and what was fixed in section 7.
+- Before and after, at 1280 and 390 px: `before-*.png` and `after-*.png` for checklist, ads-report, jnt-checker, finance and nav-settings. `/finance` is a standalone page that does not use `<x-layout>`, so it is identical before and after.
+- `after-palette-open-1280.png`, `after-palette-search-1280.png` and `after-palette-open-390.png`: the palette.
+- `after-rail-1280.png`: the rail collapsed, with a tooltip.
+- `after-drawer-open-390.png`: the phone drawer.
+- `before-menu-open-390.png`: the old phone menu.
+- Also: pinned, avatar menu, sections collapsed, and Data Encoder at 1280 and 390.
+
+**3.** The migration, the new components and the merge danger are listed under "What shipped" and "Merge danger".
+
+**4.** The branch is pushed (`git push -u origin feat/295-sidebar-nav`). There was no merge and no deploy, and no migration ran against any server.
+
 ## Story changes
 
 - **NV-2, checklist badge:** the old layout drew the badge twice (desktop bar and phone panel). The one sidebar now serves both, so the badge appears once per page. `tests/Feature/Checklist/ChecklistBadgeTest.php` `test_S_051_20` changes its count from 2 to 1; its other assertions (count, tone, title, team badge on `/checklist` and any layout page) are unchanged and pass.
