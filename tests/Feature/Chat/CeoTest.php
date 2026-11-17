@@ -72,7 +72,9 @@ class CeoTest extends ChatTestCase
 
         $this->actingAs($this->person('Data Encoder - OIC'))->postJson("/chat/{$g->id}/join")->assertForbidden();
         $this->actingAs($ceo)->postJson("/chat/{$d->id}/join")->assertUnprocessable();
-        $this->actingAs($oic)->postJson("/chat/{$g->id}/join")->assertUnprocessable();   // already in it
+        $this->actingAs($oic)->postJson("/chat/{$g->id}/join")->assertForbidden();         // a member, but not the CEO
+        $this->actingAs($ceo)->postJson("/chat/{$g->id}/join")->assertOk();
+        $this->actingAs($ceo)->postJson("/chat/{$g->id}/join")->assertUnprocessable();     // already in it
     }
 
     public function test_every_thread_states_that_the_owner_can_read(): void

@@ -1576,3 +1576,28 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
     Route::view('/rts', 'rts');
     Route::get('/phpinfo', fn () => phpinfo());
 });
+
+// ✅ Likha Chat (spec 296): ang Messenger ng team. Naka-login lang (walang allowed_ip): sa phone nag-uusap ang staff.
+//    Bawat route na may {conversation} ay tumitingin sa membership o CEO sa controller, pati ang poll at ang file.
+Route::middleware(['web', 'auth'])->prefix('chat')->name('chat.')->group(function () {
+    $chat  = \App\Http\Controllers\ChatController::class;
+    $group = \App\Http\Controllers\ChatGroupController::class;
+
+    Route::get   ('/',                                         [$chat, 'index'])        ->name('index');
+    Route::get   ('/conversations',                            [$chat, 'conversations'])->name('conversations');
+    Route::get   ('/people',                                   [$chat, 'people'])       ->name('people');
+    Route::get   ('/unread',                                   [$chat, 'unread'])       ->name('unread');
+    Route::get   ('/poll',                                     [$chat, 'poll'])         ->middleware('throttle:120,1')->name('poll');
+    Route::post  ('/direct',                                   [$chat, 'direct'])       ->middleware('throttle:60,1')->name('direct');
+    Route::post  ('/groups',                                   [$group, 'store'])       ->middleware('throttle:30,1')->name('groups.store');
+    Route::get   ('/{conversation}',                           [$chat, 'show'])         ->whereNumber('conversation')->name('show');
+    Route::patch ('/{conversation}',                           [$group, 'rename'])      ->whereNumber('conversation')->name('rename');
+    Route::post  ('/{conversation}/messages',                  [$chat, 'send'])         ->whereNumber('conversation')->middleware('throttle:60,1')->name('send');
+    Route::delete('/{conversation}/messages/{message}',        [$chat, 'remove'])       ->whereNumber(['conversation', 'message'])->name('remove');
+    Route::get   ('/{conversation}/messages/{message}/files/{index}', [$chat, 'file'])  ->whereNumber(['conversation', 'message', 'index'])->name('file');
+    Route::post  ('/{conversation}/read',                      [$chat, 'read'])         ->whereNumber('conversation')->name('read');
+    Route::post  ('/{conversation}/members',                   [$group, 'addMembers'])  ->whereNumber('conversation')->name('members.add');
+    Route::delete('/{conversation}/members/{user}',            [$group, 'removeMember'])->whereNumber(['conversation', 'user'])->name('members.remove');
+    Route::post  ('/{conversation}/leave',                     [$group, 'leave'])       ->whereNumber('conversation')->name('leave');
+    Route::post  ('/{conversation}/join',                      [$group, 'join'])        ->whereNumber('conversation')->name('join');
+});

@@ -32,6 +32,8 @@ class PollTest extends ChatTestCase
         $ben = $this->person();
         $quiet = $this->direct($ana, $ben);
         $this->message($quiet, $ben, 'old');
+        // `since` is inclusive to the second (no message in the same second is missed), so leave a gap.
+        $this->travel(10)->seconds();
         $since = now()->toIso8601String();
 
         $this->travel(10)->seconds();
@@ -41,7 +43,7 @@ class PollTest extends ChatTestCase
         $res = $this->actingAs($ana)->getJson('/chat/poll?since=' . urlencode($since))->assertOk()->json();
         $this->assertNull($res['thread']);
         $this->assertSame([$busy->id], array_column($res['conversations'], 'id'));
-        $this->assertSame(1, $res['unread']);
+        $this->assertSame(2, $res['unread'], 'the total over every chat');
     }
 
     public function test_poll_reports_messages_removed_since_the_last_poll(): void
@@ -107,7 +109,7 @@ class PollTest extends ChatTestCase
 
         $g = $this->group($oic, [$ana]);
         $this->message($g, $oic, 'c');
-        $this->message($g, null, null, ['sender_ai' => 'mira', 'body' => 'AI note']);
+        $this->message($g, null, 'AI note', ['sender_ai' => 'mira']);
 
         $left = $this->group($oic, [$ana]);
         ChatMember::where(['conversation_id' => $left->id, 'user_id' => $ana->id])->update(['left_at' => now()]);
