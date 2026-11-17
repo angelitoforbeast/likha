@@ -11,7 +11,7 @@
 <style>
   #lc {
     --lc-bg: #f9fafb; --lc-panel: #ffffff; --lc-line: #e5e7eb; --lc-line-strong: #d1d5db;
-    --lc-text: #111827; --lc-muted: #4b5563; --lc-faint: #6b7280; --lc-hover: #f3f4f6; --lc-selected: #eef2ff;
+    --lc-text: #111827; --lc-muted: #4b5563; --lc-faint: #5b6270; --lc-hover: #f3f4f6; --lc-selected: #eef2ff;
     --lc-accent: #2563eb; --lc-accent-hover: #1d4ed8; --lc-accent-soft: #dbeafe; --lc-on-accent: #ffffff;
     --lc-other: #f3f4f6; --lc-danger: #b91c1c; --lc-ai-bg: #fffbeb; --lc-ai-text: #92400e;
     --lc-top: 64px;
@@ -26,7 +26,7 @@
   :where(#lc) :where(button, input, textarea) { font: inherit; color: inherit; }
   :where(#lc) button { cursor: pointer; }
   :where(#lc) button:disabled { cursor: default; opacity: .5; }
-  #lc :focus-visible { outline: 2px solid var(--lc-accent); outline-offset: 2px; border-radius: 6px; }
+  #lc :focus-visible { outline: 2px solid var(--lc-accent); outline-offset: 2px; }
   #lc [hidden] { display: none !important; }
   .lc-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
@@ -49,8 +49,8 @@
   .lc-filter { padding: 0 16px 8px; }
   .lc-list { list-style: none; margin: 0; padding: 0 8px 8px; overflow-y: auto; flex: 1; min-height: 0; }
   .lc-row { width: 100%; display: flex; align-items: center; gap: 12px; padding: 10px 10px; border: 0; background: transparent; border-radius: 12px; text-align: left; min-height: 64px; }
-  .lc-row:hover { background: var(--lc-hover); }
-  .lc-row[aria-current="true"] { background: var(--lc-selected); }
+  .lc-row:hover { background: var(--lc-bg); }
+  .lc-row[aria-current="true"] { background: var(--lc-hover); }
   .lc-row-main { flex: 1; min-width: 0; }
   .lc-row-top { display: flex; align-items: baseline; gap: 8px; }
   .lc-row-name { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -75,8 +75,9 @@
   .lc-av.t0 { background: #dbeafe; color: #1e3a8a; } .lc-av.t1 { background: #dcfce7; color: #14532d; }
   .lc-av.t2 { background: #fef3c7; color: #78350f; } .lc-av.t3 { background: #fce7f3; color: #831843; }
   .lc-av.t4 { background: #e0e7ff; color: #312e81; } .lc-av.t5 { background: #ccfbf1; color: #134e4a; }
+  .lc-av.tn { background: #e5e7eb; color: #374151; }
   .lc-av.ai { background: var(--lc-ai-bg); color: var(--lc-ai-text); box-shadow: inset 0 0 0 1px #fde68a; }
-  .lc-ai { display: inline-block; margin-left: 5px; padding: 0 5px; border-radius: 5px; background: var(--lc-ai-bg); color: var(--lc-ai-text); font-size: 10px; font-weight: 800; letter-spacing: .06em; line-height: 16px; vertical-align: 1px; box-shadow: inset 0 0 0 1px #fde68a; }
+  .lc-ai { display: inline-block; margin-left: 5px; padding: 0 5px; border-radius: 5px; background: var(--lc-ai-bg); color: var(--lc-ai-text); font-size: 11px; font-weight: 800; letter-spacing: .05em; line-height: 16px; vertical-align: 1px; box-shadow: inset 0 0 0 1px #fde68a; }
 
   /* ── main: thread ── */
   .lc-main { flex: 1; min-width: 0; display: flex; position: relative; }
@@ -105,9 +106,9 @@
   .lc-bubble a { color: var(--lc-accent-hover); text-decoration: underline; text-underline-offset: 2px; }
   .lc-bubble.removed { background: transparent; border: 1px solid var(--lc-line-strong); color: var(--lc-faint); font-style: italic; }
   .lc-msg.me .lc-bubble.removed { background: transparent; color: var(--lc-faint); }
-  .lc-msg.pending .lc-bubble { opacity: .6; }
+  .lc-msg.pending .lc-meta { font-style: italic; }
   .lc-quote { display: block; width: 100%; text-align: left; margin: 0 0 6px; padding: 4px 8px; border: 0; border-radius: 8px; background: rgba(17, 24, 39, .06); font-size: 13px; color: inherit; box-shadow: inset 2px 0 0 rgba(17, 24, 39, .25); }
-  .lc-msg.me .lc-quote { background: rgba(255, 255, 255, .16); box-shadow: inset 2px 0 0 rgba(255, 255, 255, .6); }
+  .lc-msg.me .lc-quote { background: rgba(15, 23, 42, .22); box-shadow: inset 2px 0 0 rgba(255, 255, 255, .7); }
   .lc-quote b { display: block; font-size: 12px; }
   .lc-quote span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .lc-imgs { display: grid; gap: 4px; margin: 2px 0; }
@@ -123,7 +124,11 @@
   .lc-file small { display: block; font-weight: 400; color: var(--lc-faint); font-size: 12px; }
   .lc-meta { font-size: 11.5px; color: var(--lc-faint); margin: 3px 12px 0; display: none; }
   .lc-msg:hover .lc-meta, .lc-msg:focus-within .lc-meta, .lc-msg.show .lc-meta, .lc-msg.pending .lc-meta, .lc-msg.failed .lc-meta { display: block; }
-  .lc-msg.failed .lc-meta { color: var(--lc-danger); }
+  .lc-msg.failed .lc-meta { color: var(--lc-danger); font-size: 12.5px; font-weight: 600; }
+  .lc-msg.failed .lc-bubble, .lc-msg.me.failed .lc-bubble { background: var(--lc-panel); color: var(--lc-text); box-shadow: inset 0 0 0 1.5px var(--lc-danger); }
+  .lc-msg.failed .lc-bubble a { color: var(--lc-accent-hover); }
+  .lc-retry { min-height: 32px; padding: 4px 12px !important; font-size: 13px !important; margin-left: 6px; }
+  .lc-tag-reading { font-size: 11px; font-weight: 700; color: var(--lc-muted); background: var(--lc-hover); border-radius: 5px; padding: 0 6px; margin-left: 6px; flex: none; }
   .lc-act { align-self: center; opacity: 0; width: 30px; height: 30px; }
   .lc-msg:hover .lc-act, .lc-msg:focus-within .lc-act, .lc-msg.show .lc-act { opacity: 1; }
   .lc-menu { position: absolute; z-index: 5; bottom: calc(100% - 6px); background: var(--lc-panel); border: 1px solid var(--lc-line); border-radius: 10px; box-shadow: 0 8px 24px rgba(17, 24, 39, .14); padding: 4px; min-width: 140px; }
@@ -150,6 +155,7 @@
   .lc-chip button { border: 0; background: transparent; width: 24px; height: 24px; border-radius: 6px; color: var(--lc-muted); }
   .lc-row-compose { display: flex; align-items: flex-end; gap: 6px; }
   .lc-input { flex: 1; min-width: 0; resize: none; border: 1px solid var(--lc-line-strong); border-radius: 20px; padding: 9px 14px; max-height: 150px; line-height: 1.4; background: var(--lc-bg); }
+  .lc-input::placeholder { color: var(--lc-faint); }
   .lc-input:focus-visible { outline-offset: 0; border-radius: 20px; }
   .lc-send { width: 40px; height: 40px; border-radius: 50%; border: 0; background: var(--lc-accent); color: var(--lc-on-accent); display: grid; place-items: center; flex: none; }
   .lc-send:hover { background: var(--lc-accent-hover); }
@@ -191,13 +197,13 @@
     .lc-side { width: 100%; border-right: 0; }
     #lc[data-view="list"] .lc-main { display: none; }
     #lc[data-view="thread"] .lc-side { display: none; }
-    .lc-back { display: inline-grid !important; }
     .lc-col { max-width: 80%; }
-    .lc-act { opacity: 1; width: 28px; }
+    .lc-act { opacity: 1; width: 40px; height: 40px; }
     .lc-msg:not(.show) .lc-act { display: none; }
+    /* 16 px: iOS Safari zooms into any smaller field on focus. */
+    .lc-input, .lc-field { font-size: 16px; }
   }
-  .lc-back { display: none !important; }
-  @media (min-width: 1024px) { #lc { font-size: 14px; } .lc-side-panel { width: 340px; } }
+  @media (min-width: 1024px) { #lc { font-size: 14px; } .lc-back { display: none; } }
 </style>
 
 <div id="lc" data-view="{{ $boot['open'] ? 'thread' : 'list' }}">
@@ -259,7 +265,7 @@
     <div class="lc-placeholder" id="lc-placeholder">
       <div>
         <div class="lc-empty-icon"><i class="fa-regular fa-comment-dots" aria-hidden="true"></i></div>
-        <p style="margin: 0 0 8px; font-weight: 600; color: var(--lc-text)">Pick a chat on the left, or start a new one.</p>
+        <p style="margin: 0 0 8px; font-weight: 600; color: var(--lc-text)" id="lc-placeholder-text">Pick a chat on the left, or start a new one.</p>
         <p style="margin: 0; font-size: 13px"><i class="fa-solid fa-lock" aria-hidden="true"></i> The owner can read every conversation in Likha Chat.</p>
       </div>
     </div>
@@ -278,7 +284,8 @@
       <div class="lc-reconnect" id="lc-reconnect" role="status" hidden>Reconnecting…</div>
       <div class="lc-scroll" id="lc-scroll">
         <button type="button" class="lc-btn lc-earlier" id="lc-earlier" hidden>Load earlier messages</button>
-        <ol class="lc-msgs" id="lc-msgs" aria-live="polite" aria-relevant="additions"></ol>
+        <ol class="lc-msgs" id="lc-msgs" aria-label="Messages"></ol>
+        <div class="lc-sr" id="lc-announce" role="status" aria-live="polite"></div>
         <div class="lc-thread-empty" id="lc-thread-empty" hidden></div>
         <div class="lc-seen" id="lc-seen" hidden></div>
         <button type="button" class="lc-new-pill" id="lc-new-pill" hidden>New messages <i class="fa-solid fa-arrow-down" aria-hidden="true"></i></button>
@@ -351,7 +358,10 @@
     const opt = { method, headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-TOKEN': csrf }, credentials: 'same-origin' };
     if (body instanceof FormData) opt.body = body;
     else if (body !== undefined) { opt.headers['Content-Type'] = 'application/json'; opt.body = JSON.stringify(body); }
-    const res = await fetch(url, opt);
+    let res;
+    try { res = await fetch(url, opt); } catch (e) {
+      const err = new Error('No connection. Check your internet and try again.'); err.status = 0; throw err;
+    }
     let data = null;
     try { data = await res.json(); } catch (e) { /* no body */ }
     if (!res.ok) {
@@ -365,7 +375,7 @@
   function avatar(a, size = '') {
     if (!a) return h('span', { class: 'lc-av ' + size });
     const cls = ['lc-av', size];
-    if (a.ai) cls.push('ai'); else if (a.group) cls.push('group'); else if (a.tone !== null && a.tone !== undefined) cls.push('t' + a.tone); else cls.push('group');
+    if (a.ai) cls.push('ai'); else if (a.group) cls.push('group'); else if (a.tone !== null && a.tone !== undefined) cls.push('t' + a.tone); else cls.push('tn');
     return h('span', { class: cls.join(' '), 'aria-hidden': 'true', text: a.initials || '?' });
   }
   const aiMark = () => $('lc-ai-mark').content.firstElementChild.cloneNode(true);
@@ -417,6 +427,8 @@
     $('lc-list-loading').hidden = true;
     $('lc-list-empty').hidden = S.rows.size > 0;
     list.hidden = S.rows.size === 0;
+    $('lc-filter').parentElement.hidden = S.rows.size === 0;
+    $('lc-placeholder-text').textContent = S.rows.size === 0 ? 'Start your first chat with New chat.' : 'Pick a chat on the left, or start a new one.';
     if (S.rows.size > 0 && rows.length === 0) list.append(h('li', { class: 'lc-empty', text: 'No chats match.' }));
     const total = [...S.rows.values()].reduce((n, r) => n + (r.unread || 0), 0);
     document.title = (total ? `(${total}) ` : '') + 'Chat';
@@ -426,18 +438,19 @@
     // In a direct chat the other person's name is already the title; only "You:" is added there.
     const showSender = last && last.sender && (r.kind === 'group' || last.sender === 'You' || !r.member);
     const lastText = last ? (showSender ? `${last.sender}: ${last.text}` : last.text) : (r.kind === 'group' ? 'Group created' : 'No messages yet');
-    const label = `${r.title}${r.unread ? `, ${r.unread} unread` : ''}`;
     return h('li', {},
       h('button', {
         type: 'button', class: 'lc-row' + (r.unread ? ' unread' : '') + (r.left ? ' left' : ''),
-        'aria-current': S.open === r.id ? 'true' : 'false', 'aria-label': label, onclick: () => openConv(r.id),
+        'aria-current': S.open === r.id ? 'true' : 'false', onclick: () => openConv(r.id),
       },
         avatar(r.avatar),
         h('span', { class: 'lc-row-main' },
-          h('span', { class: 'lc-row-top' }, h('span', { class: 'lc-row-name', text: r.title }), h('span', { class: 'lc-row-time', text: listTime(r.at) })),
+          h('span', { class: 'lc-row-top' }, h('span', { class: 'lc-row-name', text: r.title }),
+            !r.member ? h('span', { class: 'lc-tag-reading', text: 'Reading' }) : null,
+            h('span', { class: 'lc-row-time', text: listTime(r.at) })),
           h('span', { class: 'lc-row-bottom' },
             h('span', { class: 'lc-row-last', text: lastText }),
-            r.unread ? h('span', { class: 'lc-pill', text: r.unread > 99 ? '99+' : String(r.unread) }) : null,
+            r.unread ? h('span', { class: 'lc-pill' }, h('span', { 'aria-hidden': 'true', text: r.unread > 99 ? '99+' : String(r.unread) }), h('span', { class: 'lc-sr', text: ` ${r.unread} unread` })) : null,
           ),
         ),
       ));
@@ -459,7 +472,11 @@
     closeNew(); closeInfo();
     S.open = id;
     root.dataset.view = 'thread';
-    if (!opts.keepUrl) history.replaceState(null, '', `/chat?c=${id}`);
+    if (!opts.keepUrl) {
+      const st = history.state || {};
+      if (isPhone() && !st.c) history.pushState({ c: id, pushed: true }, '', `/chat?c=${id}`);
+      else history.replaceState({ c: id, pushed: !!st.pushed }, '', `/chat?c=${id}`);
+    }
     renderList();
     let data;
     try { data = await api('GET', `/chat/${id}`); } catch (e) {
@@ -477,13 +494,18 @@
     renderHead(); renderComposer(); renderMessages(true);
     if (!isPhone() && S.conv.me.can_post) $('lc-input').focus({ preventScroll: true });
   }
-  function closeThread() {
+  function closeThread(opts = {}) {
+    if (!opts.keepUrl && history.state && history.state.pushed) { history.back(); return; }   // popstate closes it
     S.open = null; S.conv = null; root.dataset.view = 'list';
-    history.replaceState(null, '', '/chat');
+    if (!opts.keepUrl) history.replaceState(null, '', '/chat');
     $('lc-thread').hidden = true; $('lc-placeholder').hidden = false; closeInfo();
     renderList();
   }
-  $('lc-back').addEventListener('click', closeThread);
+  $('lc-back').addEventListener('click', () => closeThread());
+  window.addEventListener('popstate', (e) => {
+    const st = e.state;
+    if (st && st.c) openConv(st.c, { keepUrl: true }).catch(() => {}); else closeThread({ keepUrl: true });
+  });
 
   function renderHead() {
     const c = S.conv;
@@ -497,7 +519,7 @@
       sub = other && other.role ? other.role : 'Direct chat';
     }
     $('lc-thread-sub').textContent = sub;
-    $('lc-info-btn').hidden = c.kind !== 'group';
+    $('lc-info-btn').hidden = c.kind !== 'group' || c.me.left;
   }
   function renderComposer() {
     const me = S.conv.me; const bar = $('lc-readonly');
@@ -562,7 +584,7 @@
         h('img', { src: f.url, alt: f.name, loading: 'lazy' })))));
     for (const f of docs) col.append(h('a', { class: 'lc-file', href: f.url, download: f.name },
       icon('fa-regular fa-file-lines'), h('span', {}, f.name, h('small', { text: size(f.size) }))));
-    const meta = m.failed ? h('div', { class: 'lc-meta' }, 'Not sent. ', h('button', { type: 'button', class: 'lc-btn', style: 'padding:1px 8px;font-size:12px', onclick: () => retry(m) }, 'Retry'))
+    const meta = m.failed ? h('div', { class: 'lc-meta', role: 'alert' }, icon('fa-solid fa-circle-exclamation'), ` Not sent. ${m.error || ''} `, h('button', { type: 'button', class: 'lc-btn lc-retry', onclick: () => retry(m) }, 'Retry'))
       : h('div', { class: 'lc-meta', text: m.pending ? 'Sending…' : fullTime(m.at) });
     col.append(meta);
 
@@ -572,6 +594,9 @@
       li.append(h('button', { type: 'button', class: 'lc-icon-btn lc-act', 'aria-label': 'Message actions', 'aria-haspopup': 'menu', onclick: (e) => { e.stopPropagation(); menu(li, m); } }, icon('fa-solid fa-ellipsis')));
     }
     li.addEventListener('click', (e) => { if (e.target.closest('a,button')) return; li.classList.toggle('show'); });
+    if (!m.pending && !m.failed && !m.removed && S.conv.me.can_post) {
+      li.addEventListener('contextmenu', (e) => { if (e.target.closest('a')) return; e.preventDefault(); li.classList.add('show'); menu(li, m); });
+    }
     return li;
   }
   function closeMenus() { root.querySelectorAll('.lc-menu').forEach((x) => x.remove()); }
@@ -646,7 +671,7 @@
   function renderReply() {
     const bar = $('lc-replybar');
     bar.hidden = !S.reply;
-    if (S.reply) $('lc-replytext').textContent = `Replying to ${S.reply.sender.me ? 'yourself' : S.reply.sender.name}: ${S.reply.text || 'a file'}`;
+    if (S.reply) $('lc-replytext').textContent = `Replying to ${S.reply.sender.me ? 'your message' : S.reply.sender.name}: ${S.reply.text || 'a file'}`;
   }
   $('lc-reply-cancel').addEventListener('click', () => { S.reply = null; renderReply(); });
 
@@ -680,8 +705,7 @@
       if (byId(data.message.id)) S.msgs.splice(i, 1); else S.msgs[i] = data.message;
       renderMessages(nearBottom());
     } catch (e) {
-      p.pending = false; p.failed = true;
-      $('lc-err').textContent = e.message;
+      p.pending = false; p.failed = true; p.error = e.message;
       if (S.open === conv) renderMessages(nearBottom());
     }
   }
@@ -692,7 +716,8 @@
     catch (e) { $('lc-err').textContent = e.message; }
   }
   async function join() {
-    try { await api('POST', `/chat/${S.open}/join`); await openConv(S.open, { keepUrl: true }); } catch (e) { alert(e.message); }
+    try { await api('POST', `/chat/${S.open}/join`); await openConv(S.open, { keepUrl: true }); }
+    catch (e) { $('lc-readonly').append(h('span', { class: 'lc-msg-err', role: 'alert', text: e.message })); }
   }
 
   // ── polling: bawat 3 s, hinto kapag nakatago ang tab ──
@@ -716,6 +741,8 @@
         const fresh = data.thread.messages.filter((m) => !byId(m.id));
         for (const id of data.thread.removed) { const m = byId(id); if (m) { m.removed = true; m.html = null; m.text = null; m.files = []; } }
         S.msgs.push(...fresh);
+        const heard = fresh.filter((m) => !m.sender.me && m.sender.kind !== 'system');
+        if (heard.length) $('lc-announce').textContent = heard.map((m) => `${m.sender.name}: ${m.text || 'sent a file'}`).join('. ');
         S.reads = data.thread.reads;
         if (fresh.length || data.thread.removed.length) {
           renderMessages(stick, new Set(fresh.map((m) => m.id)));
@@ -837,6 +864,11 @@
   function closeLightbox() { $('lc-lightbox').hidden = true; $('lc-lightbox-img').src = ''; lastFocus && lastFocus.focus(); }
   $('lc-lightbox-close').addEventListener('click', closeLightbox);
   $('lc-lightbox').addEventListener('click', (e) => { if (e.target.id === 'lc-lightbox') closeLightbox(); });
+  $('lc-lightbox').addEventListener('keydown', (e) => {
+    if (e.key !== 'Tab') return;
+    const a = $('lc-lightbox-open'); const b = $('lc-lightbox-close');
+    e.preventDefault(); (document.activeElement === b ? a : b).focus();
+  });
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
     if (!$('lc-lightbox').hidden) closeLightbox();
@@ -849,7 +881,7 @@
   // ── start ──
   (async () => {
     try { await loadList(); } catch (e) { $('lc-list-loading').textContent = 'Chats could not load. Reload the page.'; }
-    if (BOOT.open) openConv(BOOT.open, { keepUrl: true }).catch(() => {});
+    if (BOOT.open) { history.replaceState({ c: BOOT.open }, '', location.href); openConv(BOOT.open, { keepUrl: true }).catch(() => {}); }
     schedule();
   })();
 })();
