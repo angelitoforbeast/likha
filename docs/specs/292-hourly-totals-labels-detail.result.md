@@ -50,7 +50,7 @@ One view file and its tests. No route, controller, service, migration, config or
 - `60cdbe1d` docs: spec and result skeleton
 - `edaef738` docs: plan
 - `49c19361` feat: view + tests
-- the final commit: this result file
+- `9a6de495` and the final commit: this result file
 
 ## Evidence per done-when item
 
@@ -81,7 +81,16 @@ One view file and its tests. No route, controller, service, migration, config or
 
 **Folders:** `tests/Feature/CPP` OK (58 tests, 465 assertions).
 
-FULLSUITE
+**Full suite on `49c19361`** (`vendor/bin/phpunit`, 21 min 33 s): 5418 tests, 84071 assertions, **3 failures**, 6 skipped.
+- The 3 failures are the base failures:
+  - `ExampleTest::test_the_application_returns_a_successful_response`
+  - `ItemTableFitScriptTest::test_every_catalog_column_id_has_a_minimum_width_and_a_place_in_the_drop_order`
+  - `SharedPagesBasePinTest::test_S_42_4_… with data set "/owner/private"`
+- The same three fail with the worktree switched to base `dea0c621` (`--filter='ExampleTest|ItemTableFitScriptTest|SharedPagesBasePinTest'`: 56 tests, 3 failures, the same three). These are the three 291 listed on its base.
+- **No new failures.** 5418 = 5413 (291) + the 5 new tests.
+- The 6 skipped tests are the same environment-gated ones as in 291.
+
+Run with `vendor/bin/phpunit` under Herd PHP 8.4.16 (no `.env` in the worktree). `php artisan view:cache` compiles the Blade.
 
 ### 2. Rendered row, modal, width at 1280 px
 A local render: a throwaway test (not committed, deleted) seeded 6 pages over 2026-11-12..18 with now = 2026-11-18 15:40 (hourly spend stored up to H14 today), 2026-11-15 with orders but no hourly spend, 2026-11-14 with no data, and 2026-11-12 with spend over ₱1M. It saved the served page and the two endpoints' JSON.
@@ -135,7 +144,7 @@ TOTAL         | ₱48,797.06 | 494    | ₱98.78  | ₱4,323.00           | 53
 - This is arithmetic from the CSS and font metrics, not a measurement in a browser (see the render note above).
 
 ### 3. Branch and merge danger
-PUSHLINE
+Pushed to `origin/feat/292-hourly-totals-labels-detail` (`git push -u`); the last commit is this result file. The merge-danger section is below.
 
 ## Story changes
 None.
