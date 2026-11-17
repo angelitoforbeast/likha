@@ -10,7 +10,9 @@ use App\Models\ChecklistAnalysisLog;
 use App\Models\ChecklistTaskChange;
 use App\Models\ChecklistSubmissionValue;
 use App\Models\User;
+use App\Services\AiFollowups;
 use App\Services\ChecklistBadge;
+use App\Services\ChecklistDueToday;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -143,9 +145,14 @@ class ChecklistController extends Controller
         $doneCount  = $counts['approved'];
         $totalTasks = $tasks->count();
 
+        // Mga approved na AI follow-up ng naka-login ngayong araw (spec 293): card sa itaas, hindi task, walang bilang
+        $aiFollowups = ChecklistDueToday::schema()['origin']
+            ? AiFollowups::forStaff((int) Auth::id(), $nowManila)
+            : collect();
+
         return view('checklist.index', compact(
             'tasks', 'submissionsByTask', 'mySubmissionsByTask',
-            'today', 'doneCount', 'totalTasks', 'statusByTask', 'counts'
+            'today', 'doneCount', 'totalTasks', 'statusByTask', 'counts', 'aiFollowups'
         ));
     }
 

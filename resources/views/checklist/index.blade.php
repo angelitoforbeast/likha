@@ -4,6 +4,8 @@
 
   <div class="min-h-screen bg-gray-50 mt-16">
 
+    @include('checklist.partials.ai-followup-card')
+
     {{-- ===== HEADER ===== --}}
     <div class="sticky top-16 z-20 bg-white border-b border-gray-200 shadow-sm">
       <div class="max-w-screen-2xl mx-auto px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
@@ -11,7 +13,7 @@
           <h1 class="text-base font-bold text-gray-800">Daily Checklist</h1>
           <p class="text-xs text-gray-400">{{ now()->format('l, F j, Y') }}</p>
         </div>
-        <div class="flex items-center gap-3">
+        <div class="flex items-center gap-x-3 gap-y-2 flex-wrap">
           <div class="flex items-center gap-2">
             <div class="w-28 h-1.5 bg-gray-100 rounded-full overflow-hidden">
               <div class="h-1.5 rounded-full transition-all duration-500 {{ $doneCount === $totalTasks && $totalTasks > 0 ? 'bg-green-500' : 'bg-blue-500' }}"
@@ -19,12 +21,12 @@
             </div>
             <span class="text-xs font-semibold text-gray-500">{{ $doneCount }}/{{ $totalTasks }}</span>
           </div>
-          <span class="text-xs text-gray-500">
-            <span class="text-green-600 font-semibold">{{ $counts['approved'] }} approved</span>
-            · <span class="{{ $counts['needsFix'] ? 'text-red-600 font-semibold' : '' }}">{{ $counts['needsFix'] }} kailangang ayusin</span>
-            · {{ $counts['notSubmitted'] }} hindi pa naisumite
+          <span class="order-last basis-full sm:order-none sm:basis-auto text-xs text-gray-500">
+            <span class="text-green-700 font-semibold">{{ $counts['approved'] }} approved</span>
+            · <span class="{{ $counts['needsFix'] ? 'text-red-600 font-semibold' : '' }}">{{ $counts['needsFix'] }} need a fix</span>
+            · {{ $counts['notSubmitted'] }} not submitted
             @if($counts['checking'])
-              · {{ $counts['checking'] }} sinusuri pa
+              · {{ $counts['checking'] }} checking
             @endif
           </span>
           <a href="{{ route('checklist.report') }}" class="text-xs px-3 py-1.5 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition">📋 Report</a>
@@ -123,7 +125,7 @@
                   $reason      = $statusByTask[$task->id]['reason'];
                 @endphp
 
-                <tbody
+                <tbody id="task-{{ $task->id }}"
                   x-data="{
                     showForm: false,
                     queue: [],

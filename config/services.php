@@ -69,6 +69,8 @@ return [
     // Chatbot AI step (chatbot:ai-pool): ilang segundo bago ituring na walang sagot (failed port).
     'timeout' => (int) env('OPENAI_TIMEOUT', 60),
     'model' => env('OPENAI_MODEL', 'gpt-4o-mini'),
+    // AI follow-ups ng Marketing head (checklist:ai-followups, spec 293)
+    'followup_model' => env('OPENAI_FOLLOWUP_MODEL', 'gpt-4o-mini'),
     // /astra chat: default model (verified accessible sa account) + optional allowed-list
     // override — ASTRA_MODELS="gpt-6-astra,gpt-5.5,o3" (comma-separated ids).
     'astra_default' => env('ASTRA_DEFAULT_MODEL', 'gpt-6-astra'),
