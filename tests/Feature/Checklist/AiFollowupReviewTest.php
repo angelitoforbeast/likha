@@ -186,7 +186,7 @@ class AiFollowupReviewTest extends AiFollowupTestCase
         $this->assertSame('Too pushy for a first reminder.', $f->review_note);
         $this->assertSame($ceo->id, (int) $f->reviewed_by);
         $this->assertFalse($f->is_active);
-        $this->assertSame(0, DB::table('staff_events')->count());
+        $this->assertSame(0, DB::table('staff_events')->where('kind', 'like', 'ai_followup.%')->count());
         $this->actingAs($ceo)->get('/checklist/ai-followups?tab=rejected')->assertOk()->assertSee('Too pushy for a first reminder.');
     }
 

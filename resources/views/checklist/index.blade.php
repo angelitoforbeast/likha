@@ -21,10 +21,10 @@
           </div>
           <span class="text-xs text-gray-500">
             <span class="text-green-600 font-semibold">{{ $counts['approved'] }} approved</span>
-            · <span class="{{ $counts['needsFix'] ? 'text-red-600 font-semibold' : '' }}">{{ $counts['needsFix'] }} kailangang ayusin</span>
-            · {{ $counts['notSubmitted'] }} hindi pa naisumite
+            · <span class="{{ $counts['needsFix'] ? 'text-red-600 font-semibold' : '' }}">{{ $counts['needsFix'] }} need a fix</span>
+            · {{ $counts['notSubmitted'] }} not submitted
             @if($counts['checking'])
-              · {{ $counts['checking'] }} sinusuri pa
+              · {{ $counts['checking'] }} checking
             @endif
           </span>
           <a href="{{ route('checklist.report') }}" class="text-xs px-3 py-1.5 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition">📋 Report</a>
@@ -54,6 +54,8 @@
     </div>
 
     <div class="max-w-screen-2xl mx-auto px-4 py-5 space-y-4">
+
+      @include('checklist.partials.ai-followup-card')
 
       {{-- Alerts --}}
       @if(session('success'))
@@ -123,7 +125,7 @@
                   $reason      = $statusByTask[$task->id]['reason'];
                 @endphp
 
-                <tbody
+                <tbody id="task-{{ $task->id }}"
                   x-data="{
                     showForm: false,
                     queue: [],

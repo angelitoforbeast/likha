@@ -73,6 +73,7 @@ class AiFollowupCountsTest extends AiFollowupTestCase
 
     public function test_every_count_and_list_is_the_same_with_followups_present(): void
     {
+        $this->snapshot(); // ang unang bisita ang nagsusulat ng last_seen ng bawat tao; pareho na iyon sa susunod
         $before = $this->snapshot();
         $this->assertNotEmpty($before['due']);
         $this->assertGreaterThan(0, $before['badge_joy']['count']);
