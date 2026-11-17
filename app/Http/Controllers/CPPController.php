@@ -1012,9 +1012,9 @@ class CPPController extends Controller
         $today = $now->toDateString();
         $parsed = [];
         foreach (['start', 'end'] as $k) {
-            $v = trim((string) $request->query($k, ''));
-            if ($v === '') { $parsed[$k] = null; continue; }
-            $d = preg_match('/^\d{4}-\d{2}-\d{2}$/D', $v) === 1 ? Carbon::createFromFormat('!Y-m-d', $v, 'Asia/Manila') : false;
+            $v = $request->query($k);
+            if ($v === null || $v === '') { $parsed[$k] = null; continue; }
+            $d = is_string($v) && preg_match('/^\d{4}-\d{2}-\d{2}$/D', $v) === 1 ? Carbon::createFromFormat('!Y-m-d', $v, 'Asia/Manila') : false;
             if (!$d || $d->format('Y-m-d') !== $v) {
                 return response()->json(['ok' => false, 'message' => "Invalid $k date: use YYYY-MM-DD."], 422);
             }

@@ -137,6 +137,20 @@
     .tl-hour td.tl-hour-orders { box-shadow: inset 0 0 0 1px #f59e0b; }
     .tl-hour tr.tl-hour-total th, .tl-hour tr.tl-hour-total td { font-weight: 700; border-top: 2px solid #9ca3af; }
     .tl-hour td.tl-hour-empty { color: #d1d5db; background: #fff; }
+
+    /* Hourly totals view (spec 291): rows = date, 24 hour columns, three stacked figures per cell. The same fixed layout
+       as the hourly table (column widths from the <colgroup> only, never from the content). At a 1280 px window the box
+       is about 1167 px (1280 − scroll bar − 2×32 page padding − 2×16 card padding − border): the date column takes
+       76 px and each hour about 45 px, and a figure is at most 5 characters of 10 px monospace (about 28 px). The
+       table's min-width (76 + 24 × 41 = 1060 px) is wider than the box only below about a 1190 px window, and then
+       only the wrapper scrolls, never the page. */
+    .tl-tot-wrap { width: 100%; overflow-x: auto; }
+    .tl-tot { min-width: 1060px; }
+    .tl-tot col.tl-tot-date { width: 76px; }
+    .tl-tot th.tl-hour-name { font-size: 11px; }
+    .tl-tot td { padding: 2px 1px; line-height: 1.2; vertical-align: top; }
+    .tl-tot td > div > div { overflow: hidden; text-overflow: ellipsis; }
+    .tl-tot td.tl-tot-last { border-right: 2px solid #374151; }
     /* Modal */
     .tl-modal-backdrop {
       position: fixed; inset: 0; background: rgba(15, 23, 42, 0.55);
@@ -184,13 +198,16 @@
 
   <div class="max-w-7xl mx-auto" x-data="cppTimeline()" x-init="init()">
 
-    {{-- Spec 288: Buckets (many days, the 4 snapshot times) or Hourly (one day, every hour). --}}
+    {{-- Spec 288: Buckets (many days, the 4 snapshot times) or Hourly (one day, every hour).
+         Spec 291: Hourly totals (many days, every hour, the day's total). --}}
     <div class="flex items-center gap-2 mb-3" id="tl-view-toggle">
       <span class="text-xs font-semibold text-gray-600">View</span>
       <button type="button" @click="setView('buckets')" class="text-sm px-3 py-1 rounded border"
               :class="view === 'buckets' ? 'bg-gray-800 text-white border-gray-800' : 'bg-white text-gray-700 border-gray-300'">Buckets</button>
       <button type="button" @click="setView('hourly')" class="text-sm px-3 py-1 rounded border"
               :class="view === 'hourly' ? 'bg-gray-800 text-white border-gray-800' : 'bg-white text-gray-700 border-gray-300'">Hourly</button>
+      <button type="button" @click="setView('totals')" class="text-sm px-3 py-1 rounded border"
+              :class="view === 'totals' ? 'bg-gray-800 text-white border-gray-800' : 'bg-white text-gray-700 border-gray-300'">Hourly totals</button>
       <span class="tl-legend ml-auto">
         <span><span class="swatch cpp-g"></span> CPP below ₱30</span>
         <span><span class="swatch cpp-c"></span> ₱30–49</span>
@@ -245,6 +262,68 @@
             </template>
             <template x-if="!hourLoading && !hourly.pages.length">
               <tr><td colspan="25" class="text-center text-gray-400 py-6">Walang data sa araw na ito.</td></tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    {{-- ── Hourly totals view: rows = date, columns = hour 00–23 (Manila), each cell the day's total to that hour ── --}}
+    <div x-show="view === 'totals'" x-cloak class="bg-white border border-gray-200 rounded-lg p-4 mb-4" id="tl-totals">
+      <div class="flex flex-wrap items-end gap-3 mb-2">
+        <div>
+          <label class="block text-xs font-semibold text-gray-600 mb-1">Start Date</label>
+          <input type="date" x-model="start" @change="preset='custom'" class="border border-gray-300 rounded px-2 py-1 text-sm">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-gray-600 mb-1">End Date</label>
+          <input type="date" x-model="end" @change="preset='custom'" class="border border-gray-300 rounded px-2 py-1 text-sm">
+        </div>
+        <button type="button" @click="loadTotals()" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-1.5 rounded">
+          Apply
+        </button>
+        <div class="text-xs text-gray-600 flex-1 min-w-0">
+          Each cell: Adspent, Orders and CPP of all pages with ad spend, from 00:00 to the end of that hour (cumulative,
+          so 15 matches the 3PM bucket). Hover for the exact figures. Amber edge = orders but no hourly spend stored yet.
+          Refreshes every 5 minutes.
+          <template x-if="totals.stored_at"><span> · Meta hourly spend as of <span x-text="fmtSavedAt(totals.stored_at)"></span></span></template>
+        </div>
+        <div class="text-xs text-gray-500" x-show="totalsLoading">⏳ Loading…</div>
+      </div>
+      <div class="text-xs text-amber-900 bg-amber-50 border border-amber-300 rounded px-2 py-1 mb-2" x-show="totals.stale" x-text="staleNote()" id="tl-tot-stale"></div>
+      <div class="text-xs text-gray-600 mb-2" x-show="totals.clamped" x-text="`Showing the ${totals.max_days} days ending ${fmtDate(totals.end)} (the longest range this view shows).`"></div>
+      <div class="text-xs text-red-700 mb-2" x-show="totalsError" x-text="totalsError"></div>
+      <div class="tl-tot-wrap">
+        <table class="tl-hour tl-tot" id="tl-tot-table">
+          <colgroup>
+            <col class="tl-tot-date">
+            @for ($h = 0; $h < 24; $h++)<col class="tl-tot-col">@endfor
+          </colgroup>
+          <thead>
+            <tr>
+              <th class="tl-hour-name" title="Per cell: Adspent, Orders, CPP">Date</th>
+              @for ($h = 0; $h < 24; $h++)<th class="tl-tot-h" title="{{ sprintf('00:00–%02d:59', $h) }}">{{ sprintf('%02d', $h) }}</th>@endfor
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="row in totals.days" :key="row.date">
+              <tr>
+                <th class="tl-hour-name" x-text="row.label" :title="row.date"></th>
+                <template x-for="(c, h) in row.total" :key="row.date + '|' + h">
+                  <td :class="totClass(row, c, h)" :title="totTip(row.label, c, h)">
+                    <template x-if="c">
+                      <div>
+                        <div x-text="c.spend != null ? compact(c.spend) : '—'"></div>
+                        <div x-text="String(c.orders)"></div>
+                        <div x-text="c.cpp != null ? Math.round(c.cpp) : '—'"></div>
+                      </div>
+                    </template>
+                  </td>
+                </template>
+              </tr>
+            </template>
+            <template x-if="!totalsLoading && !totals.days.length">
+              <tr><td colspan="25" class="text-center text-gray-400 py-6">Walang data sa selected range.</td></tr>
             </template>
           </tbody>
         </table>
@@ -503,7 +582,14 @@
         start:      @json($start),
         end:        @json($end),
         preset:     'last7',
-        view:       'buckets', // 'buckets' | 'hourly' (spec 288)
+        view:       'buckets', // 'buckets' | 'hourly' (spec 288) | 'totals' (spec 291)
+        totals:     { days: [], stored_at: null, today_stored_at: null, stale: false, clamped: false, max_days: 31, end: null },
+        totalsLoading: false,
+        totalsError: '',
+        // Orders are live and the hourly spend is stored every hour at :10, so the totals view re-reads its data while
+        // it is open (no page reload); the timer stops when another view is chosen.
+        totalsRefreshMs: 5 * 60 * 1000,
+        totalsTimer: null,
         hourDate:   @json(\Carbon\Carbon::now('Asia/Manila')->toDateString()),
         hourly:     { pages: [], total: [], stored_at: null, last_hour: 23 },
         hourLoading: false,
@@ -653,6 +739,69 @@
         setView(v) {
           this.view = v;
           if (v === 'hourly' && !this.hourly.loaded) this.loadHourly();
+          if (v === 'totals') {
+            this.loadTotals();
+            if (!this.totalsTimer) {
+              this.totalsTimer = setInterval(() => {
+                if (this.view === 'totals' && !(typeof document !== 'undefined' && document.hidden)) this.loadTotals();
+              }, this.totalsRefreshMs);
+            }
+          } else if (this.totalsTimer) {
+            clearInterval(this.totalsTimer);
+            this.totalsTimer = null;
+          }
+        },
+        async loadTotals() {
+          this.totalsLoading = true;
+          try {
+            const qs = new URLSearchParams({ start: this.start || '', end: this.end || '' });
+            const res = await fetch(`{{ route('ads_manager.cpp.timeline.hourly_totals') }}?${qs.toString()}`);
+            const j = await res.json();
+            if (!res.ok) { this.totalsError = j.message || ('HTTP ' + res.status); return; }
+            this.totalsError = '';
+            this.totals = {
+              days: j.days || [], stored_at: j.stored_at || null, today_stored_at: j.today_stored_at || null,
+              stale: !!j.stale, clamped: !!j.clamped, max_days: j.max_days, end: j.end,
+            };
+          } catch (e) {
+            console.error('Hourly totals load failed:', e);
+          } finally {
+            this.totalsLoading = false;
+          }
+        },
+        // The hourly view's cell colours, plus a stronger right edge on the day's last filled hour.
+        totClass(row, c, h) {
+          let last = -1;
+          (row.total || []).forEach((x, i) => { if (x) last = i; });
+          return this.hourClass(c) + (c && h === last ? ' tl-tot-last' : '');
+        },
+        // The hourly view's tooltip; a cell with orders but no stored spend has no CPP (never one from missing spend).
+        totTip(label, c, h) {
+          const hh = String(h).padStart(2, '0');
+          if (!c) return `${label} · ${hh}:00–${hh}:59 · no data`;
+          const lines = [
+            `${label} · all pages · 00:00–${hh}:59 (cumulative)`,
+            `CPP: ${c.cpp != null ? this.money(c.cpp) : (c.spend == null ? '— (no hourly spend yet)' : 'no orders yet')}`,
+            `Spend: ${c.spend != null ? this.money(c.spend) : 'no hourly spend stored yet'}`,
+            `Orders: ${this.num(c.orders)}`,
+            `CPI (per 1k impressions): ${c.cpi != null ? this.money(c.cpi) : '—'}`,
+            `CPM (per message): ${c.cpm != null ? this.money(c.cpm) : '—'}`,
+            `This hour: ${c.add_spend != null ? '+' + this.money(c.add_spend) : '—'} spend, +${this.num(c.add_orders)} orders`,
+          ];
+          if (c.source === 'orders') lines.push('Orders only: Meta hourly spend not stored yet');
+          return lines.join('\n');
+        },
+        staleNote() {
+          const at = this.totals.today_stored_at || this.totals.stored_at;
+          return at ? `⚠ Hourly spend not updated since ${this.fmtSavedAt(at)}` : '⚠ No hourly spend stored yet today';
+        },
+        // Short spend for a narrow cell: 850, 12.4k, 245k, 1.24M (the exact amount is in the tooltip).
+        compact(v) {
+          const n = Number(v ?? 0), a = Math.abs(n);
+          if (a < 999.5) return String(Math.round(n));
+          if (a < 99950) return (n / 1000).toFixed(1) + 'k';
+          if (a < 999500) return Math.round(n / 1000) + 'k';
+          return (n / 1000000).toFixed(2) + 'M';
         },
         async loadHourly() {
           this.hourLoading = true;
