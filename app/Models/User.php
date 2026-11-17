@@ -27,6 +27,7 @@ class User extends Authenticatable
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
+            'nav_pins' => 'array', // sidebar pins, spec 295
         ];
     }
 

@@ -8,15 +8,15 @@
 
     @if($saved)
       <div class="bg-green-50 border border-green-200 text-green-800 rounded-lg p-3 text-sm mb-4">
-        ✓ Nav saved (visibility + order). Refresh any page to apply.
+        ✓ Nav saved (visibility, section + order). Refresh any page to apply.
       </div>
     @endif
 
     <div class="bg-white rounded-xl shadow p-4 mb-4">
-      <div class="font-semibold text-lg mb-1">Top Nav Visibility + Order</div>
+      <div class="font-semibold text-lg mb-1">Nav Visibility, Section + Order</div>
       <p class="text-sm text-gray-500">
-        Check which roles can see each navlink. <strong>Reorder</strong> via drag-handle (≡) on the left, or by typing a number directly.
-        Lower number = appears first sa top nav. Changes apply on next page load.
+        Check which roles can see each navlink and pick the sidebar section it sits in. <strong>Reorder</strong> via drag-handle (≡) on the left, or by typing a number directly.
+        Lower number = appears first within its section. Changes apply on next page load.
       </p>
     </div>
 
@@ -32,6 +32,9 @@
                 <th class="px-2 py-2 text-center" style="width:70px;">Order</th>
                 <th class="px-3 py-2 text-left" style="min-width:220px;">Navlink</th>
                 <th class="px-3 py-2 text-left" style="min-width:160px;">URL</th>
+                @if($sections)
+                  <th class="px-3 py-2 text-left" style="min-width:130px;">Section</th>
+                @endif
                 @foreach($roles as $role)
                   <th class="px-3 py-2 text-center" style="min-width:100px;">
                     <div class="flex flex-col items-center gap-1">
@@ -72,6 +75,18 @@
                   <td class="px-3 py-2 text-xs font-mono text-gray-500">
                     <a href="{{ $link->route_url }}" target="_blank" class="text-blue-600 hover:underline">{{ $link->route_url }}</a>
                   </td>
+                  @if($sections)
+                    {{-- Sidebar section (spec 295). A link without one shows where the sidebar puts it. --}}
+                    @php $linkSection = \App\Support\NavSections::of($link); @endphp
+                    <td class="px-3 py-2">
+                      <select name="section[{{ $link->id }}]" aria-label="Section for {{ $link->label }}"
+                              class="w-full rounded border border-gray-300 bg-white px-2 py-1 text-xs focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/30">
+                        @foreach($sections as $section)
+                          <option value="{{ $section }}" {{ $linkSection === $section ? 'selected' : '' }}>{{ $section }}</option>
+                        @endforeach
+                      </select>
+                    </td>
+                  @endif
                   @foreach($roles as $role)
                     @php
                       $isVisible = $visibilityMap[$link->id][$role] ?? false;
@@ -94,7 +109,7 @@
 
       <div class="mt-4 flex items-center gap-2">
         <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded px-5 py-2 text-sm">
-          💾 Save (Visibility + Order)
+          💾 Save (Visibility, Section + Order)
         </button>
         <a href="{{ route('owner.nav-settings') }}" class="text-sm text-gray-500 hover:underline">Cancel</a>
         <span class="text-xs text-gray-400 ml-3">Tip: drag any row by the ≡ handle or change a number to reorder.</span>

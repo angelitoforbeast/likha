@@ -22,6 +22,11 @@
     font-variant-numeric: tabular-nums;
   }
   html:has(#lc), html:has(#lc) body { overflow: hidden; }
+  /* Sa tabi ng sidebar (spec 295) sa ≥ 1024 px, o ng rail kapag naka-collapse; sa phone drawer ang sidebar. */
+  @media (min-width: 1024px) {
+    #lc { left: var(--lk-w, 0px); }
+    html[data-nav-rail] #lc { left: var(--lk-rail, 0px); }
+  }
   #lc *, #lc *::before, #lc *::after { box-sizing: border-box; }
   #lc ::selection { background: rgba(37, 99, 235, .2); }
   :where(#lc) :where(button, input, textarea) { font: inherit; color: inherit; }
@@ -404,9 +409,10 @@
   function size(n) { return n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB'; }
   const isPhone = () => window.matchMedia('(max-width: 1023px)').matches;
 
-  // Ang taas ng nav (at ng storage banner, kung meron) para sa fixed na panel.
+  // Ang taas ng top bar (at ng storage banner, kung meron) para sa fixed na panel. Hindi `nav`: sa layout ng spec 295,
+  // ang unang <nav> ay ang listahan sa sidebar, na abot hanggang ibaba ng screen.
   function fitTop() {
-    const nav = document.querySelector('nav');
+    const nav = document.querySelector('.lk-topbar') || document.querySelector('nav');
     const banner = document.querySelector('[data-storage-banner]');
     let top = nav ? nav.getBoundingClientRect().bottom : 64;
     if (banner) top = Math.max(top, banner.getBoundingClientRect().bottom);

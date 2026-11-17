@@ -1532,6 +1532,8 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
     Route::post('/nav/view-as',         [\App\Http\Controllers\NavSettingsController::class, 'setViewAs'])->name('nav.view-as');
     // Spec 294: who each page would block (CEO only, checked in the controller).
     Route::get ('/owner/access-report', [\App\Http\Controllers\AccessReportController::class, 'index'])->name('owner.access-report');
+    // Sidebar pins (spec 295): the signed-in person's own, at most six. JSON from the sidebar.
+    Route::post('/nav/pins',            [\App\Http\Controllers\NavPinsController::class, 'update'])->name('nav.pins');
     Route::get ('/owner/column-settings',                [\App\Http\Controllers\OwnerColumnSettingsController::class, 'index'])           ->name('owner.column-settings');
     Route::get ('/owner/column-settings/owner-private',  [\App\Http\Controllers\OwnerColumnSettingsController::class, 'sectionOwnerPrivate'])->name('owner.column-settings.owner-private');
     Route::get ('/owner/column-settings/campaigns',      [\App\Http\Controllers\OwnerColumnSettingsController::class, 'sectionCampaigns'])    ->name('owner.column-settings.campaigns');

@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class NavLink extends Model
 {
     protected $fillable = [
-        'key', 'label', 'route_url', 'icon', 'active_pattern', 'sort_order', 'is_active',
+        'key', 'label', 'route_url', 'icon', 'section', 'active_pattern', 'sort_order', 'is_active',
     ];
 
     protected $casts = [
@@ -105,7 +105,8 @@ class NavLink extends Model
      */
     public static function defaultData(): array
     {
-        return [
+        // Each row's section is its url's place in the sidebar (NavSections, spec 295).
+        return array_map(fn (array $d) => $d + ['section' => \App\Support\NavSections::forUrl($d['route_url'])], [
             ['key'=>'ads_payment',           'label'=>'Ad Payment',         'route_url'=>'/ads_manager/payment/upload',           'icon'=>'fa-solid fa-credit-card',     'active_pattern'=>'ads_manager/payment*',           'visible'=>['Marketing','Marketing - OIC','CEO']],
             ['key'=>'ads',                   'label'=>'Ads',                'route_url'=>'/ads_manager/report',                   'icon'=>'fa-solid fa-bullhorn',         'active_pattern'=>'ads_manager/report*',            'visible'=>['Marketing','Marketing - OIC','CEO']],
             ['key'=>'marketing_summary',     'label'=>'Marketing Summary',  'route_url'=>'/owner/private',                        'icon'=>'fa-solid fa-chart-pie',        'active_pattern'=>'owner/private*',                 'visible'=>['Marketing','Marketing - OIC','CEO']],
@@ -148,6 +149,19 @@ class NavLink extends Model
             // CEO admin tools
             ['key'=>'nav_settings',          'label'=>'Nav Settings',       'route_url'=>'/owner/nav-settings',                   'icon'=>'fa-solid fa-bars-staggered',   'active_pattern'=>'owner/nav-settings*',            'visible'=>['CEO']],
             ['key'=>'column_settings',       'label'=>'Column Settings',    'route_url'=>'/owner/column-settings',                'icon'=>'fa-solid fa-table-columns',    'active_pattern'=>'owner/column-settings*',         'visible'=>['CEO']],
-        ];
+            // Links the migrations added after May 2026 (each mirrors its add_*_nav_link migration).
+            ['key'=>'users_admin',           'label'=>'Users',              'route_url'=>'/owner/users',                          'icon'=>'fa-solid fa-users-gear',       'active_pattern'=>'owner/users*',                   'visible'=>['CEO']],
+            ['key'=>'supply_finance',        'label'=>'Supply Finance',     'route_url'=>'/finance/supply',                       'icon'=>'fa-solid fa-truck-ramp-box',   'active_pattern'=>'finance/supply*',                'visible'=>['CEO']],
+            ['key'=>'playbook',              'label'=>'Playbook',           'route_url'=>'/playbook',                             'icon'=>'fa-solid fa-book-medical',     'active_pattern'=>'playbook*',                      'visible'=>['CEO','Marketing - OIC','Marketing']],
+            ['key'=>'chatblast',             'label'=>'Chatblast',          'route_url'=>'/chatblast',                            'icon'=>'fa-solid fa-paper-plane',      'active_pattern'=>'chatblast*',                     'visible'=>['CEO']],
+            ['key'=>'chatbot',               'label'=>'Chatbot',            'route_url'=>'/chatbot',                              'icon'=>'fa-solid fa-robot',            'active_pattern'=>'chatbot*',                       'visible'=>['CEO']],
+            ['key'=>'botcake_accounts',      'label'=>'Botcake Accounts',   'route_url'=>'/chatbot/botcake-accounts',             'icon'=>'fa-solid fa-key',              'active_pattern'=>'chatbot/botcake-accounts*',      'visible'=>['CEO']],
+            ['key'=>'storage',               'label'=>'Storage',            'route_url'=>'/system-monitor/storage',               'icon'=>'fa-solid fa-hard-drive',       'active_pattern'=>'system-monitor/storage*',        'visible'=>['CEO','Marketing - OIC']],
+            ['key'=>'encoding_timetable',    'label'=>'Encoding Timetable', 'route_url'=>'/encoder/timetable',                    'icon'=>'fa-solid fa-clock',            'active_pattern'=>'encoder/timetable*',             'visible'=>['CEO','Marketing','Marketing - OIC']],
+            ['key'=>'ads_daily_output',      'label'=>'Ads Daily Output',   'route_url'=>'/ads_manager/daily-output',             'icon'=>'fa-solid fa-calendar-day',     'active_pattern'=>'ads_manager/daily-output*',      'visible'=>['CEO','Marketing','Marketing - OIC']],
+            ['key'=>'checklist_ai_followups','label'=>'Marketing Head',     'route_url'=>'/checklist/ai-followups',               'icon'=>'fa-solid fa-wand-magic-sparkles', 'active_pattern'=>'checklist/ai-followups*',     'visible'=>['CEO']],
+            // No pattern: the link covers /chat and below by its url (see the narrow_chat_nav_link_pattern migration).
+            ['key'=>'chat',                  'label'=>'Chat',               'route_url'=>'/chat',                                 'icon'=>'fa-solid fa-comment-dots',     'active_pattern'=>null,                             'visible'=>['CEO','Marketing - OIC','Marketing','Data Encoder - OIC','Data Encoder']],
+        ]);
     }
 }
