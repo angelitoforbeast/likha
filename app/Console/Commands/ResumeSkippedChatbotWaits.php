@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use App\Jobs\ResumeChatbotWait;
 use App\Services\Chatbot\BotcakeSendQueue;
 use App\Services\Chatbot\ChatbotAiQueue;
+use App\Services\Chatbot\SweepLimit;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -34,15 +35,22 @@ class ResumeSkippedChatbotWaits extends Command
         if (!Schema::hasTable('chatbot_waits')) return self::SUCCESS;
         $until = microtime(true) + self::SECONDS;
         $queued = 0;
-        do {
-            $ids = DB::table('chatbot_waits')->where('due_at', '<=', now())
-                ->where(fn ($q) => $q->whereNull('dispatched_at')->orWhere('dispatched_at', '<', now()->subMinutes(self::REDISPATCH_MINUTES)))
-                ->orderBy('due_at')->limit(self::BATCH)->pluck('id');
-            if ($ids->isEmpty()) break;
-            DB::table('chatbot_waits')->whereIn('id', $ids)->update(['dispatched_at' => now()]);
-            foreach ($ids as $id) ResumeChatbotWait::dispatch((int) $id);
-            $queued += $ids->count();
-        } while ($ids->count() === self::BATCH && microtime(true) < $until);
+        // Ang bawat batch ay may sariling hangganan ng oras (SweepLimit): kasama ng mga sweep sa itaas, laging natatapos ang
+        // takbo bago mag-expire ang withoutOverlapping (5 min), kaya hindi ito nagpapatong kahit mabagal ang database.
+        $more = true;
+        while ($more) {
+            $more = false;
+            (new SweepLimit('chatbot waits'))->run(function (SweepLimit $limit) use (&$queued, &$more, $until) {
+                $ids = $limit->cap(DB::table('chatbot_waits')->where('due_at', '<=', now())
+                    ->where(fn ($q) => $q->whereNull('dispatched_at')->orWhere('dispatched_at', '<', now()->subMinutes(self::REDISPATCH_MINUTES)))
+                    ->orderBy('due_at')->limit(self::BATCH), ['id'])->pluck('id');
+                if ($ids->isEmpty()) return;
+                DB::table('chatbot_waits')->whereIn('id', $ids)->update(['dispatched_at' => now()]);
+                foreach ($ids as $id) ResumeChatbotWait::dispatch((int) $id);
+                $queued += $ids->count();
+                $more = $ids->count() === self::BATCH && microtime(true) < $until;
+            });
+        }
 
         if ($queued) $this->info("chatbot waits: {$queued} queued");
 

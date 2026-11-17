@@ -96,9 +96,13 @@ class SendQueueSweepIndexTest extends TestCase
 
         BotcakeSendQueue::sweep();
 
-        $this->assertCount(1, $queries, 'the redispatch query ran once');
-        $plan = collect(DB::select('EXPLAIN QUERY PLAN ' . $queries[0]->sql, $queries[0]->bindings))->pluck('detail')->implode(' | ');
-        $this->assertStringContainsString('USING INDEX ' . self::INDEX . ' (kind=? AND status=? AND updated_at<?)', $plan);
+        // Spec 290: one query per status (done, failed), each read in updated_at order straight from the index.
+        $this->assertCount(2, $queries, 'the redispatch query ran once per status');
+        foreach ($queries as $query) {
+            $plan = collect(DB::select('EXPLAIN QUERY PLAN ' . $query->sql, $query->bindings))->pluck('detail')->implode(' | ');
+            $this->assertStringContainsString('USING INDEX ' . self::INDEX . ' (kind=? AND status=? AND updated_at<?)', $plan);
+            $this->assertStringNotContainsString('TEMP B-TREE', $plan, 'no sort: the index gives the order');
+        }
     }
 
     public function test_the_late_sweep_fails_exactly_the_late_pending_chatbot_rows_and_reads_the_status_priority_id_index(): void
@@ -143,8 +147,10 @@ class SendQueueSweepIndexTest extends TestCase
         $this->assertSame(900, DB::table(BotcakeSendQueue::TABLE)->where('status', 'resumed')->count(), 'the resumed rows stay as they are');
         $this->assertCount(2, Queue::pushed(ResumeChatbotSend::class), 'each failed chatbot send goes on to its resume job');
 
-        $this->assertCount(1, $hints, 'only the late query carries an index hint');
+        // Spec 290: the prune looks up its ids on the created_at index too.
+        $this->assertCount(2, $hints, 'the late query and the prune lookup carry an index hint');
         $this->assertStringContainsString('from `botcake_send_requests` use index (botcake_send_requests_status_priority_id_index) where `status` = ? and `priority` < ?', $hints[0]);
+        $this->assertStringContainsString('from `botcake_send_requests` use index (botcake_send_requests_created_at_index) where (`created_at` < ?', $hints[1]);
     }
 
     public function test_the_migration_adds_the_index_once_and_down_removes_it(): void

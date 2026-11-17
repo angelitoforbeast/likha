@@ -4,6 +4,8 @@ namespace App\Services\Chatbot;
 
 use App\Jobs\ResumeChatbotAi;
 use App\Services\OrderEncode\FlowEncode;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
@@ -20,6 +22,11 @@ class ChatbotAiQueue
     public const KEEP_DAYS = 2; // ang text ng customer (messages, answer, context)
     public const RECORD_DAYS = 90; // ang record ng request (provider, bilis, tokens), kapag may mga column na nito
     public const REDISPATCH_SECONDS = 30; // ang answered/failed na hindi pa naituloy (nawalang job) ay ipinapadala ulit
+    // Ang mga index na binabasa ng claim at ng sweep (mula sa create migration). Ang mga status na hinahanap nila (pending,
+    // sending, encode, answered, failed) ay ang mga nasa himpapawid lang, kaya kaunti ang binabasa kahit milyon ang table.
+    public const STATUS_INDEX = 'chatbot_ai_requests_status_next_at_index';
+    public const CREATED_INDEX = 'chatbot_ai_requests_created_at_index';
+    public const TEXTS_FROM = 'chatbot-ai-sweep:texts-from'; // hanggang saan na nasuri ang pagbura ng text (created_at)
 
     /**
      * Hindi naghihintay ang AI step: naka-on ang switch, live na takbo ng chat o ng wait-skip (hindi Test o sequence), may
@@ -133,7 +140,8 @@ class ChatbotAiQueue
     public static function claim(string $owner, int $n): array
     {
         if ($n <= 0) return [];
-        $ids = DB::table(self::TABLE)->where('status', 'pending')->where(fn ($q) => $q->whereNull('next_at')->orWhere('next_at', '<=', now()))
+        // Sa index (status, next_at): ang pending lang ang binabasa at inaayos; sa id (PRIMARY), maaaring basahin ng database ang buong table.
+        $ids = DB::table(self::TABLE)->useIndex(self::STATUS_INDEX)->where('status', 'pending')->where(fn ($q) => $q->whereNull('next_at')->orWhere('next_at', '<=', now()))
             ->where('deadline_at', '>', now())->orderBy('id')->limit($n)->pluck('id');
         $out = [];
         foreach ($ids as $id) {
@@ -200,8 +208,20 @@ class ChatbotAiQueue
     {
         $out = ['failed' => 0, 'redispatched' => 0, 'pruned' => 0];
         if (!Schema::hasTable(self::TABLE)) return $out;
+        // Bawat SELECT ay may hangganan ng oras (SweepLimit): ang mabagal na query ay humihinto at isang warning lang, kaya
+        // hindi naharang ng sweep ang pool (at ang pagkuha ng bagong request) nang matagal.
+        (new SweepLimit('chatbot AI sweep'))->run(function (SweepLimit $limit) use (&$out) {
+            self::sweepWithin($limit, $out);
+        });
 
-        $late = DB::table(self::TABLE)->whereIn('status', ['pending', 'sending'])->where('deadline_at', '<=', now())->orderBy('id')->limit(500)->get();
+        return $out;
+    }
+
+    /** Ang mga hakbang ng sweep, ang bawat SELECT sa loob ng $limit. Ang paglampas sa deadline ang nauuna (ang naiipit na customer). */
+    private static function sweepWithin(SweepLimit $limit, array &$out): void
+    {
+        // Sa index (status, next_at): ang mga nasa himpapawid lang ang binabasa at inaayos sa id, hindi ang buong table sa PRIMARY.
+        $late = $limit->cap(DB::table(self::TABLE)->useIndex(self::STATUS_INDEX)->whereIn('status', ['pending', 'sending'])->where('deadline_at', '<=', now())->orderBy('id')->limit(500))->get();
         foreach ($late as $row) {
             $ok = DB::table(self::TABLE)->where('id', $row->id)->whereIn('status', ['pending', 'sending'])->update([
                 'status' => 'failed', 'error' => self::late($row), 'answered_at' => now(), 'updated_at' => now(),
@@ -213,7 +233,7 @@ class ChatbotAiQueue
         }
 
         // Ang Encode order na lampas na sa "Wait up to": ang resulta ng encode kapag naitabi na (si Astra ang hindi natapos), kung wala ay failed.
-        $late = DB::table(self::TABLE)->where('status', FlowEncode::STATUS)->where('deadline_at', '<=', now())->orderBy('id')->limit(500)->get();
+        $late = $limit->cap(DB::table(self::TABLE)->useIndex(self::STATUS_INDEX)->where('status', FlowEncode::STATUS)->where('deadline_at', '<=', now())->orderBy('id')->limit(500))->get();
         foreach ($late as $row) {
             $encoded = $row->answer !== null;
             $ok = DB::table(self::TABLE)->where('id', $row->id)->where('status', FlowEncode::STATUS)->update([
@@ -225,29 +245,67 @@ class ChatbotAiQueue
             }
         }
 
-        $stuck = DB::table(self::TABLE)->whereIn('status', ['answered', 'failed'])->where('updated_at', '<=', now()->subSeconds(self::REDISPATCH_SECONDS))
-            ->orderBy('id')->limit(500)->get();
+        $stuck = $limit->cap(DB::table(self::TABLE)->useIndex(self::STATUS_INDEX)->whereIn('status', ['answered', 'failed'])->where('updated_at', '<=', now()->subSeconds(self::REDISPATCH_SECONDS))
+            ->orderBy('id')->limit(500))->get();
         foreach ($stuck as $row) {
             DB::table(self::TABLE)->where('id', $row->id)->update(['updated_at' => now()]);
             ResumeChatbotAi::dispatch(self::ticket($row));
             $out['redispatched']++;
         }
 
+        // Ang pagbura ay laging "hanapin ang mga id sa index (may hangganan ng oras), saka burahin ayon sa id": ang DELETE na
+        // naka-ayos sa id ay maaaring basahin ang buong table at walang MAX_EXECUTION_TIME ang DELETE.
+        $old = now()->subDays(self::KEEP_DAYS);
         if (!self::recorded()) {
-            $out['pruned'] = DB::table(self::TABLE)->where('created_at', '<', now()->subDays(self::KEEP_DAYS))->whereIn('status', ['resumed', 'failed', 'answered'])->orderBy('id')->limit(5000)->delete();
-            return $out;
+            $out['pruned'] = self::prune($limit, self::CREATED_INDEX, 'created_at', fn ($q) => $q->where('created_at', '<', $old)->whereIn('status', ['resumed', 'failed', 'answered']));
+            return;
         }
         // May record: ang naiwang answered/failed (hindi naituloy) ay binubura pagkatapos ng 2 araw gaya ng dati; sa tapos na
-        // (resumed, sync) ang text ng customer lang ang binubura, at ang row (record) pagkatapos ng 90. Ang paghahanap ay sa
-        // ilang araw lang pagkatapos ng 2 (hindi ang buong 90), para mabilis ang sweep sa loob ng pool.
-        $out['pruned'] = DB::table(self::TABLE)->where('created_at', '<', now()->subDays(self::KEEP_DAYS))->whereIn('status', ['failed', 'answered'])->where(fn ($q) => self::sentOrNone($q))->orderBy('id')->limit(5000)->delete();
-        // Naka-ayos sa created_at (may index), hindi sa id: sa id, binabasa ng database ang table mula sa simula
-        // hanggang makakita ng 5000; kapag nabura na ang mga text, ang buong table bawat minuto.
-        $ids = DB::table(self::TABLE)->whereBetween('created_at', [now()->subDays(self::KEEP_DAYS + 5), now()->subDays(self::KEEP_DAYS)])->whereIn('status', ['resumed', 'sync'])
-            ->where(fn ($q) => $q->whereNotNull('messages')->orWhereNotNull('answer')->orWhereNotNull('context'))->orderBy('created_at')->limit(5000)->pluck('id');
-        if ($ids->isNotEmpty()) DB::table(self::TABLE)->whereIn('id', $ids)->update(['messages' => null, 'answer' => null, 'context' => null]);
-        $out['pruned'] += DB::table(self::TABLE)->where('created_at', '<', now()->subDays(self::RECORD_DAYS))->whereIn('status', ['resumed', 'sync'])->where(fn ($q) => self::sentOrNone($q))->orderBy('id')->limit(5000)->delete();
+        // (resumed, sync) ang text ng customer lang ang binubura, at ang row (record) pagkatapos ng 90. Ang answered/failed ay
+        // hinahanap sa index (status, next_at): kaunti sila, samantalang ang mas luma sa 2 araw ay halos buong table.
+        $out['pruned'] = self::prune($limit, self::STATUS_INDEX, 'id', fn ($q) => $q->whereIn('status', ['failed', 'answered'])->where('created_at', '<', $old)->where(fn ($w) => self::sentOrNone($w)));
+        self::clearTexts($limit);
+        $record = now()->subDays(self::RECORD_DAYS);
+        $out['pruned'] += self::prune($limit, self::CREATED_INDEX, 'created_at', fn ($q) => $q->where('created_at', '<', $record)->whereIn('status', ['resumed', 'sync'])->where(fn ($w) => self::sentOrNone($w)));
+    }
 
-        return $out;
+    /**
+     * Hanggang 5000 na row ng $rule: ang mga id ay hinahanap sa $index (naka-ayos sa $order, kasunod ng id), saka binubura
+     * ayon sa id at sa parehong $rule (ang row na nagbago sa pagitan, hal. naituloy, ay hindi nabubura). @return int ilang nabura
+     */
+    private static function prune(SweepLimit $limit, string $index, string $order, \Closure $rule): int
+    {
+        $q = DB::table(self::TABLE)->useIndex($index)->where($rule)->orderBy($order);
+        if ($order !== 'id') $q->orderBy('id');
+        $ids = $limit->cap($q->limit(5000), ['id'])->pluck('id');
+
+        return $ids->isEmpty() ? 0 : DB::table(self::TABLE)->whereIn('id', $ids->all())->where($rule)->delete();
+    }
+
+    /**
+     * Ang text ng customer (messages, answer, context) ng tapos na (resumed, sync) na mas luma sa KEEP_DAYS, hanggang
+     * KEEP_DAYS + 5 pabalik, 5000 kada sweep, gaya ng dati. Naka-ayos sa created_at (may index), at mula lang sa huling
+     * nasuri (TEXTS_FROM): kapag nabura na ang mga text, ang 5 araw ay wala nang mahahanap at binabasa ang lahat ng row
+     * nito bawat sweep. Kaya sa karaniwan, ang ilang segundo lang na lumampas sa 2 araw mula sa huling sweep ang binabasa.
+     * Walang TEXTS_FROM (unang takbo, nabura ang cache): mula 7 araw pabalik, tig-isang oras, at naitatabi ang bawat
+     * natapos na oras, kaya ang naubusan ng oras ng sweep ay itinutuloy ng susunod, hindi inuulit mula sa simula.
+     */
+    private static function clearTexts(SweepLimit $limit): void
+    {
+        $to = now()->subDays(self::KEEP_DAYS);
+        $floor = now()->subDays(self::KEEP_DAYS + 5);
+        $seen = Cache::get(self::TEXTS_FROM);
+        $from = $seen === null ? $floor : Carbon::parse($seen)->max($floor);
+        $left = 5000;
+        while ($left > 0 && $from->lessThan($to)) {
+            $end = $from->copy()->addHour()->min($to);
+            $rows = $limit->cap(DB::table(self::TABLE)->useIndex(self::CREATED_INDEX)->whereBetween('created_at', [$from, $end])->whereIn('status', ['resumed', 'sync'])
+                ->where(fn ($q) => $q->whereNotNull('messages')->orWhereNotNull('answer')->orWhereNotNull('context'))->orderBy('created_at')->orderBy('id')->limit($left), ['id', 'created_at'])->get();
+            if ($rows->isNotEmpty()) DB::table(self::TABLE)->whereIn('id', $rows->pluck('id')->all())->update(['messages' => null, 'answer' => null, 'context' => null]);
+            $left -= $rows->count();
+            // Naubos ang 5000: may natitira pa sa oras na iyon, kaya doon magsisimula ang susunod (ang nabura na ay hindi na tugma).
+            $from = $left === 0 ? Carbon::parse($rows->last()->created_at) : $end;
+            Cache::forever(self::TEXTS_FROM, $from->format('Y-m-d H:i:s'));
+        }
     }
 }

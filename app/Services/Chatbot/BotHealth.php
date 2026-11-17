@@ -572,11 +572,15 @@ class BotHealth
      */
     private function inbound(string $startAt, string $endAt, ?array $pages): array
     {
-        $answered = DB::table('chatbot_replies')->where('kind', 'send')->where('status', 'sent')
-            ->where('sent_at', '>=', $startAt)->where('sent_at', '<', $endAt)
-            ->when($pages !== null, fn ($q) => $q->whereIn('page_id', $pages))->distinct()->pluck('page_id')->map(fn ($p) => (string) $p)->all();
         $spans = self::flowSpans();
-        $answered = array_values(array_intersect($answered, array_keys($spans)));
+        // Ang page na may flow (at nasa $pages) na may sent na sagot sa range: isang EXISTS kada page sa index (page_id,
+        // sent_at), na humihinto sa unang tugma. Ang "distinct page_id" sa buong linggo ay binabasa ang lahat ng sagot nito.
+        $answered = [];
+        foreach (array_keys($spans) as $page) {
+            if ($pages !== null && !in_array((string) $page, array_map('strval', $pages), true)) continue;
+            if (DB::table('chatbot_replies')->where('page_id', (int) $page)->where('sent_at', '>=', $startAt)->where('sent_at', '<', $endAt)
+                ->where('kind', 'send')->where('status', 'sent')->exists()) $answered[] = (string) $page;
+        }
         if (!$answered) return ['days' => [], 'rows' => []];
 
         $out = ['days' => [], 'rows' => []];

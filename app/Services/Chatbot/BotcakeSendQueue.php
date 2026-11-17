@@ -31,6 +31,9 @@ class BotcakeSendQueue
     public const CHATBLAST_SECONDS = 3 * 3600;
     public const KEEP_DAYS = 2;
     public const REDISPATCH_SECONDS = 30;
+    // Ang mga index na binabasa ng sweep (create migration).
+    public const STATUS_PRIORITY_INDEX = 'botcake_send_requests_status_priority_id_index';
+    public const CREATED_INDEX = 'botcake_send_requests_created_at_index';
 
     /** Naka-on, may buhay na botcake:send-pool, at may table na. */
     public static function enabled(): bool
@@ -237,11 +240,12 @@ class BotcakeSendQueue
      * - chatbot, natawag na → failed na "Botcake did not answer" (gaya ng nawalang tawag), saka ang resume; hindi inuulit;
      * - chatblast → unknown kapag natawag na ang send_flow, kung hindi ay uulitin ang tatlong hakbang.
      */
-    public static function recover(?string $owner): int
+    public static function recover(?string $owner, ?SweepLimit $limit = null): int
     {
         if (!Schema::hasTable(self::TABLE)) return 0;
         $n = 0;
-        $rows = DB::table(self::TABLE)->where('status', 'sending')->where('kind', '!=', self::SEQUENCE)->when($owner, fn ($q) => $q->where(fn ($w) => $w->whereNull('claimed_by')->orWhere('claimed_by', '!=', $owner)))->get();
+        $q = DB::table(self::TABLE)->where('status', 'sending')->where('kind', '!=', self::SEQUENCE)->when($owner, fn ($q) => $q->where(fn ($w) => $w->whereNull('claimed_by')->orWhere('claimed_by', '!=', $owner)));
+        $rows = ($limit ? $limit->cap($q) : $q)->get(); // sa sweep: may hangganan ng oras
         foreach ($rows as $row) {
             $back = fn () => DB::table(self::TABLE)->where('id', $row->id)->where('status', 'sending')->where('claimed_by', $row->claimed_by)
                 ->update(['status' => 'pending', 'claimed_by' => null, 'called_at' => null, 'updated_at' => now()]);
@@ -276,11 +280,23 @@ class BotcakeSendQueue
     {
         $out = ['failed' => 0, 'requeued' => 0, 'redispatched' => 0, 'pruned' => 0];
         if (!Schema::hasTable(self::TABLE)) return $out;
-        if (!BotcakeSendPool::alive(self::DEAD_POOL_SECONDS)) self::recover(null);
+        // Bawat SELECT ay may hangganan ng oras (SweepLimit): ang mabagal na query ay humihinto at isang warning lang, kaya
+        // hindi naharang ng sweep ang pool nang matagal at walang query na naiiwang tumatakbo sa server.
+        (new SweepLimit('botcake send sweep'))->run(function (SweepLimit $limit) use (&$out) {
+            self::sweepWithin($limit, $out);
+        });
+
+        return $out;
+    }
+
+    /** Ang mga hakbang ng sweep, ang bawat SELECT sa loob ng $limit. */
+    private static function sweepWithin(SweepLimit $limit, array &$out): void
+    {
+        if (!BotcakeSendPool::alive(self::DEAD_POOL_SECONDS)) self::recover(null, $limit);
 
         // Sa index (status, priority, id): ang pending na hindi sequence lang ang binabasa, hindi ang buong table.
-        foreach (DB::table(self::TABLE)->useIndex('botcake_send_requests_status_priority_id_index')->where('status', 'pending')->where('priority', '<', self::SEQUENCE_PRIORITY)
-            ->where('kind', '!=', self::SEQUENCE)->where('deadline_at', '<=', now())->orderBy('id')->limit(500)->get() as $row) {
+        foreach ($limit->cap(DB::table(self::TABLE)->useIndex(self::STATUS_PRIORITY_INDEX)->where('status', 'pending')->where('priority', '<', self::SEQUENCE_PRIORITY)
+            ->where('kind', '!=', self::SEQUENCE)->where('deadline_at', '<=', now())->orderBy('id')->limit(500))->get() as $row) {
             if ($row->kind === 'chatblast') {
                 if (DB::table(self::TABLE)->where('id', $row->id)->where('status', 'pending')->update(['status' => 'failed', 'error' => 'Not sent in time; queued again', 'done_at' => now(), 'updated_at' => now()]) !== 1) continue;
                 BotcakeMessage::whereKey($row->message_id)->where('status', 'sending')->update(['status' => 'queued']);
@@ -293,15 +309,27 @@ class BotcakeSendQueue
             }
         }
 
-        foreach (DB::table(self::TABLE)->where('kind', 'chatbot')->whereIn('status', ['done', 'failed'])->where('updated_at', '<=', now()->subSeconds(self::REDISPATCH_SECONDS))->orderBy('id')->limit(500)->get() as $row) {
+        // Ang done/failed na hindi pa naituloy: kada status sa index (kind, status, updated_at), ang 500 na pinakaluma, kaya
+        // hanggang 500 lang ang binabasa (ang "status in (...) order by id" ay maaaring basahin ang buong table sa PRIMARY).
+        // Ang pinakamababang 500 na id ng mga iyon, ayon sa id, gaya ng dati.
+        $cutoff = now()->subSeconds(self::REDISPATCH_SECONDS);
+        $stuck = collect();
+        foreach (['done', 'failed'] as $status) {
+            $stuck = $stuck->concat($limit->cap(DB::table(self::TABLE)->where('kind', 'chatbot')->where('status', $status)->where('updated_at', '<=', $cutoff)
+                ->orderBy('updated_at')->orderBy('id')->limit(500))->get());
+        }
+        foreach ($stuck->sortBy('id')->take(500) as $row) {
             DB::table(self::TABLE)->where('id', $row->id)->update(['updated_at' => now()]);
             ResumeChatbotSend::dispatch(self::ticket($row));
             $out['redispatched']++;
         }
 
-        $out['pruned'] = DB::table(self::TABLE)->where('created_at', '<', now()->subDays(self::KEEP_DAYS))->where('kind', '!=', self::SEQUENCE)->whereIn('status', ['resumed', 'failed', 'done'])->orderBy('id')->limit(5000)->delete();
-
-        return $out;
+        // Ang luma: ang mga id ay hinahanap sa index ng created_at (may hangganan ng oras), saka binubura ayon sa id at sa
+        // parehong kondisyon; ang DELETE na naka-ayos sa id ay maaaring basahin ang buong table at walang MAX_EXECUTION_TIME.
+        $old = now()->subDays(self::KEEP_DAYS);
+        $rule = fn ($q) => $q->where('created_at', '<', $old)->where('kind', '!=', self::SEQUENCE)->whereIn('status', ['resumed', 'failed', 'done']);
+        $ids = $limit->cap(DB::table(self::TABLE)->useIndex(self::CREATED_INDEX)->where($rule)->orderBy('created_at')->orderBy('id')->limit(5000), ['id'])->pluck('id');
+        if ($ids->isNotEmpty()) $out['pruned'] = DB::table(self::TABLE)->whereIn('id', $ids->all())->where($rule)->delete();
     }
 
     // ---- Ang sequence step (chatbot:sequence-pool) ----
@@ -519,10 +547,20 @@ class BotcakeSendQueue
     {
         $out = ['failed' => 0, 'redispatched' => 0, 'pruned' => 0];
         if (!Schema::hasTable(self::TABLE)) return $out;
-        // Kada status, sa index (status, priority, id): hindi binabasa ang buong table.
+        // Gaya ng sweep(): bawat SELECT ay may hangganan ng oras.
+        (new SweepLimit('sequence send sweep'))->run(function (SweepLimit $limit) use (&$out) {
+            self::sweepSequenceWithin($limit, $out);
+        });
+
+        return $out;
+    }
+
+    private static function sweepSequenceWithin(SweepLimit $limit, array &$out): void
+    {
+        // Kada status, sa index (status, priority, id), na naka-ayos na sa id: hindi binabasa ang buong table.
         foreach (['done', 'failed'] as $status) {
-            foreach (DB::table(self::TABLE)->where('status', $status)->where('priority', self::SEQUENCE_PRIORITY)->where('updated_at', '<=', now()->subSeconds(self::REDISPATCH_SECONDS))
-                ->orderBy('id')->limit(500)->get() as $row) {
+            foreach ($limit->cap(DB::table(self::TABLE)->useIndex(self::STATUS_PRIORITY_INDEX)->where('status', $status)->where('priority', self::SEQUENCE_PRIORITY)->where('updated_at', '<=', now()->subSeconds(self::REDISPATCH_SECONDS))
+                ->orderBy('id')->limit(500))->get() as $row) {
                 DB::table(self::TABLE)->where('id', $row->id)->update(['updated_at' => now()]);
                 ResumeChatbotSequenceSend::dispatch(self::sequenceTicket($row));
                 $out['redispatched']++;
@@ -531,14 +569,12 @@ class BotcakeSendQueue
         // Ang luma (tapos, pumalya, skipped o kinansela = resumed) ay binubura nang paunti-unti, isang beses kada minuto: hanggang sa
         // pinakabagong id na lampas KEEP_DAYS (isang basa sa index ng created_at), saka kada status sa index (status, priority, id).
         if (Cache::add('sequence-prune:' . ChatbotSequences::site(), 1, 60)) {
-            $cutoff = DB::table(self::TABLE)->where('created_at', '<', now()->subDays(self::KEEP_DAYS))->orderByDesc('created_at')->orderByDesc('id')->value('id');
+            $cutoff = $limit->cap(DB::table(self::TABLE)->useIndex(self::CREATED_INDEX)->where('created_at', '<', now()->subDays(self::KEEP_DAYS))->orderByDesc('created_at')->orderByDesc('id'), ['id'])->value('id');
             foreach ($cutoff === null ? [] : ['resumed', 'failed', 'done'] as $status) {
-                $ids = DB::table(self::TABLE)->where('status', $status)->where('priority', self::SEQUENCE_PRIORITY)->where('id', '<=', $cutoff)
-                    ->orderBy('id')->limit(5000)->pluck('id');
+                $ids = $limit->cap(DB::table(self::TABLE)->useIndex(self::STATUS_PRIORITY_INDEX)->where('status', $status)->where('priority', self::SEQUENCE_PRIORITY)->where('id', '<=', $cutoff)
+                    ->orderBy('id')->limit(5000), ['id'])->pluck('id');
                 if ($ids->isNotEmpty()) $out['pruned'] += DB::table(self::TABLE)->whereIn('id', $ids->all())->delete();
             }
         }
-
-        return $out;
     }
 }

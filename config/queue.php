@@ -121,6 +121,8 @@ return [
     'pools' => [
         'idle_ms' => (int) env('CHATBOT_POOL_IDLE_MS', 200),
         'busy_ms' => (int) env('CHATBOT_POOL_BUSY_MS', 5),
+        // Ang pinakamatagal na oras ng isang sweep ng ticket (ang MAX_EXECUTION_TIME ng mga SELECT nito, SweepLimit).
+        'sweep_ms' => (int) env('CHATBOT_SWEEP_MS', 10000),
     ],
 
     'failed' => [

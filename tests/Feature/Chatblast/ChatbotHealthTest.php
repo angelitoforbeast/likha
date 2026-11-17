@@ -321,4 +321,46 @@ class ChatbotHealthTest extends ChatblastTestCase
         $this->assertStringContainsString('&lt;script&gt;alert(1)&lt;/script&gt;', $all); // lumalabas, naka-escape
         $this->assertStringContainsString('Health', $html); // nasa nav
     }
+
+    /**
+     * Spec 290 SW-4: ang mga page na may sent na sagot sa range ay isang EXISTS kada page na may flow (index page_id,
+     * sent_at), hindi "distinct page_id" sa lahat ng sagot ng range. Pareho ang resulta: Page Cuatro (may flow) ay may
+     * failed lang ngayon at sent noong isang araw, kaya hindi kasama; Page Tres ay walang flow.
+     */
+    public function test_SW4_answered_pages_are_one_indexed_look_per_flow_page_with_the_same_result(): void
+    {
+        $this->page('Page Cuatro', '1004');
+        DB::table('page_settings')->insert(['page_name' => 'Page Cuatro', 'provider' => 'chatbot', 'key' => 'flow_id', 'value' => '2', 'created_at' => '2026-10-01 00:00:00', 'updated_at' => '2026-10-01 00:00:00']);
+        $h = $this->chat('1004', '7020', '2026-10-21 11:00:00', 'Page Cuatro');
+        $this->reply($h, '2026-10-21 11:00:05', 'failed', 'Botcake HTTP 502', 502, page: '1004');
+        $this->reply($h, '2026-10-19 11:00:05', page: '1004');
+        $this->reply(null, '2026-10-21 11:30:00', page: '1003'); // sent sa page na walang flow
+        [$start, $end] = ['2026-10-21 00:00:00', '2026-10-22 00:00:00'];
+        // Ang dating paraan, para sa paghahambing.
+        $before = fn (?array $pages) => array_values(array_intersect(
+            DB::table('chatbot_replies')->where('kind', 'send')->where('status', 'sent')->where('sent_at', '>=', $start)->where('sent_at', '<', $end)
+                ->when($pages !== null, fn ($q) => $q->whereIn('page_id', $pages))->distinct()->pluck('page_id')->map(fn ($p) => (string) $p)->all(),
+            array_map('strval', array_keys(BotHealth::flowSpans()))));
+        $scopes = [null, [1002], [1004], [1003]];
+        $wants = array_map($before, $scopes);
+        $this->assertSame(['1001', '1002'], $wants[0]);
+        $queries = [];
+        DB::listen(function ($q) use (&$queries) {
+            if (str_contains($q->sql, '"chatbot_replies"')) $queries[] = $q->sql;
+        });
+
+        foreach ($scopes as $i => $pages) {
+            $rows = (fn () => $this->inbound($start, $end, $pages))->call(app(BotHealth::class))['rows'];
+            $got = array_values(array_unique(array_column($rows, 'page')));
+            sort($got);
+            $want = $wants[$i];
+            sort($want);
+            $this->assertSame($want, $got, 'pages ' . json_encode($pages));
+        }
+
+        $looks = array_values(array_filter($queries, fn ($s) => str_starts_with($s, 'select exists(')));
+        $this->assertNotEmpty($looks);
+        foreach ($looks as $s) $this->assertStringContainsString('where "page_id" = ? and "sent_at" >= ? and "sent_at" < ?', $s);
+        $this->assertSame([], array_values(array_filter($queries, fn ($s) => str_contains($s, 'distinct') && !str_contains($s, 'exists'))), 'no distinct page_id over the range');
+    }
 }
