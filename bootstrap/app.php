@@ -22,6 +22,9 @@ return Application::configure(basePath: dirname(__DIR__))
 
         // Last seen at staff_events ng naka-login na staff (para sa staff feed ng owner).
         $middleware->appendToGroup('web', \App\Http\Middleware\RecordStaffActivity::class);
+
+        // Spec 294: who each page would block, per role (record mode never blocks; enforce answers 403).
+        $middleware->appendToGroup('web', \App\Http\Middleware\RecordPageAccess::class);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         // Huwag kailanman i-flash sa session ang API key fields (/boardroom/agents) kapag may validation error.
