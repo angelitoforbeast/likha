@@ -106,7 +106,7 @@ The Upload request answers in 0.01 s and the Update request in 0.02 s (the test 
 - Update: `test_RR_E_double_click_and_two_tabs_run_one_update_and_report_the_count_once`. Two clicks give one job; a third click after it finished gives no new job; a second copy of the job does nothing and keeps the first count.
 - Upload: `test_RU_E_double_submit_of_the_same_upload_makes_one_run_and_one_job`. The same file twice while queued gives the same run and one job. The same file after the run is done gives a new run, for example after a mapping fix.
 
-**5. Pushed; merge danger below.** PUSH_RESULT
+**5. Pushed; merge danger below.** `git push -u origin fix/283-jnt-checker-no-timeout` created the new branch on origin. `git ls-remote origin fix/283-jnt-checker-no-timeout` showed `1a39c287`. The commit that adds this line is pushed the same way. Nothing was pushed to main or develop, and nothing was deployed.
 
 ## Story changes
 
