@@ -80,3 +80,37 @@ Refused: the dark admin-template sidebar with coloured icon tiles; an accent str
 ## 6. Constraints
 
 Tailwind Play CDN as loaded today (classes it generates, arbitrary values allowed), Alpine as loaded today, Font Awesome 6.5 icons, system sans. AA contrast: gray-500 on white is 4.8:1 for section labels; gray-700 labels; blue-700 on blue-50 for active (8.6:1). Visible focus: 2 px blue-600 ring with 2 px offset on every control. Every control reachable by keyboard; the drawer and palette trap focus while open and return it. Motion: 150-200 ms ease-out on drawer slide, rail width and palette fade only; `prefers-reduced-motion` turns them off. No new fonts, no new libraries.
+
+---
+
+## 7. Critique and audit (after the build) and what was fixed
+
+Run as impeccable prescribes: two isolated reviewers, A (design review, no detector) and B (detector + rendered checks in headless Chrome against the local server, as CEO and Data Encoder). Detector (`impeccable detect --json` on the four changed templates): **0 findings**. Critique score **28/40** (Good); audit score **14/20** (Good). After-shots in this folder are the fixed state.
+
+| # | Finding (source) | Sev | Fix |
+|---|---|---|---|
+| 1 | Palette search row squashed to ~20 px when the list is long (A) | P1 | `flex-shrink: 0` on the search row and footer |
+| 2 | Recent opened on the current page, so Ctrl+K → Enter did nothing (A) | P1 | Recent leaves out the page you are on |
+| 3 | Invisible pin buttons caught taps at the right of every row; no hover on touch (A, B) | P1 | Pin takes no pointer events while hidden; shown at low emphasis on `hover: none`; rows reserve a pin lane so it never covers a badge |
+| 4 | A pinned link showed no pinned state in its section (B) | P2 | Pins that are on stay visible (blue) |
+| 5 | Current page filled twice when pinned; a closed section hid where you are (A) | P2 | Pinned copy gets a quieter blue text/icon only; a section holding the current page has a blue header |
+| 6 | Double 64 px gap on checklist-style pages when the storage banner shows (A) | P2 | Banner pulls the page's own offset back (`-mb-16`) on those pages |
+| 7 | Rail: 9 section buttons still tabbable as 12 px hairlines (B) | P2 | Out of tab order and `aria-hidden` while in the rail |
+| 8 | Drawer not modal for screen readers (B) | P2 | Page and top bar `inert` while the drawer is open |
+| 9 | Pin icon 2.31:1 on its hover chip (B) | P2 | gray-500 (≥ 3:1) |
+| 10 | Avatar `role="menu"` holding a form and a select, no arrow keys (A) | P3 | Plain disclosure (`aria-expanded`/`aria-controls`) |
+| 11 | Profile icon blank (`fa-regular fa-user`) (A) | P3 | `fa-solid fa-user` |
+| 12 | Palette and menu fades not covered by reduced motion (A) | P3 | Added to the reduced-motion rule |
+| 13 | Selected palette row's section text 4.44:1 (B) | P3 | gray-600 |
+| 14 | 36 px buttons under the 44 px touch guideline (B) | P3 | 44 px buttons and 40 px rows on `pointer: coarse` |
+| 15 | Six-pin limit only in a `title` (A) | P3 | Visible note under Pinned at six |
+| 16 | Search not ranked (A) | P3 | Label-prefix matches first, then label, then section/url |
+| 17 | Palette at 12vh, brief says 15vh (A) | P3 | 15vh |
+
+Not fixed, with reason:
+- "Supply" shows no icon: its stored class `fa-boxes-stacking` does not exist in Font Awesome 6.5 (should be `fa-boxes-stacked`). It is data in production `nav_links`, blank before this work too; the owner can change it, or a later spec can (this one does not rename or edit links).
+- Link labels that differ from page titles ("Ads" → "Import Ads Manager Reports", "Waybill" → "UPDATE FROM JNT") and cryptic labels ("MES SEG", "IP", "Checker 1"): renaming links is out of scope; the nav now makes them visible, which helps the owner choose later.
+- Near-duplicate links (Waybill / Waybill V2, Tally Sticker / Tally Sticker 2): kept by the spec's decision.
+- Each pin button is its own tab stop (B, P3): kept; it is what makes pinning reachable by keyboard.
+- Dashboard shows two h1s (bar + the page's own "Welcome"): the old layout had the same; only own-header pages are listed.
+- Not verified headless: pin drag on touch, real screen-reader output, the pin-save failure path, mouse-hover tooltips (focus tooltips verified).

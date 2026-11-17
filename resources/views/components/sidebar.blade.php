@@ -186,6 +186,12 @@
       railBtn.setAttribute('aria-pressed', String(on));
       railBtn.setAttribute('aria-label', on ? 'Expand sidebar' : 'Collapse sidebar');
       railBtn.setAttribute('data-nav-tip', on ? 'Expand sidebar' : '');
+      // In the rail the section headers are only hairlines: out of the tab order and hidden from screen readers.
+      const rail = on && desktop();
+      document.querySelectorAll('[data-nav-toggle]').forEach(b => {
+        rail ? b.setAttribute('tabindex', '-1') : b.removeAttribute('tabindex');
+        rail ? b.setAttribute('aria-hidden', 'true') : b.removeAttribute('aria-hidden');
+      });
     };
     railBtn.addEventListener('click', () => {
       html.toggleAttribute('data-nav-rail');
@@ -194,20 +200,24 @@
       tip.hidden = true;
     });
     syncRail();
+    window.matchMedia('(min-width: 1024px)').addEventListener('change', syncRail);
 
     // Drawer below 1024 px: focus moves in, Esc / scrim / close button / a link closes it, focus returns.
     const sidebar = document.getElementById('likha-sidebar');
     let opener = null;
+    const behind = () => document.querySelectorAll('.lk-main, .lk-topbar');
     window.likhaDrawer = {
       open(from) {
         opener = from || null;
         html.setAttribute('data-nav-drawer', '');
+        behind().forEach(el => { el.inert = true; });
         document.querySelectorAll('[data-nav-drawer-open]').forEach(b => b.setAttribute('aria-expanded', 'true'));
         sidebar.querySelector('.lk-drawer-close').focus();
       },
       close() {
         if (!html.hasAttribute('data-nav-drawer')) return;
         html.removeAttribute('data-nav-drawer');
+        behind().forEach(el => { el.inert = false; });
         document.querySelectorAll('[data-nav-drawer-open]').forEach(b => b.setAttribute('aria-expanded', 'false'));
         if (opener) opener.focus();
       },

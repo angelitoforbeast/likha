@@ -91,10 +91,11 @@
     .lk-dot.is-red { background: #dc2626; } .lk-dot.is-neutral { background: var(--lk-faint); } .lk-dot.is-team { background: #f97316; }
     /* Pin: shows on row hover and keyboard focus; always shown when on. A link with a badge keeps its badge visible. */
     .lk-pin { position: absolute; top: .25rem; right: .25rem; display: grid; place-items: center; width: 1.75rem; height: 1.75rem;
-      border-radius: .375rem; color: var(--lk-faint); background: var(--lk-hover); opacity: 0; font-size: .75rem; transition: opacity .15s, color .15s; }
-    .lk-row:hover .lk-pin, .lk-pin:focus-visible { opacity: 1; }
+      border-radius: .375rem; color: var(--lk-muted); background: var(--lk-hover); opacity: 0; pointer-events: none; font-size: .75rem; transition: opacity .15s, color .15s; }
+    .lk-row:hover .lk-pin, .lk-pin:focus-visible { opacity: 1; pointer-events: auto; }
+    .lk-section:not(.lk-pinned) .lk-pin.is-on { opacity: 1; pointer-events: auto; background: transparent; }
     .lk-row.has-pin .lk-link { padding-right: 2.25rem; }
-    @media (hover: none) { .lk-pin { opacity: 1; background: transparent; color: #d1d5db; } .lk-pin.is-on { color: var(--lk-accent); } }
+    @media (hover: none) { .lk-pin { opacity: 1; pointer-events: auto; background: transparent; color: var(--lk-faint); } .lk-pin.is-on { color: var(--lk-accent); } }
     .lk-pin:hover { color: var(--lk-accent); }
     .lk-pin.is-on { color: var(--lk-accent); }
     .lk-pinned .lk-pin { background: transparent; }
@@ -149,6 +150,7 @@
     .lk-pal-opt { display: flex; align-items: center; gap: .75rem; height: 2.5rem; padding: 0 .625rem; border-radius: .5rem; font-size: .875rem; color: var(--lk-text); }
     .lk-pal-opt.is-sel { background: var(--lk-accent-soft); color: var(--lk-accent-ink); }
     .lk-pal-opt.is-sel .lk-icon { color: var(--lk-accent); }
+    .lk-pal-opt.is-sel .lk-pal-section { color: #4b5563; }
     .lk-pal-label { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
     .lk-pal-section { flex-shrink: 0; font-size: .75rem; color: var(--lk-muted); }
     .lk-pal-empty { padding: 2rem 1rem; text-align: center; font-size: .875rem; color: var(--lk-muted); }
@@ -192,6 +194,12 @@
     html[data-nav-closed~="{{ $sectionName }}"] [data-section-body="{{ $sectionName }}"] { display: none; }
     html[data-nav-closed~="{{ $sectionName }}"] [data-nav-toggle="{{ $sectionName }}"] .lk-chevron { transform: rotate(-90deg); }
     @endforeach
+    /* Touch screens: 44 px targets for the bar and sidebar buttons. */
+    @media (pointer: coarse) {
+      .lk-iconbtn, .lk-search { min-width: 2.75rem; height: 2.75rem; }
+      .lk-pin { width: 2.25rem; height: 2.25rem; top: 0; }
+      .lk-link { height: 2.5rem; }
+    }
     @media (prefers-reduced-motion: reduce) {
       .lk-sidebar, .lk-scrim, .lk-topbar, .lk-main, .lk-chevron, .lk-pal, .lk-pal-scrim, .lk-menu { transition: none !important; }
     }
