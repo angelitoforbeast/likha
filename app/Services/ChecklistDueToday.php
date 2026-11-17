@@ -93,6 +93,8 @@ class ChecklistDueToday
             ->join('checklist_task_users as tu', 'tu.checklist_task_id', '=', 't.id')
             ->whereIn('tu.user_id', $userIds)
             ->where('t.is_active', true)
+            // ang AI follow-up (origin = 'ai') ay paalala lang, hindi task na due
+            ->when($schema['origin'], fn ($q) => $q->where(fn ($w) => $w->whereNull('t.origin')->orWhere('t.origin', '!=', 'ai')))
             ->where('t.created_at', '<', $nextStr)
             ->where(function ($q) use ($nextStr) {
                 $q->whereNull('t.deleted_at')->orWhere('t.deleted_at', '>=', $nextStr);
@@ -179,9 +181,10 @@ class ChecklistDueToday
      * Mga table at column na kailangan, isang beses kada request (nasa app container, kaya bago ulit
      * sa susunod na request): tasks = may checklist_tasks, checklist_task_users at checklist_submissions;
      * time_cols = ang mga oras na column na nandoon na (hal. bago ang migration ng deadline);
-     * approval = may checklist_analysis_logs na may verdict; override = may is_override na rin.
+     * approval = may checklist_analysis_logs na may verdict; override = may is_override na rin;
+     * origin = may checklist_tasks.origin na (ang AI follow-ups ng spec 293, na hindi checklist task).
      *
-     * @return array{tasks:bool, time_cols:list<string>, approval:bool, override:bool}
+     * @return array{tasks:bool, time_cols:list<string>, approval:bool, override:bool, origin:bool}
      */
     public static function schema(): array
     {
@@ -194,6 +197,7 @@ class ChecklistDueToday
                 'time_cols' => $tasks ? array_values(array_intersect(['scheduled_time', 'deadline_time'], Schema::getColumnListing('checklist_tasks'))) : [],
                 'approval'  => $approval = $tasks && Schema::hasTable('checklist_analysis_logs') && Schema::hasColumn('checklist_analysis_logs', 'verdict'),
                 'override'  => $approval && Schema::hasColumn('checklist_analysis_logs', 'is_override'),
+                'origin'    => Schema::hasTable('checklist_tasks') && Schema::hasColumn('checklist_tasks', 'origin'),
             ]);
         }
 

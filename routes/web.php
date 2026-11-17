@@ -177,6 +177,12 @@ Route::middleware(['web','auth'])->prefix('checklist')->name('checklist.')->grou
     Route::get('/manage', [\App\Http\Controllers\ChecklistController::class, 'manage'])->name('manage');
     Route::get('/manage/history', [\App\Http\Controllers\ChecklistController::class, 'history'])->name('history');
     Route::get('/report', [\App\Http\Controllers\ChecklistController::class, 'report'])->name('report');
+    // Marketing head (spec 293): CEO lang ang nagre-review ng AI follow-ups
+    Route::get('/ai-followups', [\App\Http\Controllers\ChecklistAiFollowupController::class, 'index'])->name('ai-followups');
+    Route::post('/ai-followups/settings', [\App\Http\Controllers\ChecklistAiFollowupController::class, 'settings'])->name('ai-followups.settings');
+    Route::post('/ai-followups/{followup}/approve', [\App\Http\Controllers\ChecklistAiFollowupController::class, 'approve'])->whereNumber('followup')->name('ai-followups.approve');
+    Route::post('/ai-followups/{followup}/edit', [\App\Http\Controllers\ChecklistAiFollowupController::class, 'edit'])->whereNumber('followup')->name('ai-followups.edit');
+    Route::post('/ai-followups/{followup}/reject', [\App\Http\Controllers\ChecklistAiFollowupController::class, 'reject'])->whereNumber('followup')->name('ai-followups.reject');
     Route::post('/{task}/submit', [\App\Http\Controllers\ChecklistController::class, 'submit'])->name('submit');
     Route::delete('/submission/{submission}', [\App\Http\Controllers\ChecklistController::class, 'deleteSubmission'])->name('delete-submission');
     Route::delete('/files/{file}', [\App\Http\Controllers\ChecklistController::class, 'deleteFile'])->name('delete-file');
@@ -1524,6 +1530,8 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
     Route::post('/owner/nav-settings/reset', [\App\Http\Controllers\NavSettingsController::class, 'reset'])->name('owner.nav-settings.reset');
     Route::post('/owner/nav-settings/add-route', [\App\Http\Controllers\NavSettingsController::class, 'addRoute'])->name('owner.nav-settings.add-route');
     Route::post('/nav/view-as',         [\App\Http\Controllers\NavSettingsController::class, 'setViewAs'])->name('nav.view-as');
+    // Spec 294: who each page would block (CEO only, checked in the controller).
+    Route::get ('/owner/access-report', [\App\Http\Controllers\AccessReportController::class, 'index'])->name('owner.access-report');
     // Sidebar pins (spec 295): the signed-in person's own, at most six. JSON from the sidebar.
     Route::post('/nav/pins',            [\App\Http\Controllers\NavPinsController::class, 'update'])->name('nav.pins');
     Route::get ('/owner/column-settings',                [\App\Http\Controllers\OwnerColumnSettingsController::class, 'index'])           ->name('owner.column-settings');
@@ -1577,4 +1585,29 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
     // ✅ Misc
     Route::view('/rts', 'rts');
     Route::get('/phpinfo', fn () => phpinfo());
+});
+
+// ✅ Likha Chat (spec 296): ang Messenger ng team. Naka-login lang (walang allowed_ip): sa phone nag-uusap ang staff.
+//    Bawat route na may {conversation} ay tumitingin sa membership o CEO sa controller, pati ang poll at ang file.
+Route::middleware(['web', 'auth'])->prefix('chat')->name('chat.')->group(function () {
+    $chat  = \App\Http\Controllers\ChatController::class;
+    $group = \App\Http\Controllers\ChatGroupController::class;
+
+    Route::get   ('/',                                         [$chat, 'index'])        ->name('index');
+    Route::get   ('/conversations',                            [$chat, 'conversations'])->name('conversations');
+    Route::get   ('/people',                                   [$chat, 'people'])       ->name('people');
+    Route::get   ('/unread',                                   [$chat, 'unread'])       ->name('unread');
+    Route::get   ('/poll',                                     [$chat, 'poll'])         ->middleware('throttle:120,1')->name('poll');
+    Route::post  ('/direct',                                   [$chat, 'direct'])       ->middleware('throttle:60,1')->name('direct');
+    Route::post  ('/groups',                                   [$group, 'store'])       ->middleware('throttle:30,1')->name('groups.store');
+    Route::get   ('/{conversation}',                           [$chat, 'show'])         ->whereNumber('conversation')->name('show');
+    Route::patch ('/{conversation}',                           [$group, 'rename'])      ->whereNumber('conversation')->name('rename');
+    Route::post  ('/{conversation}/messages',                  [$chat, 'send'])         ->whereNumber('conversation')->middleware('throttle:60,1')->name('send');
+    Route::delete('/{conversation}/messages/{message}',        [$chat, 'remove'])       ->whereNumber(['conversation', 'message'])->name('remove');
+    Route::get   ('/{conversation}/messages/{message}/files/{index}', [$chat, 'file'])  ->whereNumber(['conversation', 'message', 'index'])->name('file');
+    Route::post  ('/{conversation}/read',                      [$chat, 'read'])         ->whereNumber('conversation')->name('read');
+    Route::post  ('/{conversation}/members',                   [$group, 'addMembers'])  ->whereNumber('conversation')->name('members.add');
+    Route::delete('/{conversation}/members/{user}',            [$group, 'removeMember'])->whereNumber(['conversation', 'user'])->name('members.remove');
+    Route::post  ('/{conversation}/leave',                     [$group, 'leave'])       ->whereNumber('conversation')->name('leave');
+    Route::post  ('/{conversation}/join',                      [$group, 'join'])        ->whereNumber('conversation')->name('join');
 });

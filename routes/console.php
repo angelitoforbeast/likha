@@ -79,6 +79,15 @@ Schedule::command('supply:refresh-primary-items --last=14')
     ->dailyAt('03:50')
     ->withoutOverlapping();
 
+// Marketing head (spec 293): AI follow-up drafts para sa late o not_approved na marketing checklist task, bawat 30 minuto
+// 9 AM hanggang 9 PM Manila. Walang ginagawang draft hangga't naka-off sa /checklist/ai-followups (off bilang default).
+Schedule::command('checklist:ai-followups')
+    ->timezone('Asia/Manila')
+    ->everyThirtyMinutes()
+    ->between('09:00', '21:00')
+    ->withoutOverlapping(10) // 10 min: ang takbong nag-crash ay hindi haharang nang matagal
+    ->onOneServer();
+
 // Staff activity log: 90 araw lang ang itinatago. 04:20 Manila: pagkatapos ng night step at ng 03:50 refresh.
 Schedule::command('staff-events:prune')
     ->timezone('Asia/Manila')
