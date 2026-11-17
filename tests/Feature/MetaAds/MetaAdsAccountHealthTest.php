@@ -377,7 +377,7 @@ class MetaAdsAccountHealthTest extends MetaAdsTestCase
         $this->assertCount(2, $this->meta());
     }
 
-    public function test_AA_3_the_hourly_schedule_reads_only_when_stale_and_the_scheduled_sync_reads_after_its_run(): void
+    public function test_AA_3_the_hourly_command_reads_only_when_stale_and_is_scheduled_every_hour(): void
     {
         $ana = $this->user('Marketing', 'ana@example.test');
         $this->connect($ana, self::TOKEN_ANA, ['111']);

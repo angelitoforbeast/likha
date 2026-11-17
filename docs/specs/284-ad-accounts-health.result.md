@@ -29,9 +29,154 @@ Base: 9fa8ed84 + 280 (a5a4f7ba) + 281 (64992c69). First step after "go": run the
 
 ## What shipped
 
+Code commit `707d9a27` on `feat/284-ad-accounts-health` (base 9fa8ed84 + 280 + 281). No migration, no new table, no new config key, no new cron line.
+
+- `app/Services/MetaAds/AccountHealth.php` (new):
+  - The read: one `me/adaccounts` call per connection with `account_id,name,account_status,disable_reason,currency,balance,amount_spent,spend_cap,funding_source_details`, limit 200, paging followed. Field names checked against the Marketing API ad-account reference: all exist; `funding_source_details` needs MANAGE on the account.
+  - The call uses 1 try and a 20 s timeout, so there is no rate-limit back-off inside a web request.
+  - If the call fails for any reason other than 190 or a rate limit, it is made once more without `funding_source_details`. The payment method then shows "not available" and the reason is listed once.
+  - 190 marks the connection expired, as Sync does. That connection's rows say "Token expired: <Facebook name> (Reconnect)".
+  - Any other failure keeps the last good row for that connection's accounts, with its own read time and the reason.
+  - An account seen through two connections is one row naming both. Names go through `Connections::names()`.
+  - Storage: one `app_settings` row, `meta_ads.account_health`, used as both the 10-minute cache and the last good read. It is reused while the last attempt, good or failed, is under 10 minutes old. Reads run under `Cache::lock('meta_ads.account_health', 180)`. No token or raw Graph body is stored.
+  - Money: amounts are kept as Meta's minor-unit strings and converted with string arithmetic, no floats. Offset 1 for Meta's 11 zero-offset currencies (CLP, COP, CRC, HUF, ISK, IDR, JPY, KRW, PYG, TWD, VND, from Meta's currency table); offset 100 for every other currency.
+  - Status and disable-reason codes are shown in words. % used is rounded down, so 89.99% is not a 90% warning.
+- `app/Services/MetaAds/Graph.php`: `all()` takes optional `$tries` and `$timeout` (default unchanged, so the existing callers behave the same).
+- `app/Http/Controllers/MetaAdsController.php`:
+  - `adAccounts()`: `GET /ads_manager/meta/ad-accounts`. It reads Meta in the request only when the stored read is stale.
+  - `refreshAdAccounts()`: `POST /ads_manager/meta/ad-accounts/refresh`. It reads now, under the lock; if another read is running, it says so and shows the last read.
+  - Both use `checkAccess()` (the "Ads" nav permission, 404 without it). Neither needs write mode.
+  - `panel()` adds the warnings from the stored read only.
+- `resources/views/ads_manager/ad_accounts.blade.php` (new):
+  - A table from `md` up, one card per account below `md`. Long names and ids wrap, and there is no horizontal page scroll at 390 px.
+  - Red and amber warning lines at the top.
+  - The empty state "No Meta connection on this site."
+  - The "not available" reasons, listed once at the bottom.
+- `resources/views/ads_manager/report.blade.php`: one line `⚠ Ad accounts: <name> (<reason>), …  (read <time>) Open Ad Accounts`. It is red if any warning is red, otherwise amber. It shows only to users with the "Ads" permission.
+- `resources/views/ads_manager/_meta_ads.blade.php`: an "Ad Accounts: balance, spend cap, payment" link in the Facebook (Meta Ads API) card.
+- `app/Console/Commands/MetaAdsAccountHealth.php` (new): `meta-ads:account-health [--force]`. Without `--force` it reads only when there are connections and the stored read is stale.
+- `routes/console.php`: `meta-ads:account-health` runs hourly (`0 * * * *`, withoutOverlapping, runInBackground) in the existing scheduler.
+- `app/Console/Commands/MetaAdsSync.php`: after a `--scheduled` run, the stored read is refreshed. A failure there is a warning line and does not fail the sync.
+- `tests/Feature/MetaAds/MetaAdsAccountHealthTest.php`: 20 tests. The Graph is faked with `Http::fake` and `preventStrayRequests`, the same as the other Meta tests.
+
 ## Evidence per done-when item
 
+PHP 8.4.16 (Herd). The tests use the repo's phpunit.xml: sqlite in memory, array cache.
+
+**1. Feature tests for AA-1..AA-4 pass; the full suite adds no new failures.**
+
+```
+php vendor/bin/phpunit tests/Feature/MetaAds/MetaAdsAccountHealthTest.php --testdox
+ ✔ AA 1 H five accounts show every field with money in two decimals
+ ✔ AA 1 minor units are converted by the currency offset without floats
+ ✔ AA 1 N no meta connection shows the empty state and calls nothing
+ ✔ AA 1 N payment method refused retries without it and lists the reason once
+ ✔ AA 1 N a field missing from one account shows not available and the page still renders
+ ✔ AA 1 E the same account through two connections is one row naming both
+ ✔ AA 1 E an expired token is named on its rows and the connection is marked
+ ✔ AA 2 H an account in grace period is a red line on both pages
+ ✔ AA 2 unsettled disabled and cap reached are red
+ ✔ AA 2 N all healthy shows no warning line
+ ✔ AA 3 a fresh stored read makes no graph call on page load
+ ✔ AA 3 another read in progress shows the stored read without calling
+ ✔ AA 3 E api blocked shows the last good read with its time and the error
+ ✔ AA 3 E a rate limit does not wait or retry in the request
+ ✔ AA 3 refresh now reads even when fresh for anyone with ads access without write mode
+ ✔ AA 3 the hourly command reads only when stale and is scheduled every hour
+ ✔ AA 3 the scheduled sync refreshes the stored read after its run
+ ✔ AA 4 a role without the ads link gets 404 and sees no balance or warning
+ ✔ AA 4 guests are sent to login
+ ✔ AA 4 the stored read holds no token
+OK (20 tests, 146 assertions)
+
+php vendor/bin/phpunit tests/Feature/MetaAds
+OK (253 tests, 1193 assertions)
+```
+
+- Minor units:
+  - PHP `123456` → `PHP 1,234.56`.
+  - `5` → `0.05`.
+  - USD `-1230` → `-12.30`.
+  - `9007199254740993` → `90,071,992,547,409.93`. That is 2^53+1, where a float would lose the last digit.
+  - JPY `1500` → `1,500.00` and VND `25000000` → `25,000,000.00` (offset 1).
+  - A non-integer string, or a missing currency → "not available".
+- Degraded field:
+  - When `funding_source_details` is refused, there are 2 calls, and the second asks for the fields without it.
+  - The payment cell reads "not available" on both rows.
+  - The reason appears once.
+  - A row missing `amount_spent`, `currency` and `funding_source_details`, with a non-numeric `balance`, renders "not available" in those cells, and the page is 200.
+
+Full suite: `php -d memory_limit=2G vendor/bin/phpunit`
+
+| | Tests | Failures |
+|---|---|---|
+| base 9fa8ed84 | 5,294 | 3 |
+| branch (284 + 280 + 281) | 5,343 (+20 from 284, +29 from 280 and 281) | 3 |
+
+The 3 base failures:
+- `ExampleTest::test_the_application_returns_a_successful_response`
+- `Item\ItemTableFitScriptTest::test_every_catalog_column_id_has_a_minimum_width_and_a_place_in_the_drop_order`
+- `OwnerPrivate\SharedPagesBasePinTest::test_S_42_4_... with data set "/owner/private"`
+
+The branch has the same 3 failures and no others (time 20:37 vs 17:45 on the base).
+
+**2. The page renders with seeded fake data.** A throwaway test, not committed, seeds two connections (Ana: 111, 222, 333; Ben: 333, 444). Ben's token is refused `funding_source_details`. The test GETs the page as the CEO. Excerpt of the HTML, with whitespace trimmed and the CSRF input removed:
+
+```html
+<div class="... border-red-300 bg-red-50 text-red-800" role="alert" data-warning="red">
+  ⚠ <span class="font-semibold break-words">Kusina Grace</span> <span class="font-mono break-all">111</span>: In grace period</div>
+<div class="... border-red-300 bg-red-50 text-red-800" role="alert" data-warning="red">
+  ⚠ <span ...>Old Shop</span> <span ...>444</span>: Disabled</div>
+<div class="... border-amber-300 bg-amber-50 text-amber-800" role="alert" data-warning="amber">
+  ⚠ <span ...>Near Cap</span> <span ...>222</span>: spend cap 93% used</div>
+<table class="min-w-full text-sm" id="ad-accounts-table"> ...
+<tr data-account="111" class="bg-red-50">
+  <td>Kusina Grace · 111 · PHP</td><td>Marketing User FB</td>
+  <td><span class="text-red-700 font-semibold">In grace period</span></td>
+  <td>PHP 18,450.75</td><td>PHP 1,250,043.21</td><td>No limit</td><td>Visa *4111</td><td>Nov 17, 2026 3:39 PM</td></tr>
+<tr data-account="222" class="bg-amber-50">
+  <td>Near Cap · 222 · PHP</td><td>Marketing User FB</td><td>Active</td>
+  <td>PHP 300.00</td><td>PHP 46,500.00</td>
+  <td>PHP 50,000.00 <div class="text-xs font-semibold">PHP 3,500.00 left · 93% used</div></td>
+  <td>Visa *4222</td><td>Nov 17, 2026 3:39 PM</td></tr>
+<tr data-account="444" class="bg-red-50">
+  <td>Old Shop · 444 · USD</td><td>Marketing - OIC User FB</td>
+  <td><span class="text-red-700 font-semibold">Disabled</span><div>Reason: Payment risk</div></td>
+  <td>USD 0.00</td><td>USD 8,800.00</td><td>No limit</td><td>not available</td><td>Nov 17, 2026 3:39 PM</td></tr>
+<tr data-account="333" class="">
+  <td>Shared Shop · 333 · PHP</td><td>Marketing User FB, Marketing - OIC User FB</td><td>Active</td>
+  <td>PHP 0.12</td><td>PHP 0.99</td><td>No limit</td><td>Visa *4333</td><td>Nov 17, 2026 3:39 PM</td></tr>
+...
+<div id="ad-accounts-notes"><div>Why some fields are "not available":</div>
+  <div>Payment method not available for Marketing - OIC User FB&#039;s accounts: Graph error 100: (#100) Requires MANAGE for funding_source_details</div></div>
+```
+
+The same seeded data on `/ads_manager/report`:
+
+```html
+<div id="ad-accounts-warning" role="alert" class="rounded border px-4 py-2 text-sm break-words border-red-300 bg-red-50 text-red-800">
+  ⚠ Ad accounts: Kusina Grace (In grace period), Old Shop (Disabled), Near Cap (spend cap 93% used)
+  <span class="text-xs">(read Nov 17, 2026 3:39 PM)</span>
+  <a href="http://localhost/ads_manager/meta/ad-accounts" class="underline font-semibold">Open Ad Accounts</a></div>
+...
+<h2 class="font-semibold">Facebook (Meta Ads API)</h2>
+<a href="http://localhost/ads_manager/meta/ad-accounts" id="ad-accounts-link" ...>Ad Accounts: balance, spend cap, payment</a>
+```
+
+The page also contains the same rows as cards, which show below `md` (768 px). No screenshot was taken: the layout loads Tailwind from its CDN, and the built-in browser cannot open a local file. The 390 px layout is the card list, with `break-words`/`break-all` on names and ids and no fixed widths.
+
+**3. No Graph call on a page load when a fresh cached read exists.** `test_AA_3_a_fresh_stored_read_makes_no_graph_call_on_page_load`:
+- The first load makes 1 call.
+- Two more loads at +9 min make 0 calls.
+- At +11 min, the read happens again.
+
+`test_AA_3_E_api_blocked_...` shows that a failed attempt also counts for the 10 minutes. `test_AA_3_another_read_in_progress_...` shows that, while the lock is held, neither the page nor Refresh now calls Meta. `test_AA_2_H_...` shows that the report page makes no Graph call.
+
+**4. Branch pushed.** PUSH_EVIDENCE
+
 ## Story changes
+
+None. The Refresh-now permission and the hourly refresh follow the rulings below.
 
 ## Rulings
 
@@ -40,3 +185,16 @@ Base: 9fa8ed84 + 280 (a5a4f7ba) + 281 (64992c69). First step after "go": run the
 - Q3: Reading Meta in the request when the data is stale is allowed only on the Ad Accounts page and Refresh now: one call per connection, 20 s timeout, under the lock.
 
 ## Merge danger
+
+- **Ships with 280 and 281.** This branch is built on 9fa8ed84 with `fix/280-ads-updated-only-on-change` (a5a4f7ba) and `feat/281-meta-app-settings` (64992c69) merged in. Merging it brings in both of them. Merge 280 and 281 first (or together); after that, this branch adds only its own commits.
+- **Files shared with 281:**
+  - `MetaAdsController.php`: a new `use` line, a new key in `panel()`, and two new methods at the end of the panel section.
+  - `routes/web.php`: two routes right after the 281 `meta/app/test` route.
+  - `_meta_ads.blade.php`: one link in the card header.
+
+  These conflict only if 281 changes again before the merge.
+- **Graph::all signature:** two optional trailing parameters with the old defaults, so existing calls are unchanged.
+- **Scheduler:** a new hourly `meta-ads:account-health`. It reads Meta only when there is a connection and the stored read is more than 10 minutes old: about 24 calls a day per connection, plus up to 3 after the scheduled syncs. On the second site (no Meta connection) it does nothing. The existing `schedule:run` cron runs it, so no cron change is needed.
+- **Config:** none. No `.env` key and no migration. The `app_settings` row `meta_ads.account_health` is created on the first read.
+- **Revert:** `git revert` of the code commit `707d9a27`. Leaving the `meta_ads.account_health` row in place is harmless; delete it if you want the table clean (`DELETE FROM app_settings WHERE key = 'meta_ads.account_health'`). Nothing else holds state.
+- **After deploy:** the first visit to `/ads_manager/meta/ad-accounts` (or the next hour's run) makes the first read. Until then, the report page shows no warning line.
