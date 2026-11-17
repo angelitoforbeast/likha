@@ -112,7 +112,9 @@ class ChecklistAiFollowupController extends Controller
             return response()->json(['ok' => true, 'settings' => AiFollowups::settings()]);
         }
 
-        return back()->with('success', 'Settings saved.');
+        return back()->with('success', array_keys($validated) === ['enabled']
+            ? ($validated['enabled'] ? 'The Marketing head is on. It checks every 30 minutes from 9 AM to 9 PM.' : 'The Marketing head is off. It drafts nothing until you switch it on.')
+            : 'Settings saved.');
     }
 
     /** Ang mga value na kailangan ng isang card (draft, sent o rejected), handa na para sa Blade. */
