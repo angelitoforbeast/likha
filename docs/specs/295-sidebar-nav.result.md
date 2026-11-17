@@ -92,7 +92,25 @@ Read first: `components/layout.blade.php`, `components/navlink.blade.php`, `NavL
   - "Add to nav" sets a section;
   - `defaultData()` has a section on every row and every migration-made link with the same url and the same visibility;
   - Reset writes each default's section and visibility and re-creates a deleted default link.
-- Full suite against base 8164024f: see "Full suite" below.
+- Full suite against base 8164024f: see below.
+
+**Full suite against base 8164024f** (`phpunit`, the whole suite, `-d memory_limit=4G`. The first attempts ran out of memory in the JUnit logger at 100% and were rerun without it):
+
+| | Tests | Assertions | Errors | Failures | Skipped |
+|---|---|---|---|---|---|
+| Base 8164024f | 5418 | 83040 | 97 | 183 | 6 |
+| Branch, first run | 5507 | 83627 | 97 | 185 | 6 |
+| Branch after the two test edits below (those two classes rerun; no app code changed after the full run) | 5507 (+89 in `tests/Feature/Nav`) | | 97 | 183 | 6 |
+
+- **The failing set on the branch is identical to the base's 280**, compared by test name.
+- 277 of the 280 are in `tests/Feature/Chatblast`. By class: CommentRepliesTest 48, BroadcastTest 23, ChatbotSequenceEngineTest 22, ChatblastSendTest 21, AdOpenWaitTest 18, FailedSendKeepsConversationTest 12, ChatbotWaitSkipTest 12, ChatblastTrackTest 11, ChatbotAsyncAiTest 10, CustomerReachInboundTest 8, ChatEchoTest 8, BotcakeAsyncSendTest 8, GatewayTypingTest 7, CommentPermissionTest 7, ChatbotProviderTest 7, ChatblastSafetyTest 6, ChatbotAiProviderPoolTest 5, ChatblastReadyTest 5, IncepxionEchoTest 4, CustomerReachChatblastTest 4, ChatbotAiRecordTest 4, ChatblastSequenceTest 4, AdGroupRunTest 4, ChatbotAiRestartTest 3, RealSendTimeTest 2, GatewayPerPageTest 2, ChatbotTagsTest 2, ChatbotAmendmentOneTest 2, ChatbotAfterOrderSequenceTest 2, ChatblastPageTest 2, RunEventRowTest 1, QueueRedisHorizonTest 1, ChatbotHealthTest 1, AiKeyPoolPathTest 1.
+- The other 3 are:
+  - `OwnerPrivate\SharedPagesBasePinTest` for `/owner/private`;
+  - `Item\ItemTableFitScriptTest`;
+  - `ExampleTest`.
+- The first branch run had **2 new failures**. Both came from tests that read the whole layout, and I changed both tests. The reviewer should confirm these two edits (see Story changes):
+  - `Boardroom\SecurityTest::test_model_output_is_delivered_as_plain_text`: it asserts that the `/boardroom` page contains no `localStorage` string anywhere. The new nav keeps UI state in localStorage, which the spec asks for: the rail, closed sections and the last 5 pages "per browser". The check now covers the page's own content (from `<main>`), which is where the boardroom's code lives.
+  - `OwnerPrivate\SharedPagesBasePinTest` for `/owner/column-settings/owner-private`: this is a sha1 pin of the whole render, re-pinned on every intended change (its docblock lists each one). I rendered the page on base and on branch. From `<main>` down, the only difference is the closing `</div>` of the new content wrapper. I re-pinned the hash and added a docblock line.
 
 **2. Design evidence** in `docs/design/295-sidebar-nav/`:
 - `brief.md`, written before the build, with the critique and audit findings and what was fixed in section 7.
@@ -112,6 +130,9 @@ Read first: `components/layout.blade.php`, `components/navlink.blade.php`, `NavL
 - **NV-2, checklist badge:** the old layout drew the badge twice (desktop bar and phone panel). The one sidebar now serves both, so the badge appears once per page. `tests/Feature/Checklist/ChecklistBadgeTest.php` `test_S_051_20` changes its count from 2 to 1; its other assertions (count, tone, title, team badge on `/checklist` and any layout page) are unchanged and pass.
 - **NV-2, top bar:** the separate red Logout button became a "Log out" row in the avatar menu, as the spec's avatar menu lists it. The page heading band became the bar's title.
 - **NV-4:** pinning is off while the CEO uses View as (ruling 7).
+- **Two layout-wide tests outside this spec** were changed so they keep their intent with the new nav (details in Evidence, item 1):
+  - `tests/Feature/Boardroom/SecurityTest.php`: the localStorage check now covers the page content.
+  - `tests/Feature/OwnerPrivate/SharedPagesBasePinTest.php`: re-pinned the hash; the diff is layout-only.
 - No other story changed.
 
 ## Rulings

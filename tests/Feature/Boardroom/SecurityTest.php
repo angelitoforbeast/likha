@@ -190,6 +190,7 @@ class SecurityTest extends BoardroomTestCase
         $this->assertStringNotContainsString('alert(1)', $page, 'Ang page ay walang naka-embed na model output.');
         $this->assertStringNotContainsString('x-html', $page, 'Bawal ang x-html: text lang ang pag-render.');
         $this->assertStringNotContainsString('innerHTML', $page);
-        $this->assertStringNotContainsString('localStorage', $page, 'Walang credential o data sa localStorage.');
+        // Ang page mismo (mula <main>): ang nav ng layout (spec 295) ay may UI state lang sa localStorage (rail, sarado na section, huling 5 page).
+        $this->assertStringNotContainsString('localStorage', substr($page, (int) strpos($page, '<main>')), 'Walang credential o data sa localStorage.');
     }
 }
