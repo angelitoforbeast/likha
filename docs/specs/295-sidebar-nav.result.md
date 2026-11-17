@@ -184,3 +184,39 @@ Choices the spec left open, each with its reason:
 2. **localStorage holds only UI state**, under the keys `likha.nav.rail`, `likha.nav.closed` and `likha.nav.recent`. That is the rail flag, the closed section names, and the urls of the last 5 nav pages visited, all per browser as the spec asks. On a shared office PC, the next person to sign in on that browser sees the previous person's Recent list (urls of pages only, no data). If that matters, the list can be cleared on logout.
 3. **The "Supply" link has no icon in production data.** `fa-boxes-stacking` does not exist in Font Awesome 6.5; it should be `fa-boxes-stacked`. It is a one-field change in Nav settings or the database; this spec does not edit links.
 4. **The spec says Reset misses 10 links; I found 9** (ruling 6).
+
+## Follow-up after merging 293, 294, 296
+
+The release commit `eca2a07e` (293, 294, 296) is merged into this branch in `a9cfae5f`. `routes/web.php` conflicted after `/nav/view-as`. Both blocks are kept: 294's `/owner/access-report`, then `/nav/pins`. The changes below are in `41078e8e`.
+
+- **Nav test fixtures** (`tests/Feature/Nav/NavTestCase.php`). A hand row is now inserted only when no row has its key or url. 296 makes `chat`, and 293 makes `/checklist/ai-followups` under the key `checklist_ai_followups`. When the row already exists, the migration's row is kept and only the fixture's visibility is set (`updateOrInsert` per role). No assertion changed.
+- **`NavLink::defaultData()`** gains `checklist_ai_followups` (CEO) and `chat` (the five roles), as their migrations make them. The existing test "every link a migration made is in the catalogue, same url and visibility" required it, and Reset now restores both. `NavSettingsSectionTest` is unchanged.
+- **Chat link pattern.** A hand-made `chat*` matched `/chatblast` and `/chatbot`, and 296's `chat` missed `/chat/5`. A single `Str::is` pattern, which is what both the sidebar and 294's `AccessRule` use, cannot express both `/chat` and `/chat/*`. AccessRule already reads an empty pattern as "the route_url and below, on whole segments".
+  - New migration `2026_11_28_100000_narrow_chat_nav_link_pattern` clears the pattern of the `/chat` link (by key `chat` or url `/chat`) and touches no other link. `down()` puts back 296's `chat`.
+  - The sidebar (`components/sidebar.blade.php`) now reads an empty pattern the same way. Before this change, a link with no pattern was never marked as the current page.
+- **`/chat` and `/chat/*` are full-width pages** in `components/layout.blade.php` (296 ruling 10).
+- **Chat panel placement** (`chat/index.blade.php`, beyond the brief but needed for the page to work). After the merge, the panel measured `document.querySelector('nav')`. In this layout that is the sidebar's list, which reaches the bottom of the screen. The panel was therefore pushed off screen, and at ≥ 1024 px its left side sat under the sidebar. It now measures `.lk-topbar`, and at ≥ 1024 px it starts at the sidebar's width (or the rail's). This is checked in markup by a test, not in a browser.
+- **Tests:**
+  - `tests/Feature/Nav/ChatLinkTest.php` (7 tests):
+    - `/chatblast` and `/chatbot` do not mark Chat as current. This includes a Marketing user who sees Chat but not Chatblast.
+    - `/chat` and `/chat/5` mark Chat as current.
+    - AccessRule allows `/chat/5`, leaves `/chatroom` unmapped and still blocks `/chatblast` for Marketing.
+    - The migration up/down touches only the chat link.
+    - Reset keeps the chat link without a pattern.
+    - `/chat` renders full width.
+  - `tests/Feature/Chat/LayoutTest.php` (2 tests): the real `/chat` page is full width, and the panel measures the top bar.
+  - With the migration changed to write `chat*`, 4 of the 7 Nav tests fail.
+
+**Runs** (Herd PHP, `-d memory_limit=-1`)
+
+| | Tests | Result |
+|---|---|---|
+| `tests/Feature/Nav` | 96 | OK |
+| `tests/Feature/Chat` | 65 | OK |
+| `tests/Feature/Access` | 42 | OK |
+| `tests/Feature/Checklist` | 261 | OK |
+| Full suite | 5679, 84453 assertions | 99 errors, 195 failures, 6 skipped |
+
+- Of the full suite's 294 failing tests, 280 are the same set as the base (by test name): the 277 Chatblast tests listed above, plus `ExampleTest`, `ItemTableFitScriptTest` and `SharedPagesBasePinTest` `/owner/private`.
+- The other 14 are `Chatblast\SpeedMemoryTest` (4) and `Chatblast\SpeedPrewarmTest` (10). Both are timing tests that fail under load in the full run. Run alone, both pass: SpeedMemoryTest 4/4, SpeedPrewarmTest 20/20.
+- No other failures.
