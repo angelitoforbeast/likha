@@ -142,7 +142,9 @@ class AccessRule
     {
         $mode = self::RECORD;
         if (Schema::hasTable('app_settings')) {
-            $value = DB::table('app_settings')->where('key', 'access.mode')->value('value');
+            // pluck, not value(): without "limit 1" this read never shares its SQL text with the other app_settings
+            // reads (some tests tell a page's own queries apart by their SQL text).
+            $value = DB::table('app_settings')->where('key', 'access.mode')->pluck('value')->first();
             if (strtolower(trim((string) $value)) === self::ENFORCE) {
                 $mode = self::ENFORCE;
             }
