@@ -177,3 +177,10 @@ Choices the spec left open, each with its reason:
 **How to revert to the old nav**
 - Revert the UI commits. The layout reads `section` and `nav_pins` only through `NavSections` / `NavMenu`, so the old layout works with the columns still present.
 - To remove the columns too: `php artisan migrate:rollback --path=database/migrations/2026_11_27_100000_add_nav_sections_and_pins.php`. It drops both columns. Visibility rows were never changed, so nothing else needs undoing.
+
+## For the reviewer to decide
+
+1. **The two edits to tests outside this spec**, in `Boardroom\SecurityTest` and `OwnerPrivate\SharedPagesBasePinTest` (Evidence, item 1). Both keep the test's intent. Rejecting either means moving the nav's UI state out of localStorage (into a cookie or the server) or not re-pinning the render.
+2. **localStorage holds only UI state**, under the keys `likha.nav.rail`, `likha.nav.closed` and `likha.nav.recent`. That is the rail flag, the closed section names, and the urls of the last 5 nav pages visited, all per browser as the spec asks. On a shared office PC, the next person to sign in on that browser sees the previous person's Recent list (urls of pages only, no data). If that matters, the list can be cleared on logout.
+3. **The "Supply" link has no icon in production data.** `fa-boxes-stacking` does not exist in Font Awesome 6.5; it should be `fa-boxes-stacked`. It is a one-field change in Nav settings or the database; this spec does not edit links.
+4. **The spec says Reset misses 10 links; I found 9** (ruling 6).
