@@ -67,7 +67,7 @@
     .lk-section + .lk-section { margin-top: 1rem; }
     .lk-section-head-wrap { margin: 0; }
     .lk-section-head { display: flex; align-items: center; width: 100%; height: 1.75rem; padding: 0 .5rem; border-radius: .375rem;
-      font-size: .6875rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--lk-muted); }
+      font-size: .6875rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--lk-muted); text-align: left; }
     .lk-section-head:hover { color: var(--lk-ink); }
     .lk-section-head.is-static { cursor: default; }
     .lk-section-head.is-static:hover { color: var(--lk-muted); }
