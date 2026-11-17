@@ -57,7 +57,7 @@ No migration, no new table, no config change, nothing new scheduled. One new GET
 - `ff9b7f2e` test: pin the hourly timeline output before the refactor (fixtures recorded from base code)
 - `e02506f0` feat: shared class + endpoint
 - `33c7a152` feat: view + tests
-- plus this result commit
+- `bcccd03d` and the final commit: this result file
 
 ## Evidence per done-when item
 
@@ -86,7 +86,14 @@ No migration, no new table, no config change, nothing new scheduled. One new GET
 
 **Folders:** `tests/Feature/CPP` OK (53 tests, 365 assertions), with the 288 `CppHourlyTimelineTest` unchanged and green. `tests/Feature/MetaAds` OK (283 tests, 1421 assertions).
 
-**Full suite:** SUITE_PLACEHOLDER
+**Full suite on `33c7a152`** (`vendor/bin/phpunit`, 15 min 33 s): 5413 tests, 83971 assertions, **3 failures**, 6 skipped.
+- The 3 failures are the base failures:
+  - `ExampleTest::test_the_application_returns_a_successful_response`
+  - `ItemTableFitScriptTest::test_every_catalog_column_id_has_a_minimum_width_and_a_place_in_the_drop_order`
+  - `SharedPagesBasePinTest::test_S_42_4_… with data set "/owner/private"`
+- The same three fail with the worktree switched to base `ebab078e` (`--filter='ExampleTest|ItemTableFitScriptTest|SharedPagesBasePinTest'`: 56 tests, 3 failures, the same three).
+- **No new failures.**
+- The 6 skipped tests are environment gated: BoardroomLiveSmokeTest × 3 (live keys), QueueRedisHorizonTest (Redis), SequenceReRunTest (MySQL only), ReturnedQueryPerfTest (perf flag).
 
 `php artisan test` prints a `file_get_contents(.env)` warning per test in this worktree because it has no `.env` (known, see 241/286). The suites were run with `vendor/bin/phpunit` under Herd PHP 8.4.16. `php artisan view:cache` compiles the Blade, and `route:list -v` shows the new route with `web`, `auth`, `allowed_ip`, the same as `/hourly`.
 
@@ -161,7 +168,7 @@ The orders-only day (2026-11-15), first cell:
    - Suggested check on the server: `EXPLAIN` with `?` = `'2026-10-19','2026-11-18'` and the pattern above.
 
 ### 4. Branch and merge danger
-Pushed: `git push -u origin feat/291-hourly-totals` (see the report for the final hash). The merge-danger section is below.
+Pushed to `origin/feat/291-hourly-totals` (`git push -u`); the last commit is this result file. The merge-danger section is below.
 
 ## Story changes
 None. HT-1's "newest date on top as Buckets orders them" holds: the bucket grid builds its dates descending, and this view does the same.
