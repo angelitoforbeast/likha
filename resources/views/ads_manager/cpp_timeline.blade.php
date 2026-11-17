@@ -145,12 +145,23 @@
        table's min-width (76 + 24 × 41 = 1060 px) is wider than the box only below about a 1190 px window, and then
        only the wrapper scrolls, never the page. */
     .tl-tot-wrap { width: 100%; overflow-x: auto; }
-    .tl-tot { min-width: 1060px; }
-    .tl-tot col.tl-tot-date { width: 76px; }
-    .tl-tot th.tl-hour-name { font-size: 11px; }
-    .tl-tot td { padding: 2px 1px; line-height: 1.2; vertical-align: top; }
+    /* Spec 292: the labels Adspent / Orders / CPP are written once per row in their own column instead of in every
+       cell, and the figures are full numbers (42,101 / 1,144 / 36.80). To pay for the label column the date goes on two
+       lines ("Nov 18" over "Wed"): date 46 px + labels 44 px leave 1165 − 90 = 1075 px, 44.8 px per hour, and with no
+       side padding and the 1 px border a cell keeps 43.8 px, room for a figure of 7 characters (at most 7 × 6 px = 42 px
+       of 10 px monospace). A longer figure falls back to the compact form (1.02M). min-width 46 + 44 + 24 × 44 = 1146 px
+       is still inside the 1165 px box. */
+    .tl-tot { min-width: 1146px; }
+    .tl-tot col.tl-tot-date { width: 46px; }
+    .tl-tot col.tl-tot-lbl { width: 44px; }
+    .tl-tot th.tl-hour-name { font-size: 11px; padding-left: 3px; line-height: 1.25; vertical-align: top; }
+    .tl-tot th.tl-tot-lbls { font-size: 10px; font-weight: 600; color: #4b5563; text-align: left; padding: 2px 1px;
+      line-height: 1.2; vertical-align: top; background: #f9fafb; }
+    .tl-tot td { padding: 2px 0; line-height: 1.2; vertical-align: top; }
     .tl-tot td > div > div { overflow: hidden; text-overflow: ellipsis; }
     .tl-tot td.tl-tot-last { border-right: 2px solid #374151; }
+    .tl-tot td.tl-tot-click { cursor: pointer; }
+    .tl-tot td.tl-tot-click:hover { outline: 2px solid #2563eb; outline-offset: -2px; }
     /* Modal */
     .tl-modal-backdrop {
       position: fixed; inset: 0; background: rgba(15, 23, 42, 0.55);
@@ -283,9 +294,9 @@
           Apply
         </button>
         <div class="text-xs text-gray-600 flex-1 min-w-0">
-          Each cell: Adspent, Orders and CPP of all pages with ad spend, from 00:00 to the end of that hour (cumulative,
-          so 15 matches the 3PM bucket). Hover for the exact figures. Amber edge = orders but no hourly spend stored yet.
-          Refreshes every 5 minutes.
+          Each cell: Adspent (₱), Orders and CPP (₱) of all pages with ad spend, from 00:00 to the end of that hour
+          (cumulative, so 15 matches the 3PM bucket). Hover for the exact figures; click a cell for the pages.
+          Amber edge = orders but no hourly spend stored yet. Refreshes every 5 minutes.
           <template x-if="totals.stored_at"><span> · Meta hourly spend as of <span x-text="fmtSavedAt(totals.stored_at)"></span></span></template>
         </div>
         <div class="text-xs text-gray-500" x-show="totalsLoading">⏳ Loading…</div>
@@ -297,25 +308,28 @@
         <table class="tl-hour tl-tot" id="tl-tot-table">
           <colgroup>
             <col class="tl-tot-date">
+            <col class="tl-tot-lbl">
             @for ($h = 0; $h < 24; $h++)<col class="tl-tot-col">@endfor
           </colgroup>
           <thead>
             <tr>
-              <th class="tl-hour-name" title="Per cell: Adspent, Orders, CPP">Date</th>
+              <th class="tl-hour-name">Date</th>
+              <th class="tl-tot-lbls" title="Per cell, top to bottom: Adspent (₱), Orders, CPP (₱)"></th>
               @for ($h = 0; $h < 24; $h++)<th class="tl-tot-h" title="{{ sprintf('00:00–%02d:59', $h) }}">{{ sprintf('%02d', $h) }}</th>@endfor
             </tr>
           </thead>
           <tbody>
             <template x-for="row in totals.days" :key="row.date">
               <tr>
-                <th class="tl-hour-name" x-text="row.label" :title="row.date"></th>
+                <th class="tl-hour-name" :title="row.date + ' (' + row.label + ')'"><div x-text="dayLines(row.label)[0]"></div><div x-text="dayLines(row.label)[1]"></div></th>
+                <th class="tl-tot-lbls"><div title="Adspent (₱)">Adspent</div><div>Orders</div><div title="CPP (₱)">CPP</div></th>
                 <template x-for="(c, h) in row.total" :key="row.date + '|' + h">
-                  <td :class="totClass(row, c, h)" :title="totTip(row.label, c, h)">
+                  <td :class="totClass(row, c, h) + (c ? ' tl-tot-click' : '')" :title="totTip(row.label, c, h)" @click="c && openHour(row, h)">
                     <template x-if="c">
                       <div>
-                        <div x-text="c.spend != null ? compact(c.spend) : '—'"></div>
-                        <div x-text="String(c.orders)"></div>
-                        <div x-text="c.cpp != null ? Math.round(c.cpp) : '—'"></div>
+                        <div x-text="figSpend(c)"></div>
+                        <div x-text="figOrders(c)"></div>
+                        <div x-text="figCpp(c)"></div>
                       </div>
                     </template>
                   </td>
@@ -323,7 +337,7 @@
               </tr>
             </template>
             <template x-if="!totalsLoading && !totals.days.length">
-              <tr><td colspan="25" class="text-center text-gray-400 py-6">Walang data sa selected range.</td></tr>
+              <tr><td colspan="26" class="text-center text-gray-400 py-6">Walang data sa selected range.</td></tr>
             </template>
           </tbody>
         </table>
@@ -573,6 +587,71 @@
         </div>
       </div>
     </template>
+
+    {{-- ── Hourly totals: detail of one hour cell (spec 292) ─────────────
+         Same look as the snapshot detail above. The rows are the Hourly view's page rows at that hour and the TOTAL is
+         its Total cell, from the same endpoint, so the modal, the cell and the Hourly view never disagree. --}}
+    <template x-if="hm.open">
+      <div class="tl-modal-backdrop" id="tl-hm" @click.self="closeHour()" @keydown.escape.window="closeHour()">
+        <div class="tl-modal">
+          <div class="tl-modal-head">
+            <div>
+              <div class="tl-modal-title" x-text="hmTitle()"></div>
+              <div class="tl-modal-sub">
+                <span x-text="hmRange()"></span>
+                <template x-if="!hm.loading && !hm.error"><span> · <span x-text="hm.rows.length"></span> pages</span></template>
+              </div>
+              <template x-if="hm.total">
+                <div class="text-sm text-gray-800 mt-1" id="tl-hm-totals" x-text="hmTotalsLine()"></div>
+              </template>
+            </div>
+            <div class="flex items-center gap-2">
+              <button @click="copyDetail('tlHourTable')" class="bg-blue-600 hover:bg-blue-700 text-white text-sm px-3 py-1.5 rounded">📋 Copy</button>
+              <button @click="closeHour()" class="tl-modal-close">✕ Close</button>
+            </div>
+          </div>
+          <div class="tl-modal-body">
+            <template x-if="hm.loading">
+              <div class="text-center text-gray-400 py-8">⏳ Loading detail…</div>
+            </template>
+            <template x-if="!hm.loading && hm.error">
+              <div class="text-center text-red-700 py-8" x-text="hm.error"></div>
+            </template>
+            <template x-if="!hm.loading && !hm.error">
+              <table class="tl-detail-table" id="tlHourTable">
+                <thead>
+                  <tr>
+                    <th tabindex="0" :aria-sort="hmAria(0)" @click="sortHour(0)" @keydown.enter.prevent="sortHour(0)" @keydown.space.prevent="sortHour(0)">Page</th>
+                    <th class="num" tabindex="0" :aria-sort="hmAria(1)" @click="sortHour(1)" @keydown.enter.prevent="sortHour(1)" @keydown.space.prevent="sortHour(1)">Adspent</th>
+                    <th class="num" tabindex="0" :aria-sort="hmAria(2)" @click="sortHour(2)" @keydown.enter.prevent="sortHour(2)" @keydown.space.prevent="sortHour(2)">Orders</th>
+                    <th class="num" tabindex="0" :aria-sort="hmAria(3)" @click="sortHour(3)" @keydown.enter.prevent="sortHour(3)" @keydown.space.prevent="sortHour(3)">CPP</th>
+                    <th class="num" tabindex="0" :aria-sort="hmAria(4)" @click="sortHour(4)" @keydown.enter.prevent="sortHour(4)" @keydown.space.prevent="sortHour(4)" title="Adspent added in this hour">+ Adspent this hour</th>
+                    <th class="num" tabindex="0" :aria-sort="hmAria(5)" @click="sortHour(5)" @keydown.enter.prevent="sortHour(5)" @keydown.space.prevent="sortHour(5)" title="Orders added in this hour">+ Orders this hour</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template x-for="r in hmRows()" :key="r.page">
+                    <tr :class="r.source === 'orders' ? 'bg-amber-50' : ''" :title="r.source === 'orders' ? 'Orders only: Meta hourly spend not stored yet' : ''">
+                      <td x-text="r.page"></td>
+                      <template x-for="(v, i) in hmCells(r)" :key="r.page + '|' + i"><td class="num" x-text="v"></td></template>
+                    </tr>
+                  </template>
+                  <template x-if="hm.rows.length === 0">
+                    <tr><td colspan="6" class="text-center text-gray-400 py-6">Walang data sa oras na ito.</td></tr>
+                  </template>
+                </tbody>
+                <tfoot x-show="hm.total">
+                  <tr>
+                    <td>TOTAL</td>
+                    <template x-for="(v, i) in hmFoot()" :key="'hmf' + i"><td class="num" x-text="v"></td></template>
+                  </tr>
+                </tfoot>
+              </table>
+            </template>
+          </div>
+        </div>
+      </div>
+    </template>
   </div>
 
   <script src="{{ asset('js/cpp-sort.js') }}?v={{ substr(md5_file(public_path('js/cpp-sort.js')), 0, 10) }}"></script>
@@ -622,6 +701,11 @@
 
         // Ang value ng bawat column ng popup table, sa order ng mga header, para sa pag-sort.
         modalSortFields: ['page_name', 'item_names', 'amount_spent', 'orders', 'proceed_orders', 'cpp', 'cpi', 'cpm', 'tcpr_pct'],
+
+        // Spec 292: the detail of one Hourly totals cell (date + hour). rows = the Hourly view's page cells at that hour,
+        // total = its Total cell at that hour (the cell itself).
+        hm: { open: false, loading: false, error: '', date: '', hour: 0, label: '', rows: [], total: null, sort: { col: null, dir: null } },
+        hmSortFields: ['page', 'spend', 'orders', 'cpp', 'add_spend', 'add_orders'],
 
         // Filtered row list for the modal table. When hideZeroSpent is on
         // (default), drops rows where amount_spent == 0. Totals are always
@@ -795,6 +879,75 @@
           const at = this.totals.today_stored_at || this.totals.stored_at;
           return at ? `⚠ Hourly spend not updated since ${this.fmtSavedAt(at)}` : '⚠ No hourly spend stored yet today';
         },
+        // "Nov 18 Wed" on two lines, "Nov 18" over "Wed", so the date column stays narrow (spec 292).
+        dayLines(label) {
+          const p = String(label || '').split(' ');
+          return [p.slice(0, 2).join(' '), p.slice(2).join(' ')];
+        },
+        // The cell figures (spec 292): Adspent in whole pesos and Orders with thousands separators, CPP with 2 decimals.
+        // A cell has room for 7 characters (see the CSS), so a longer figure takes the compact form for that value only.
+        fit(text, v) { return text.length <= 7 ? text : this.compact(v); },
+        figSpend(c) { return c.spend != null ? this.fit(Math.round(Number(c.spend)).toLocaleString('en-PH'), c.spend) : '—'; },
+        figOrders(c) { return this.fit(this.num(c.orders), c.orders); },
+        figCpp(c) {
+          return c.cpp != null ? this.fit(Number(c.cpp).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }), c.cpp) : '—';
+        },
+        // 0 → 12AM, 9 → 9AM, 12 → 12PM, 15 → 3PM: the way the bucket names read.
+        hourLabel(h) { return `${h % 12 === 0 ? 12 : h % 12}${h < 12 ? 'AM' : 'PM'}`; },
+
+        // Opens the detail of a filled cell. The date and hour come from the page, so they are checked before the fetch;
+        // the Hourly endpoint falls back to today on a bad date, so its reply must carry the date that was asked for.
+        // The reply's Total row is the same array as this row's cells (one shared code path), and it replaces the row's
+        // cells so the cell and its modal show the same figures even when orders came in since the last refresh.
+        async openHour(row, h) {
+          const date = row && row.date;
+          if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isInteger(h) || h < 0 || h > 23) return;
+          if (!row.total || !row.total[h]) return;
+          this.hm = { open: true, loading: true, error: '', date, hour: h, label: row.label, rows: [], total: row.total[h], sort: { col: null, dir: null } };
+          try {
+            const qs = new URLSearchParams({ date });
+            const res = await fetch(`{{ route('ads_manager.cpp.timeline.hourly') }}?${qs.toString()}`);
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            const j = await res.json();
+            if (j.date !== date) throw new Error('Asked for ' + date + ', got ' + j.date);
+            if (!this.hm.open || this.hm.date !== date || this.hm.hour !== h) return; // closed or another cell opened
+            if (Array.isArray(j.total) && j.total.length === 24) { row.total = j.total; row.last_hour = j.last_hour; }
+            this.hm.total = (j.total || [])[h] || null;
+            this.hm.rows = (j.pages || []).filter(p => p.cells && p.cells[h]).map(p => Object.assign({ page: p.page }, p.cells[h]));
+          } catch (e) {
+            console.error('Hour detail load failed:', e);
+            this.hm.error = 'Hindi ma-load ang pages ng oras na ito.';
+          } finally {
+            this.hm.loading = false;
+          }
+        },
+        closeHour() { this.hm.open = false; },
+        hmTitle() { return `${this.fmtDate(this.hm.date)} · ${this.hourLabel(this.hm.hour)}`; },
+        hmRange() {
+          const h = this.hm.hour;
+          return `Cumulative 00:00 – ${h % 12 === 0 ? 12 : h % 12}:59 ${h < 12 ? 'AM' : 'PM'}`;
+        },
+        hmTotalsLine() {
+          const t = this.hm.total;
+          if (!t) return '';
+          return `Adspent ${t.spend != null ? this.money(t.spend) : '—'} · Orders ${this.num(t.orders)} · CPP ${t.cpp != null ? this.money(t.cpp) : '—'}`;
+        },
+        hmRows() { return CppSort.sortItems(this.hm.rows, this.hmSortFields, this.hm.sort); },
+        sortHour(col) { this.hm.sort = CppSort.nextFor(this.hm.sort, this.hm.rows, this.hmSortFields, col); },
+        hmAria(col) { return CppSort.aria(this.hm.sort, col); },
+        // Adspent, Orders, CPP, + Adspent this hour, + Orders this hour; "—" where no hourly spend is stored.
+        hmCells(r) {
+          if (!r) return ['', '', '', '', ''];
+          return [
+            r.spend != null ? this.money(r.spend) : '—',
+            this.num(r.orders),
+            r.cpp != null ? this.money(r.cpp) : '—',
+            r.add_spend != null ? this.money(r.add_spend) : '—',
+            this.num(r.add_orders),
+          ];
+        },
+        hmFoot() { return this.hmCells(this.hm.total); },
+
         // Short spend for a narrow cell: 850, 12.4k, 245k, 1.24M (the exact amount is in the tooltip).
         compact(v) {
           const n = Number(v ?? 0), a = Math.abs(n);
@@ -879,8 +1032,8 @@
 
         closeDetail() { this.modal.open = false; },
 
-        copyDetail() {
-          const table = document.getElementById('tlDetailTable');
+        copyDetail(id = 'tlDetailTable') {
+          const table = document.getElementById(id);
           if (!table) return;
           const rows = Array.from(table.querySelectorAll('tr'));
           const tsv = rows.map(row =>

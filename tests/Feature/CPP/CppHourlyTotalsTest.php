@@ -302,13 +302,210 @@ class CppHourlyTotalsTest extends ChatblastTestCase
         $css = preg_replace('/\s+/', ' ', $html);
         $this->assertStringContainsString('.tl-hour { table-layout: fixed; width: 100%;', $css, 'the totals table takes the hourly table\'s fixed layout');
         $this->assertStringContainsString('.tl-tot-wrap { width: 100%; overflow-x: auto; }', $css, 'below the min-width only the wrapper scrolls');
-        $this->assertStringContainsString('.tl-tot { min-width: 1060px; }', $css);
-        $this->assertStringContainsString('.tl-tot col.tl-tot-date { width: 76px; }', $css);
-        // A 1280 px window minus the scroll bar (17), the page padding (2×32), the card padding (2×16) and border (2)
-        // leaves 1165 px: wider than the 1060 px minimum, so no scroll; 1165 − 76 = 1089 for 24 hours, 45 px each.
+        // Spec 292 moved 30 px from the date column to the label column and raised the minimum so a 7-character figure
+        // is never cut: the arithmetic is in test_HL1_the_label_column_and_the_width_at_1280_px.
+        $this->assertStringContainsString('.tl-tot { min-width: 1146px; }', $css);
+        $this->assertStringContainsString('.tl-tot col.tl-tot-date { width: 46px; }', $css);
         $box = 1280 - 17 - 64 - 32 - 2;
-        $this->assertGreaterThan(76 + 24 * 41, $box);
-        $this->assertSame(45, intdiv($box - 76, 24));
+        $this->assertGreaterThanOrEqual(1146, $box);
+    }
+
+    /**
+     * HL-1: one label column between the date and hour 00, once per date row, its three lines in the order of the
+     * cell's three figures; the 24 hours still fit a 1280 px window.
+     */
+    public function test_HL1_the_label_column_and_the_width_at_1280_px(): void
+    {
+        $html = $this->get('/ads_manager/cpp/timeline')->assertOk()->getContent();
+        $this->assertSame(1, preg_match('#<table class="tl-hour tl-tot" id="tl-tot-table">(.*?)</table>#s', $html, $t));
+
+        // colgroup: date, labels, then the 24 hours.
+        $this->assertSame(1, preg_match('#<colgroup>\s*<col class="tl-tot-date">\s*<col class="tl-tot-lbl">\s*(<col class="tl-tot-col">){24}\s*</colgroup>#', $t[1]));
+        // Header: Date, the (empty) label header, 00 … 23.
+        $this->assertSame(1, preg_match('#<tr>\s*<th class="tl-hour-name">Date</th>\s*<th class="tl-tot-lbls"[^>]*></th>\s*<th class="tl-tot-h"[^>]*>00</th>#', $t[1]));
+        // The row template (x-for over the dates): one label cell, written once, with the three labels in cell order,
+        // then the hour cells, whose figures carry no label.
+        $this->assertSame(1, preg_match('#<template x-for="row in totals.days" :key="row.date">(.*?)</template>\s*<template x-if="!totalsLoading#s', $t[1], $row));
+        $this->assertSame(1, substr_count($row[1], 'class="tl-tot-lbls"'));
+        $this->assertSame(1, preg_match('#<th class="tl-tot-lbls"><div title="Adspent \(₱\)">Adspent</div><div>Orders</div><div title="CPP \(₱\)">CPP</div></th>#u', $row[1]));
+        $this->assertSame(1, preg_match('#<div x-text="figSpend\(c\)"></div>\s*<div x-text="figOrders\(c\)"></div>\s*<div x-text="figCpp\(c\)"></div>#', $row[1]));
+        $this->assertStringNotContainsString('Adspent', preg_replace('#<th class="tl-tot-lbls">.*?</th>#s', '', $row[1]), 'no label inside the hour cells');
+        $this->assertStringContainsString('colspan="26"', $t[1], 'the empty-range row spans date + labels + 24 hours');
+
+        // The label lines and the figure lines share font size and line height, so each label sits on its figure's line.
+        $css = preg_replace('/\s+/', ' ', $html);
+        $this->assertStringContainsString('.tl-tot col.tl-tot-lbl { width: 44px; }', $css);
+        $this->assertStringContainsString('.tl-tot th.tl-tot-lbls { font-size: 10px; font-weight: 600; color: #4b5563; text-align: left; padding: 2px 1px; line-height: 1.2; vertical-align: top;', $css);
+        $this->assertStringContainsString('.tl-tot td { padding: 2px 0; line-height: 1.2; vertical-align: top; }', $css);
+        $this->assertStringContainsString('.tl-hour td { font-family: \'SFMono-Regular\', Consolas, monospace; font-size: 10px;', $css);
+
+        // Width at a 1280 px window: 1280 − 17 scroll bar − 2×32 page padding − 2×16 card padding − 2 border = 1165 px.
+        // Date 46 + labels 44 = 90 px, so each of the 24 hours gets (1165 − 90) / 24 = 44.8 px; with no side padding and
+        // the 1 px border a cell keeps 43.8 px, and a 7-character figure is at most 7 × 6 px = 42 px of 10 px monospace
+        // (SFMono / Menlo 0.6 em; Consolas 0.55 em is 38.5 px). The min-width keeps 44 px per hour (46 + 44 + 24 × 44).
+        $box = 1280 - 17 - 64 - 32 - 2;
+        $this->assertSame(1165, $box);
+        $perHour = ($box - 46 - 44) / 24;
+        $this->assertEqualsWithDelta(44.8, $perHour, 0.05);
+        $this->assertGreaterThanOrEqual(7 * 6, $perHour - 1);
+        $this->assertSame(1146, 46 + 44 + 24 * 44);
+        $this->assertLessThanOrEqual($box, 1146);
+    }
+
+    /**
+     * HL-2: Adspent in whole pesos and Orders with thousands separators, CPP with 2 decimals; a figure over 7 characters
+     * takes the compact form for that value only. The 291 rules stay ("—" without hourly spend).
+     */
+    public function test_HL2_the_cell_figures_read_like_money_and_counts(): void
+    {
+        $out = $this->js('{}', <<<'JS'
+            const cell = (spend, orders, cpp) => [c.figSpend({spend}), c.figOrders({orders}), c.figCpp({cpp})];
+            out.normal = cell(42100.51, 1144, 36.8);
+            out.small = cell(850.4, 3, 283.47);
+            out.zero = cell(0, 0, null);
+            out.ordersOnly = cell(null, 7, null);
+            out.edge = cell(999999.49, 99999, 999.99);
+            out.big = cell(1023456.78, 1234567, 1234.56);
+            out.huge = cell(12345678.9, 5, 12345.67);
+            out.hours = [0, 9, 11, 12, 15, 23].map(h => c.hourLabel(h));
+            out.days = ['Nov 18 Wed', 'Nov 9 Mon'].map(l => c.dayLines(l));
+            JS);
+
+        $this->assertSame(['42,101', '1,144', '36.80'], $out['normal'], 'the Buckets figures: ₱42,100.51, 1,144 orders, ₱36.80');
+        $this->assertSame(['850', '3', '283.47'], $out['small']);
+        $this->assertSame(['0', '0', '—'], $out['zero']);
+        $this->assertSame(['—', '7', '—'], $out['ordersOnly'], 'no hourly spend: "—" for spend and CPP, never a CPP from missing spend');
+        $this->assertSame(['999,999', '99,999', '999.99'], $out['edge'], 'the longest figures that still fit (7 characters)');
+        $this->assertSame(['1.02M', '1.23M', '1.2k'], $out['big'], 'over 7 characters: compact, for that value only');
+        $this->assertSame(['12.35M', '5', '12.3k'], $out['huge']);
+        $this->assertSame(['12AM', '9AM', '11AM', '12PM', '3PM', '11PM'], $out['hours']);
+        $this->assertSame([['Nov 18', 'Wed'], ['Nov 9', 'Mon']], $out['days']);
+        foreach (array_merge($out['normal'], $out['edge'], $out['big'], $out['huge']) as $s) {
+            $this->assertLessThanOrEqual(7, mb_strlen($s), $s);
+        }
+    }
+
+    /**
+     * HL-3: a click on a filled cell opens the detail of that date and hour from the Hourly endpoint. Title, range,
+     * totals equal to the cell, per-page rows that add up to them, sort, close; empty cells and bad input open nothing.
+     */
+    public function test_HL3_a_click_on_an_hour_cell_opens_its_detail(): void
+    {
+        $this->seedTwoDays();
+        $totals = $this->getJson('/ads_manager/cpp/timeline/hourly-totals?start=' . self::PREV . '&end=' . self::DAY)->json();
+        $hourly = $this->getJson('/ads_manager/cpp/timeline/hourly?date=' . self::DAY)->json();
+
+        $out = $this->js(json_encode($hourly), <<<'JS'
+            c.totals = { days: JSON.parse(JSON.stringify(TOTALS.days)) };
+            const row = c.totals.days[0];
+            out.cell = row.total[9];
+            await c.openHour(row, 9);
+            out.fetched = fetched.slice();
+            out.open = c.hm.open; out.loading = c.hm.loading; out.error = c.hm.error;
+            out.title = c.hmTitle(); out.range = c.hmRange(); out.line = c.hmTotalsLine();
+            out.total = c.hm.total; out.rows = c.hmRows();
+            out.cells = out.rows.map(r => [r.page].concat(c.hmCells(r)));
+            out.foot = c.hmFoot();
+            out.rowTotalAfter = row.total;
+            c.sortHour(1); out.sorted1 = c.hmRows().map(r => r.page); out.aria1 = c.hmAria(1);
+            c.sortHour(1); out.sorted2 = c.hmRows().map(r => r.page);
+            c.closeHour(); out.closed = c.hm.open;
+
+            await c.openHour(row, 11);
+            out.h11 = { total: c.hm.total, rows: c.hmRows(), cells: c.hmRows().map(r => [r.page].concat(c.hmCells(r))), line: c.hmTotalsLine() };
+            c.closeHour();
+
+            const n = fetched.length;
+            await c.openHour(row, 23);                       // filled (a past day)
+            out.h23 = [c.hm.open, c.hmTitle(), c.hmRange(), c.hm.rows.length];
+            c.closeHour();
+            await c.openHour(row, 0);                        // empty cell: nothing opens, nothing is fetched
+            await c.openHour(row, 24);
+            await c.openHour(row, '9');
+            await c.openHour(row, 9.5);
+            await c.openHour({ date: "2026-11-09' OR 1=1", total: row.total }, 9);
+            await c.openHour({ date: '2026-11-09' }, 9);
+            out.badOpen = c.hm.open; out.badFetches = fetched.length - n - 1;
+            JS, ['TOTALS' => json_encode($totals)]);
+
+        $cell = $totals['days'][0]['total'][9];
+        $this->assertSame(['/ads_manager/cpp/timeline/hourly?date=2026-11-09'], array_map(fn ($u) => parse_url($u, PHP_URL_PATH) . '?' . parse_url($u, PHP_URL_QUERY), $out['fetched']), 'the existing Hourly endpoint, no new query');
+        $this->assertSame([true, false, ''], [$out['open'], $out['loading'], $out['error']]);
+        $this->assertSame('Nov 9, 2026 · 9AM', $out['title']);
+        $this->assertSame('Cumulative 00:00 – 9:59 AM', $out['range']);
+        $this->assertEquals($cell, $out['total'], 'the modal total is the cell');
+        // At 09: Page P1 ₱100 (H09) with 3 orders (7:30, 09:15, 09:40) and page q ₱40 (H08) with 1 (08:20). Page P2 has
+        // no order before 11:30 and Unknown ad no spend before H10, so they are not in the table yet.
+        $this->assertEquals(['spend' => 140, 'orders' => 4, 'cpp' => 35], array_intersect_key($cell, array_flip(['spend', 'orders', 'cpp'])));
+        $this->assertSame('Adspent ₱140.00 · Orders 4 · CPP ₱35.00', $out['line']);
+        $this->assertSame([['Page P1', '₱100.00', '3', '₱33.33', '₱100.00', '2'], ['page q', '₱40.00', '1', '₱40.00', '₱0.00', '0']], $out['cells']);
+        $this->assertSame(['₱140.00', '4', '₱35.00', '₱100.00', '2'], $out['foot'], 'TOTAL row = the cell');
+        $this->assertSame($totals['days'][0]['total'], $out['rowTotalAfter'], 'the row takes the same Total row the modal read');
+
+        // At 11, with an orders-only page: the rows still add up to the cell, "—" for that page's spend and CPP.
+        $c11 = $totals['days'][0]['total'][11];
+        $this->assertEquals($c11, $out['h11']['total']);
+        $this->assertEqualsWithDelta($c11['spend'], array_sum(array_map(fn ($r) => $r['spend'] ?? 0, $out['h11']['rows'])), 0.001, 'page spend adds up to the cell');
+        $this->assertSame($c11['orders'], array_sum(array_column($out['h11']['rows'], 'orders')), 'page orders add up to the cell');
+        $this->assertSame($c11['add_orders'], array_sum(array_column($out['h11']['rows'], 'add_orders')), 'what the hour added adds up too');
+        $this->assertSame([
+            ['Page P1', '₱180.00', '4', '₱45.00', '₱0.00', '0'],
+            ['Page P2', '—', '1', '—', '—', '1'],
+            ['page q', '₱40.00', '1', '₱40.00', '₱0.00', '0'],
+            ['Unknown ad', '₱30.00', '0', '—', '₱0.00', '0'],
+        ], $out['h11']['cells']);
+        $this->assertSame('Adspent ₱250.00 · Orders 6 · CPP ₱41.67', $out['h11']['line']);
+
+        // Sortable like the Buckets modal: Adspent high to low, then low to high.
+        $this->assertSame('descending', $out['aria1']);
+        $this->assertSame(['Page P1', 'page q'], $out['sorted1']);
+        $this->assertSame(['page q', 'Page P1'], $out['sorted2']);
+        $this->assertFalse($out['closed']);
+
+        $this->assertSame([true, 'Nov 9, 2026 · 11PM', 'Cumulative 00:00 – 11:59 PM'], array_slice($out['h23'], 0, 3));
+        $this->assertSame([false, 0], [$out['badOpen'], $out['badFetches']], 'empty cell, hour 24, a string or fractional hour, a bad date: no modal, no fetch');
+    }
+
+    /** HL-3: today's current hour opens with what is stored so far, equal to its cell. */
+    public function test_HL3_todays_current_hour_shows_what_is_stored_so_far(): void
+    {
+        $this->travelTo(Carbon::parse(self::DAY . ' 10:20:00', 'Asia/Manila'));
+        $this->seedTwoDays();
+        $totals = $this->getJson('/ads_manager/cpp/timeline/hourly-totals?start=' . self::DAY . '&end=' . self::DAY)->json();
+        $hourly = $this->getJson('/ads_manager/cpp/timeline/hourly?date=' . self::DAY)->json();
+
+        $out = $this->js(json_encode($hourly), <<<'JS'
+            c.totals = { days: TOTALS.days };
+            const row = c.totals.days[0];
+            await c.openHour(row, 10);
+            out.a = [c.hmTitle(), c.hm.total, c.hm.rows];
+            await c.openHour(row, 11);
+            out.future = c.hm.open && c.hm.hour === 11;
+            JS, ['TOTALS' => json_encode($totals)]);
+
+        $this->assertSame('Nov 9, 2026 · 10AM', $out['a'][0]);
+        $this->assertEquals($totals['days'][0]['total'][10], $out['a'][1]);
+        $this->assertEquals(['spend' => 250, 'orders' => 5, 'cpp' => 50], array_intersect_key($out['a'][1], array_flip(['spend', 'orders', 'cpp'])));
+        $this->assertSame(5, array_sum(array_column($out['a'][2], 'orders')));
+        $this->assertEqualsWithDelta(250, array_sum(array_map(fn ($r) => $r['spend'] ?? 0, $out['a'][2])), 0.001);
+        $this->assertFalse($out['future'], 'hour 11 is in the future: empty cell, no modal');
+    }
+
+    /** HL-3: the served markup: a click only on a filled cell, the Buckets modal's classes, and the three ways to close. */
+    public function test_HL3_the_modal_markup_reuses_the_buckets_modal_and_closes_three_ways(): void
+    {
+        $html = $this->get('/ads_manager/cpp/timeline')->assertOk()->getContent();
+
+        $this->assertStringContainsString('@click="c && openHour(row, h)"', $html, 'empty cells (c null) open nothing');
+        $this->assertStringContainsString(':class="totClass(row, c, h) + (c ? \' tl-tot-click\' : \'\')"', $html);
+        $this->assertSame(1, preg_match('#<template x-if="hm.open">\s*<div class="tl-modal-backdrop" id="tl-hm" @click.self="closeHour\(\)" @keydown.escape.window="closeHour\(\)">\s*<div class="tl-modal">\s*<div class="tl-modal-head">#', $html),
+            'click outside and Esc close it; same classes as the snapshot modal');
+        $this->assertStringContainsString('<button @click="closeHour()" class="tl-modal-close">✕ Close</button>', $html);
+        $this->assertSame(1, preg_match('#<table class="tl-detail-table" id="tlHourTable">\s*<thead>\s*<tr>(.*?)</tr>#s', $html, $head));
+        preg_match_all('#<th[^>]*@click="sortHour\((\d)\)"[^>]*>([^<]+)</th>#', $head[1], $ths);
+        $this->assertSame(['0', '1', '2', '3', '4', '5'], $ths[1]);
+        $this->assertSame(['Page', 'Adspent', 'Orders', 'CPP', '+ Adspent this hour', '+ Orders this hour'], $ths[2]);
+        $this->assertStringContainsString('<td>TOTAL</td>', substr($html, strpos($html, 'id="tlHourTable"')));
     }
 
     /** HT-1..HT-3 in the browser script: cell text, colours, the last hour's edge, tooltip, refresh, stale note. */
@@ -367,7 +564,7 @@ class CppHourlyTotalsTest extends ChatblastTestCase
     }
 
     /** Runs the page's cppTimeline() in Node (Manila time zone); fetch answers $json and records each URL. */
-    private function js(string $json, string $script): array
+    private function js(string $json, string $script, array $globals = []): array
     {
         $node = (new \Symfony\Component\Process\ExecutableFinder())->find('node');
         if ($node === null) $this->markTestSkipped('Node is not installed.');
@@ -379,6 +576,7 @@ class CppHourlyTotalsTest extends ChatblastTestCase
             . "const timers = []; let cleared = 0;\n"
             . "globalThis.setInterval = (fn, ms) => { timers.push({fn, ms}); return timers.length; };\n"
             . "globalThis.clearInterval = () => { cleared++; };\n"
+            . implode('', array_map(fn ($k, $v) => "const $k = $v;\n", array_keys($globals), $globals))
             . "const c = cppTimeline();\nconst out = {};\n"
             . "(async () => {\n" . $script . "\n})().then(() => console.log(JSON.stringify(out)));\n";
         $file = tempnam(sys_get_temp_dir(), 'cppht') . '.cjs';
