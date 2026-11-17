@@ -93,7 +93,10 @@ class QueuePickupConfigTest extends TestCase
         $this->assertSame(5, $pools['busy_ms']);
 
         $this->env(['CHATBOT_POOL_IDLE_MS' => '100', 'CHATBOT_POOL_BUSY_MS' => '2']);
-        $this->assertSame(['idle_ms' => 100, 'busy_ms' => 2], $this->load('queue.php')['pools']);
+        // Spec 290: the sweep's time limit lives beside the loop intervals.
+        $this->assertSame(['idle_ms' => 100, 'busy_ms' => 2, 'sweep_ms' => 10000], $this->load('queue.php')['pools']);
+        $this->env(['CHATBOT_SWEEP_MS' => '4000']);
+        $this->assertSame(4000, $this->load('queue.php')['pools']['sweep_ms']);
 
         config(['queue.pools.idle_ms' => 150, 'queue.pools.busy_ms' => 3]);
         $this->assertSame(150_000, TicketPool::pause(false));

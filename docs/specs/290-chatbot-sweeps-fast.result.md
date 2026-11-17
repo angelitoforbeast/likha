@@ -77,7 +77,16 @@ New and changed tests (all pass):
 - tests/Feature/Chatblast/ChatbotHealthTest.php: `test_SW4_answered_pages_are_one_indexed_look_per_flow_page_with_the_same_result` (the old distinct query and the new per-page look give the same pages for no scope, [1002], [1004] (flow, only a failed reply today and a sent one 2 days before) and [1003] (no flow); every look is `exists ... where "page_id" = ? and "sent_at" >= ? and "sent_at" < ?`; no `distinct` over the range).
 - tests/Feature/Chatblast/SendQueueSweepIndexTest.php (spec 251) updated, see Story changes.
 
-SUITE_PLACEHOLDER
+Full suite (Herd PHP 8.4, `vendor/bin/phpunit`), base db017387 run from an exported copy of that commit, branch run on f0f9e87e+4300432d:
+
+| | Tests | Failures |
+|---|---|---|
+| Base db017387 | 5383 | 5 |
+| Branch | 5400 | 5, then 4 after the config-test update below |
+
+Base failures: `BigBroadcastTest::test_S_167_1_5000_messages_on_50_pages_all_go_out_without_one_failed_for_waiting`, `BigBroadcastTest::test_S_167_1_a_waybill_another_sequence_messaged_while_it_waited_in_line_is_skipped_when_the_pool_starts_it`, `ExampleTest::test_the_application_returns_a_successful_response` (302), `ItemTableFitScriptTest::test_every_catalog_column_id_has_a_minimum_width_and_a_place_in_the_drop_order`, `SharedPagesBasePinTest::test_S_42_4_..._byte_for_byte_as_at_the_base` (/owner/private).
+
+Branch failures: the same `ExampleTest`, `ItemTableFitScriptTest`, `SharedPagesBasePinTest` and the first `BigBroadcastTest` case (timing; both `BigBroadcastTest` cases pass when the file runs alone on the branch, and the second one failed on base, passed on the branch), plus `QueuePickupConfigTest::test_S_102_4_pool_intervals_come_from_config_with_env_overrides`, which compared the whole `queue.pools` array and now sees the new `sweep_ms` key. That test was updated (see Story changes) and passes. No new failure remains.
 
 ### 2. Each changed query's SQL (MySQL, from `test_SW1_every_changed_query_carries_the_time_limit_and_its_index_on_mysql` with `SWEEP_SQL_OUT`) and the index it should use
 `n` is the milliseconds left of the sweep's 10 s budget (10000 for the first SELECT of a sweep, less after). Dates are the test clock.
@@ -113,6 +122,7 @@ PUSH_PLACEHOLDER
 ## Story changes
 - `SendQueueSweepIndexTest::test_S1_the_redispatch_query_of_the_sweep_reads_the_kind_status_updated_at_index` (spec 251): the redispatch is now one query per status, so it expects 2 queries instead of 1, each `USING INDEX botcake_send_requests_kind_status_updated_at_idx (kind=? AND status=? AND updated_at<?)` and now also without a temp B-tree (no sort).
 - `SendQueueSweepIndexTest::test_the_late_sweep_fails_exactly_the_late_pending_chatbot_rows_and_reads_the_status_priority_id_index`: two queries now carry an index hint (the late query, as before, and the new prune id lookup on `created_at`), instead of exactly one.
+- `QueuePickupConfigTest::test_S_102_4_pool_intervals_come_from_config_with_env_overrides` (spec 102): the expected `queue.pools` array now includes `sweep_ms` (10000), and the test also checks the `CHATBOT_SWEEP_MS` override.
 - No other existing test changed. The spec 251 selection tests (exact rows, id order, at most 500 lowest id) pass unchanged.
 
 ## Rulings
