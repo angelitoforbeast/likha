@@ -35,4 +35,8 @@ Base: 9fa8ed84 + 280 (a5a4f7ba) + 281 (64992c69). First step after "go": run the
 
 ## Rulings
 
+- Q1: Refresh now needs the "Ads" permission only. It writes nothing to Meta or the ads data, so write mode is not required.
+- Q2: The report page never calls Meta. The stored read is refreshed hourly by the existing scheduler (no new cron line; `schedule:run` already runs) and after each scheduled `meta-ads:sync`. The read time is shown next to the warning.
+- Q3: Reading Meta in the request when the data is stale is allowed only on the Ad Accounts page and Refresh now: one call per connection, 20 s timeout, under the lock.
+
 ## Merge danger
