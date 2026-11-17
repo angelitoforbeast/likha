@@ -70,11 +70,12 @@ class Graph
     /**
      * Lahat ng data ng isang listahan, sinusundan ang paging.next. Ang next na hindi https://graph.facebook.com ay hindi
      * sinusundan (ang token ay doon lang ipinapadala) at mali ito, para "partial" ang run at hindi tahimik na kulang.
+     * $tries / $timeout: gaya ng get(), para sa bawat page (hal. isang subok lang sa loob ng web request).
      */
-    public function all(string $path, array $query, string $token): array
+    public function all(string $path, array $query, string $token, int $tries = self::TRIES, int $timeout = 120): array
     {
         $out  = [];
-        $page = $this->get($path, $query, $token);
+        $page = $this->get($path, $query, $token, true, $tries, $timeout);
         $seen = [];
         while (true) {
             foreach ($page['data'] ?? [] as $row) $out[] = $row;
@@ -83,7 +84,7 @@ class Graph
             if (!is_string($next) || $next === '' || isset($seen[$next]) || empty($page['data'])) return $out;
             if (!self::isGraphUrl($next)) throw new GraphException('Not followed: a paging link to another host.');
             $seen[$next] = true;
-            $page = $this->get($next, [], $token);
+            $page = $this->get($next, [], $token, true, $tries, $timeout);
         }
     }
 

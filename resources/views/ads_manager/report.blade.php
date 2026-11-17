@@ -6,6 +6,21 @@
       @include('ads_manager._data_notice')
     @endif
 
+    {{-- Spec 284: isang linya kapag may ad account na grace period / unsettled / disabled / spend cap ≥ 90%, mula sa huling read. --}}
+    @if (!empty($meta['account_health']['warnings']))
+      @php
+        $aw = $meta['account_health']['warnings'];
+        $awRed = collect($aw)->contains('level', 'red');
+        $awAt = $meta['account_health']['read_at'] ? \Carbon\Carbon::parse($meta['account_health']['read_at'])->timezone('Asia/Manila')->format('M j, Y g:i A') : null;
+      @endphp
+      <div id="ad-accounts-warning" role="alert"
+           class="rounded border px-4 py-2 text-sm break-words {{ $awRed ? 'border-red-300 bg-red-50 text-red-800' : 'border-amber-300 bg-amber-50 text-amber-800' }}">
+        ⚠ Ad accounts: {{ collect($aw)->map(fn ($w) => $w['name'] . ' (' . $w['warning'] . ')')->implode(', ') }}
+        <span class="text-xs">@if ($awAt)(read {{ $awAt }})@endif</span>
+        <a href="{{ route('ads_manager.meta.ad_accounts') }}" class="underline font-semibold">Open Ad Accounts</a>
+      </div>
+    @endif
+
     {{-- Quick links sa related pages --}}
     <div class="flex gap-2 flex-wrap">
       <a href="/ads_manager/catalog"

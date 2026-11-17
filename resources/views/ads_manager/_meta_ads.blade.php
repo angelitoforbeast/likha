@@ -2,6 +2,7 @@
 <div class="border rounded p-4 space-y-4" id="meta-ads-card">
   <div class="flex items-center justify-between flex-wrap gap-2">
     <h2 class="font-semibold">Facebook (Meta Ads API)</h2>
+    <a href="{{ route('ads_manager.meta.ad_accounts') }}" id="ad-accounts-link" class="text-sm text-blue-700 underline">Ad Accounts: balance, spend cap, payment</a>
     <span class="text-xs px-2 py-0.5 rounded {{ $meta['write_mode'] ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-700' }}">
       Write mode: {{ $meta['write_mode'] ? 'ON' : 'OFF (compare only)' }}
     </span>

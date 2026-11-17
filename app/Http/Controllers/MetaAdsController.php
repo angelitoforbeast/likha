@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Jobs\CompareMetaAds;
 use App\Jobs\SyncMetaAdsReports;
 use App\Models\UploadLog;
+use App\Services\MetaAds\AccountHealth;
 use App\Services\MetaAds\AppConfig;
 use App\Services\MetaAds\Connections;
 use App\Services\MetaAds\Graph;
@@ -109,7 +110,35 @@ class MetaAdsController extends Controller
             'logs'       => $logs,
             'refused'    => \App\Services\MetaAds\DataHealth::refusals($logs->where('type', Sync::LOG_TYPE)->pluck('id')->all()),
             'compare'    => $compare,
+            // Spec 284: from the stored read only, so the report page never waits on Meta.
+            'account_health' => self::accountWarnings(),
         ];
+    }
+
+    /** @return array{warnings: list<array>, read_at: ?string} the warnings of the stored ad-account read */
+    private static function accountWarnings(): array
+    {
+        $stored = AccountHealth::stored();
+
+        return ['warnings' => AccountHealth::warnings($stored), 'read_at' => $stored['read_at'] ?? null];
+    }
+
+    /** Spec 284: balance, spend, spend cap, payment method and status of every ad account (read when the stored read is stale). */
+    public function adAccounts(AccountHealth $health)
+    {
+        $this->checkAccess();
+
+        return view('ads_manager.ad_accounts', ['health' => $health->forPage()]);
+    }
+
+    /** Reads Meta now (read-only, so the "Ads" permission is enough; write mode is not needed). */
+    public function refreshAdAccounts(AccountHealth $health)
+    {
+        $this->checkAccess();
+        $res = $health->refresh();
+
+        return redirect()->route('ads_manager.meta.ad_accounts')
+            ->with('status', $res['ran'] ? 'Ad accounts read from Meta.' : 'A read is already running: showing the last read.');
     }
 
     private function back()

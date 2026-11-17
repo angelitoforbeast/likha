@@ -299,6 +299,13 @@ Schedule::command('meta-ads:sync --scheduled')
     ->withoutOverlapping(120)
     ->runInBackground();
 
+// Spec 284: balance, spend cap at status ng bawat ad account (read-only), para sa paalala sa /ads_manager/report. Kada oras;
+// walang binabasa kapag walang connection o wala pang 10 minuto ang huling read. Pagkatapos din ng bawat scheduled meta-ads:sync.
+Schedule::command('meta-ads:account-health')
+    ->hourly()
+    ->withoutOverlapping(10)
+    ->runInBackground();
+
 // Ads Manager data health: bawat ad account at kung may data kahapon (sync man o upload); itinatabi para sa pulang paalala
 // sa /ads_manager/report. Default 12:00 Manila (services.meta_ads.data_health_at), pagkatapos ng mga upload sa umaga.
 Schedule::command('ads:data-health --record')

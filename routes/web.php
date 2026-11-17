@@ -939,6 +939,9 @@ Route::post('/ads_manager/meta/accounts', [\App\Http\Controllers\MetaAdsControll
 // Spec 281: ang Meta app (App ID, App Secret, Configuration ID) ng site, CEO lang.
 Route::post('/ads_manager/meta/app', [\App\Http\Controllers\MetaAdsController::class, 'saveApp'])->name('ads_manager.meta.app');
 Route::post('/ads_manager/meta/app/test', [\App\Http\Controllers\MetaAdsController::class, 'testApp'])->name('ads_manager.meta.app.test');
+// Spec 284: balance, spend cap, payment method at status ng bawat ad account (read-only sa Meta).
+Route::get('/ads_manager/meta/ad-accounts', [\App\Http\Controllers\MetaAdsController::class, 'adAccounts'])->name('ads_manager.meta.ad_accounts');
+Route::post('/ads_manager/meta/ad-accounts/refresh', [\App\Http\Controllers\MetaAdsController::class, 'refreshAdAccounts'])->name('ads_manager.meta.ad_accounts.refresh');
 
     Route::get('/ads_manager/cpp', [\App\Http\Controllers\CPPController::class, 'index'])->name('ads_manager.cpp');
     Route::get('/ads_manager/cpp/data', [\App\Http\Controllers\CPPController::class, 'data'])
