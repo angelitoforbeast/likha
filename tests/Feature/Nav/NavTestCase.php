@@ -106,21 +106,29 @@ abstract class NavTestCase extends TestCase
         Artisan::call('migrate', ['--path' => [self::SECTIONS_MIGRATION], '--force' => true]);
     }
 
+    /**
+     * Inserts each hand row, or, when a migration already made that link (same key or same url: 296 makes `chat`,
+     * 293 makes `/checklist/ai-followups` as `checklist_ai_followups`), keeps the migration's row as it is and only
+     * sets the visibility listed here. No link is inserted twice.
+     */
     protected function addHandRows(): void
     {
         $now = now();
         $sort = (int) DB::table('nav_links')->max('sort_order');
         foreach (self::HAND_ROWS as [$key, $label, $url, $roles]) {
-            $id = DB::table('nav_links')->insertGetId([
-                'key' => $key, 'label' => $label, 'route_url' => $url, 'icon' => 'fa-solid fa-link',
-                'active_pattern' => ltrim($url, '/') . '*', 'sort_order' => ++$sort, 'is_active' => true,
-                'created_at' => $now, 'updated_at' => $now,
-            ]);
-            foreach (self::ROLES as $role) {
-                DB::table('nav_link_role_visibility')->insert([
-                    'nav_link_id' => $id, 'role' => $role, 'is_visible' => in_array($role, $roles, true),
+            $id = DB::table('nav_links')->where('key', $key)->orWhere('route_url', $url)->value('id');
+            if (!$id) {
+                $id = DB::table('nav_links')->insertGetId([
+                    'key' => $key, 'label' => $label, 'route_url' => $url, 'icon' => 'fa-solid fa-link',
+                    'active_pattern' => ltrim($url, '/') . '*', 'sort_order' => ++$sort, 'is_active' => true,
                     'created_at' => $now, 'updated_at' => $now,
                 ]);
+            }
+            foreach (self::ROLES as $role) {
+                DB::table('nav_link_role_visibility')->updateOrInsert(
+                    ['nav_link_id' => $id, 'role' => $role],
+                    ['is_visible' => in_array($role, $roles, true), 'created_at' => $now, 'updated_at' => $now],
+                );
             }
         }
     }

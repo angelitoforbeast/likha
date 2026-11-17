@@ -13,7 +13,12 @@
 
 @php
   $isChecklistLink = fn ($link) => trim((string) $link->route_url, '/') === 'checklist';
-  $isActive = fn ($link) => $link->active_pattern ? request()->is($link->active_pattern) : false;
+  // A link with no pattern covers its url and the paths below it, on whole segments (as AccessRule, spec 294).
+  $isActive = function ($link) {
+    if (trim((string) $link->active_pattern) !== '') return request()->is(ltrim(trim($link->active_pattern), '/'));
+    $url = trim((string) $link->route_url, '/');
+    return $url === '' ? request()->is('/') : request()->is($url, $url . '/*');
+  };
   // Only one row is marked as the current page: the first match in sidebar order.
   $activeId = null;
   foreach ($sections as $s) {

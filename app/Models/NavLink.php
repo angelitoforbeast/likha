@@ -159,6 +159,9 @@ class NavLink extends Model
             ['key'=>'storage',               'label'=>'Storage',            'route_url'=>'/system-monitor/storage',               'icon'=>'fa-solid fa-hard-drive',       'active_pattern'=>'system-monitor/storage*',        'visible'=>['CEO','Marketing - OIC']],
             ['key'=>'encoding_timetable',    'label'=>'Encoding Timetable', 'route_url'=>'/encoder/timetable',                    'icon'=>'fa-solid fa-clock',            'active_pattern'=>'encoder/timetable*',             'visible'=>['CEO','Marketing','Marketing - OIC']],
             ['key'=>'ads_daily_output',      'label'=>'Ads Daily Output',   'route_url'=>'/ads_manager/daily-output',             'icon'=>'fa-solid fa-calendar-day',     'active_pattern'=>'ads_manager/daily-output*',      'visible'=>['CEO','Marketing','Marketing - OIC']],
+            ['key'=>'checklist_ai_followups','label'=>'Marketing Head',     'route_url'=>'/checklist/ai-followups',               'icon'=>'fa-solid fa-wand-magic-sparkles', 'active_pattern'=>'checklist/ai-followups*',     'visible'=>['CEO']],
+            // No pattern: the link covers /chat and below by its url (see the narrow_chat_nav_link_pattern migration).
+            ['key'=>'chat',                  'label'=>'Chat',               'route_url'=>'/chat',                                 'icon'=>'fa-solid fa-comment-dots',     'active_pattern'=>null,                             'visible'=>['CEO','Marketing - OIC','Marketing','Data Encoder - OIC','Data Encoder']],
         ]);
     }
 }

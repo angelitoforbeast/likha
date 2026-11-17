@@ -356,6 +356,8 @@
       'prompt-generator',
       'boardroom',
       'boardroom/*',
+      'chat',
+      'chat/*',
     ]))
       <div class="w-full px-0">
         {{ $slot }}
