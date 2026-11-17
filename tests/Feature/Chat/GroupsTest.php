@@ -122,8 +122,12 @@ class GroupsTest extends ChatTestCase
         $this->assertContains($before->id, $ids);
         $this->assertNotContains($after->id, $ids);
 
-        $poll = $this->actingAs($ben)->getJson("/chat/poll?c={$g->id}&after={$before->id}")->assertOk()->json('thread.messages');
-        $this->assertNotContains($after->id, array_column($poll, 'id'));
+        // Nothing new: no later messages, no current member list, no read receipts.
+        $this->assertSame([], $thread['reads']);
+        $this->assertSame([], $thread['conversation']['members']);
+        $poll = $this->actingAs($ben)->getJson("/chat/poll?c={$g->id}&after={$before->id}")->assertOk()->json('thread');
+        $this->assertNotContains($after->id, array_column($poll['messages'], 'id'));
+        $this->assertSame([], $poll['reads']);
 
         $this->actingAs($ben)->postJson("/chat/{$g->id}/messages", ['body' => 'Still here?'])->assertForbidden();
 

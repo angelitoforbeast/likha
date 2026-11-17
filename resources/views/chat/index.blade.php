@@ -23,9 +23,9 @@
   html:has(#lc), html:has(#lc) body { overflow: hidden; }
   #lc *, #lc *::before, #lc *::after { box-sizing: border-box; }
   #lc ::selection { background: rgba(37, 99, 235, .2); }
-  #lc button, #lc input, #lc textarea { font: inherit; color: inherit; }
-  #lc button { cursor: pointer; }
-  #lc button:disabled { cursor: default; opacity: .5; }
+  :where(#lc) :where(button, input, textarea) { font: inherit; color: inherit; }
+  :where(#lc) button { cursor: pointer; }
+  :where(#lc) button:disabled { cursor: default; opacity: .5; }
   #lc :focus-visible { outline: 2px solid var(--lc-accent); outline-offset: 2px; border-radius: 6px; }
   #lc [hidden] { display: none !important; }
   .lc-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
@@ -64,6 +64,7 @@
   .lc-empty { padding: 40px 24px; text-align: center; color: var(--lc-muted); }
   .lc-empty h2 { font-size: 17px; color: var(--lc-text); margin: 0 0 6px; font-weight: 700; }
   .lc-empty p { margin: 0 0 16px; font-size: 14px; }
+  #lc-list-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding-bottom: 80px; }
   .lc-empty-icon { font-size: 28px; color: var(--lc-line-strong); margin-bottom: 12px; }
 
   /* ── avatars ── */
@@ -114,6 +115,7 @@
   .lc-imgs.multi { grid-template-columns: repeat(2, minmax(0, 140px)); }
   .lc-imgs button { padding: 0; border: 0; background: var(--lc-hover); border-radius: 12px; overflow: hidden; display: block; }
   .lc-imgs img { display: block; width: 100%; height: auto; max-height: 320px; object-fit: cover; }
+  .lc-imgs.n1 img { aspect-ratio: 4 / 3; }
   .lc-imgs.multi img { aspect-ratio: 1; height: 100%; }
   .lc-file { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 12px; background: var(--lc-hover); color: var(--lc-text) !important; text-decoration: none !important; margin: 2px 0; max-width: 280px; }
   .lc-file i { color: var(--lc-muted); font-size: 18px; }
@@ -178,6 +180,7 @@
 
   /* lightbox */
   .lc-lightbox { position: fixed; inset: 0; z-index: 60; background: rgba(17, 24, 39, .92); display: grid; place-items: center; padding: 48px 12px 12px; }
+  .lc-lightbox[hidden] { display: none; }
   .lc-lightbox img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 6px; }
   .lc-lightbox .lc-icon-btn { position: absolute; top: 10px; right: 10px; color: #fff; }
   .lc-lightbox .lc-icon-btn:hover { background: rgba(255, 255, 255, .12); color: #fff; }
@@ -413,13 +416,16 @@
     list.replaceChildren(...rows.map(rowEl));
     $('lc-list-loading').hidden = true;
     $('lc-list-empty').hidden = S.rows.size > 0;
+    list.hidden = S.rows.size === 0;
     if (S.rows.size > 0 && rows.length === 0) list.append(h('li', { class: 'lc-empty', text: 'No chats match.' }));
     const total = [...S.rows.values()].reduce((n, r) => n + (r.unread || 0), 0);
     document.title = (total ? `(${total}) ` : '') + 'Chat';
   }
   function rowEl(r) {
     const last = r.last;
-    const lastText = last ? (last.sender ? `${last.sender}: ${last.text}` : last.text) : (r.kind === 'group' ? 'Group created' : 'No messages yet');
+    // In a direct chat the other person's name is already the title; only "You:" is added there.
+    const showSender = last && last.sender && (r.kind === 'group' || last.sender === 'You' || !r.member);
+    const lastText = last ? (showSender ? `${last.sender}: ${last.text}` : last.text) : (r.kind === 'group' ? 'Group created' : 'No messages yet');
     const label = `${r.title}${r.unread ? `, ${r.unread} unread` : ''}`;
     return h('li', {},
       h('button', {
@@ -484,7 +490,8 @@
     $('lc-thread-av').replaceChildren(avatar(c.avatar));
     $('lc-thread-title').textContent = c.title;
     let sub = '';
-    if (c.kind === 'group') sub = `${c.members.length} member${c.members.length === 1 ? '' : 's'}`;
+    if (c.me.left) sub = 'You left this group';
+    else if (c.kind === 'group') sub = `${c.members.length} member${c.members.length === 1 ? '' : 's'}`;
     else {
       const other = c.members.find((m) => m.id !== BOOT.me.id);
       sub = other && other.role ? other.role : 'Direct chat';
@@ -588,10 +595,10 @@
     box.hidden = who.length === 0;
     if (!who.length) return;
     const names = who.map((r) => r.name).join(', ');
-    box.replaceChildren(h('span', { text: 'Seen by', style: 'margin-right:6px' }),
+    box.replaceChildren(h('span', { text: 'Seen by', style: 'margin-right:6px' },
+      h('span', { class: 'lc-sr', text: ` ${names}` })),
       ...who.slice(0, 5).map((r) => { const a = avatar(r, 'xs'); a.setAttribute('title', r.name); return a; }),
-      who.length > 5 ? h('span', { text: `+${who.length - 5}`, style: 'margin-left:4px' }) : null,
-      h('span', { class: 'lc-sr', text: names }));
+      ...(who.length > 5 ? [h('span', { text: `+${who.length - 5}`, style: 'margin-left:4px' })] : []));
   }
   $('lc-new-pill').addEventListener('click', toBottom);
   $('lc-scroll').addEventListener('scroll', () => { if (nearBottom()) $('lc-new-pill').hidden = true; });

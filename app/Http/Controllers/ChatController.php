@@ -133,7 +133,7 @@ class ChatController extends Controller
             'conversation' => $this->conversationInfo($c, $me, $member),
             'messages' => ChatPresenter::messages($rows, $me),
             'has_more' => $hasMore,
-            'reads' => ChatPresenter::reads($c, $me),
+            'reads' => $this->departed($me, $member) ? [] : ChatPresenter::reads($c, $me),
             'now' => now()->toIso8601String(),
         ]);
     }
@@ -169,7 +169,7 @@ class ChatController extends Controller
             $thread = [
                 'messages' => ChatPresenter::messages($new, $me),
                 'removed' => $removed,
-                'reads' => ChatPresenter::reads($c, $me),
+                'reads' => $this->departed($me, $member) ? [] : ChatPresenter::reads($c, $me),
             ];
         }
 
@@ -320,6 +320,12 @@ class ChatController extends Controller
         }
     }
 
+    /** Umalis o tinanggal na (at hindi CEO): ang luma lang ang nakikita niya. */
+    private function departed(User $me, ?ChatMember $member): bool
+    {
+        return ChatAccess::visibleUntil($me, $member) !== null;
+    }
+
     private function wantsAll(Request $request, User $me): bool
     {
         return $request->boolean('all') && ChatAccess::isCeo($me);
@@ -327,7 +333,9 @@ class ChatController extends Controller
 
     private function conversationInfo(ChatConversation $c, User $me, ?ChatMember $member): array
     {
-        $members = ChatMember::where('conversation_id', $c->id)->whereNull('left_at')->orderBy('id')->get();
+        // Ang umalis na ay walang bagong nakikita: walang listahan ng kasalukuyang miyembro.
+        $members = $this->departed($me, $member) ? collect()
+            : ChatMember::where('conversation_id', $c->id)->whereNull('left_at')->orderBy('id')->get();
         $all = ChatMember::where('conversation_id', $c->id)->pluck('user_id')->all();
         $people = ChatPeople::lookup($all);
         [$title, $avatar] = ChatPresenter::titleAndAvatar($c, $me, $all, $people);
