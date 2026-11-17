@@ -2,8 +2,8 @@
 
 namespace Tests\Feature\Orders;
 
-use App\Http\Controllers\JntCheckerController;
 use App\Models\MacroOutput;
+use App\Services\Jnt\JntCheckerMatcher;
 use App\Services\Jnt\JntPayloadBuilder;
 use App\Services\MacroChecker;
 use App\Services\OrderPhone;
@@ -171,7 +171,7 @@ class PhoneTenDigitsTest extends TestCase
         $this->assertSame(['09171234567', '09171234567'], [$payload['receiver']['phone'], $payload['receiver']['mobile']]);
 
         // Ang susi ng checker: ang order (9171234567) at ang waybill (receiver 09171234567) ay iisang susi.
-        $key = (new \ReflectionMethod(JntCheckerController::class, 'makeKey'))->getClosure(new JntCheckerController());
+        $key = (new \ReflectionMethod(JntCheckerMatcher::class, 'makeKey'))->getClosure(new JntCheckerMatcher());
         $this->assertSame($key('Page Uno', '09171234567', '2 x Glow Serum', '998'), $key('Page Uno', '9171234567', '2 x Glow Serum', '998'));
     }
 }

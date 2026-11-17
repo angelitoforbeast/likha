@@ -646,6 +646,8 @@ Route::post('/jnt/item-types/delete/{id}', [\App\Http\Controllers\ItemTypeMappin
 Route::get('/jnt/checker', [JntCheckerController::class, 'index'])->name('jnt.checker');
 Route::post('/jnt/checker/upload', [JntCheckerController::class, 'upload'])->name('jnt.checker.upload');
 Route::get('/jnt/checker/upload', fn () => redirect()->route('jnt.checker'));
+// Estado ng isang upload/update run para sa polling ng page (spec 283): cache read lang.
+Route::get('/jnt/checker/status/{run}', [JntCheckerController::class, 'status'])->name('jnt.checker.status');
 Route::post('/jnt/checker/update', [\App\Http\Controllers\JntCheckerController::class, 'update'])
     ->name('jnt.checker.update');
 Route::get('/jnt/waybills/sender-name', [SenderNameController::class, 'index'])

@@ -14,7 +14,73 @@
         </div>
     @endif
 
-    <form method="POST" action="{{ route('jnt.checker.upload') }}" enctype="multipart/form-data" class="p-4 space-y-4">
+    {{-- Spec 283: ang upload ay tumatakbo sa background; dito ang estado ng run --}}
+    @if($runExpired ?? false)
+        <div class="mb-4 bg-yellow-50 border border-yellow-300 text-yellow-900 px-4 py-3 rounded" data-run-expired>
+            ⏳ This check expired, please upload again.
+        </div>
+    @endif
+
+    @if(!empty($runError))
+        <div class="mb-4 bg-red-50 border border-red-200 text-red-800 px-4 py-3 rounded" data-run-error>
+            ❌ {{ $runError }}
+        </div>
+    @endif
+
+    @if(!empty($runSuccess))
+        <div class="mb-4 bg-green-50 border border-green-200 text-green-800 px-4 py-3 rounded">
+            ✅ {{ $runSuccess }}
+        </div>
+    @endif
+
+    @php
+        $runBusy = !empty($run) && in_array($run['status'], ['queued', 'running'], true);
+        $updateBusy = !empty($update) && in_array($update['status'], ['queued', 'running'], true);
+    @endphp
+
+    @if($runBusy)
+        <div class="mb-4 bg-blue-50 border border-blue-200 text-blue-900 px-4 py-3 rounded" data-run-progress>
+            @if($run['status'] === 'queued')
+                ⏳ <strong>Waiting to start...</strong> The check is in line for the background worker.
+                <span class="text-xs">(waiting <span data-waited>{{ gmdate('i:s', min($run['waited_seconds'], 3599)) }}</span>)</span>
+                @if($run['waited_seconds'] > 600)
+                    <div class="text-xs mt-1">It has waited over 10 minutes. The background worker may be stopped: please tell the admin.</div>
+                @endif
+            @else
+                ⚙️ <strong>Checking the orders...</strong> This page shows the results by itself when done.
+            @endif
+        </div>
+    @endif
+
+    @if($runBusy || $updateBusy)
+        <div hidden data-status-url="{{ route('jnt.checker.status', ['run' => $run['id']]) }}"></div>
+        <script>
+            (function () {
+                var url = document.querySelector('[data-status-url]').getAttribute('data-status-url');
+                var seen = @json(($run['status'] ?? '') . '|' . ($update['status'] ?? ''));
+                function tick() {
+                    fetch(url, { credentials: 'same-origin', headers: { 'Accept': 'application/json' } })
+                        .then(function (r) { return r.ok ? r.json() : null; })
+                        .then(function (s) {
+                            if (!s) return setTimeout(tick, 5000);
+                            var now = (s.status || '') + '|' + ((s.update && s.update.status) || '');
+                            if (now !== seen) { window.location.reload(); return; }
+                            var w = document.querySelector('[data-waited]');
+                            if (w && typeof s.waited_seconds === 'number') {
+                                var m = Math.floor(s.waited_seconds / 60), sec = s.waited_seconds % 60;
+                                w.textContent = (m < 10 ? '0' : '') + m + ':' + (sec < 10 ? '0' : '') + sec;
+                            }
+                            setTimeout(tick, 3000);
+                        })
+                        .catch(function () { setTimeout(tick, 5000); });
+                }
+                setTimeout(tick, 3000);
+            })();
+        </script>
+    @endif
+
+    <form method="POST" action="{{ route('jnt.checker.upload') }}" enctype="multipart/form-data" class="p-4 space-y-4"
+          onsubmit="var b=this.querySelector('button[type=submit]'); if (b.disabled) return false; b.disabled=true; b.textContent='Uploading...';">
         @csrf
 
         <label class="block">
@@ -157,9 +223,46 @@
         </div>
     @endif
 
-    @if(isset($updatableCount) && $updatableCount > 0)
-        <form method="POST" action="{{ route('jnt.checker.update') }}" class="mt-4">
+    @if(!empty($update))
+        {{-- Isang Update lang kada upload: kapag nagsimula na, estado na lang ang ipinapakita --}}
+        <div class="mt-4" data-update-state="{{ $update['status'] }}">
+            @if($update['status'] === 'queued')
+                <div class="bg-blue-50 border border-blue-200 text-blue-900 px-4 py-3 rounded">
+                    ⏳ <strong>Update waiting to start...</strong> It is in line for the background worker.
+                    @if($update['waited_seconds'] > 600)
+                        <div class="text-xs mt-1">It has waited over 10 minutes. The background worker may be stopped: please tell the admin.</div>
+                    @endif
+                </div>
+            @elseif($update['status'] === 'running')
+                <div class="bg-blue-50 border border-blue-200 text-blue-900 px-4 py-3 rounded">
+                    ⚙️ <strong>Updating WAYBILL...</strong> This page shows the count by itself when done.
+                </div>
+            @elseif($update['status'] === 'done')
+                <div class="bg-green-50 border border-green-200 text-green-800 px-4 py-3 rounded">
+                    ✅ WAYBILL updated for {{ $update['count'] }} row(s).
+                </div>
+            @else
+                <div class="bg-red-50 border border-red-200 text-red-800 px-4 py-3 rounded">
+                    ❌ {{ $update['error'] }}
+                </div>
+                @if(isset($updatableCount) && $updatableCount > 0)
+                    {{-- Ligtas ulitin: pareho ang waybill na isusulat sa parehong mga row --}}
+                    <form method="POST" action="{{ route('jnt.checker.update') }}" class="mt-2"
+                          onsubmit="var b=this.querySelector('button[type=submit]'); if (b.disabled) return false; b.disabled=true;">
+                        @csrf
+                        <input type="hidden" name="run" value="{{ $run['id'] ?? '' }}">
+                        <button type="submit" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded">
+                            TRY THE UPDATE AGAIN
+                        </button>
+                    </form>
+                @endif
+            @endif
+        </div>
+    @elseif(isset($updatableCount) && $updatableCount > 0)
+        <form method="POST" action="{{ route('jnt.checker.update') }}" class="mt-4"
+              onsubmit="var b=this.querySelector('button[type=submit]'); if (b.disabled) return false; b.disabled=true;">
             @csrf
+            <input type="hidden" name="run" value="{{ $run['id'] ?? '' }}">
             <button type="submit" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded">
                 UPDATE ORDERS (set WAYBILL)
             </button>

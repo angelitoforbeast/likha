@@ -2,44 +2,91 @@
 
 namespace App\Http\Controllers;
 
+use App\Jobs\RunJntCheckerUpdate;
+use App\Jobs\RunJntCheckerUpload;
+use App\Services\Jnt\JntCheckerMatcher;
+use App\Services\Jnt\JntCheckerRuns;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
-use PhpOffice\PhpSpreadsheet\IOFactory;
-use App\Models\MacroOutput;
-use App\Models\PageSenderMapping;
-use App\Models\FeeSetting;
-use Carbon\Carbon;
 
+/**
+ * J&T Order Checker (/jnt/checker).
+ *
+ * Spec 283: ang mabigat na trabaho (pagbasa ng Excel/ZIP at pagtutugma, at ang pagsulat ng WAYBILL) ay
+ * tumatakbo sa queue job; ang mga web request dito ay nag-iimbak, nagpapadala ng job at nagbabasa ng
+ * estado lang, para hindi na tumama sa 60 s ng nginx (504). Ang pagtutugma mismo ay nasa
+ * App\Services\Jnt\JntCheckerMatcher, hindi binago.
+ */
 class JntCheckerController extends Controller
 {
-    public function index()
+    public const EXPIRED = 'This check expired, please upload again.';
+    public const NOTHING_TO_UPDATE = 'No matched rows with WAYBILL found from the last upload.';
+
+    /** Gaano katagal ituturing na "parehong pindot" ang parehong file + petsa habang hindi pa tapos. */
+    private const SAME_UPLOAD_SECONDS = 900;
+
+    public function __construct(private JntCheckerRuns $runs) {}
+
+    public function index(Request $request)
     {
-        return view('jnt.checker', [
-            'results'              => session('results'),
-            'matchedCount'         => session('matchedCount'),
-            'notMatchedCount'      => session('notMatchedCount'),
-            'notInExcelCount'      => session('notInExcelCount'),
-            'notInExcelRows'       => session('notInExcelRows'),
-            'filter_date_start'    => session('filter_date_start'),
-            'filter_date_end'      => session('filter_date_end'),
-            'updatableCount'       => session('updatableCount'),
+        $runId = $request->query('run') ?: session('jnt_checker_run');
+        $vars = ['run' => null, 'runExpired' => false, 'runError' => null, 'runSuccess' => null, 'update' => null];
 
-            // diagnostics
-            'mappingMissingCount'  => session('mappingMissingCount'),
-            'skippedCancelCount'   => session('skippedCancelCount'),
-            'processedFilesCount'  => session('processedFilesCount'),
-            'perfectMatch'         => session('perfectMatch'),
+        if (!$runId) {
+            return view('jnt.checker', $vars);
+        }
 
-            // shipping fee
-            'sfMismatchCount'      => session('sfMismatchCount'),
-            'sfCorrectCount'       => session('sfCorrectCount'),
-            'sfNoDataCount'        => session('sfNoDataCount'),
-            'expectedShippingFee'  => session('expectedShippingFee'),
-        ]);
+        $state = JntCheckerRuns::isValidId((string) $runId) ? $this->runs->get((string) $runId) : null;
+        if ($state === null) {
+            return view('jnt.checker', array_merge($vars, ['runExpired' => true]));
+        }
+        $this->ensureOwner($state);
+
+        $state = $this->withStaleCheck($state);
+        $vars['run'] = $this->publicState($state);
+        $vars['filter_date_start'] = $state['filter_date_start'] ?? null;
+        $vars['filter_date_end'] = $state['filter_date_end'] ?? null;
+
+        if (in_array($state['status'], [JntCheckerRuns::STATUS_ERROR, JntCheckerRuns::STATUS_FAILED], true)) {
+            $vars['runError'] = $state['error'];
+            return view('jnt.checker', $vars);
+        }
+        if ($state['status'] !== JntCheckerRuns::STATUS_DONE) {
+            return view('jnt.checker', $vars); // waiting to start / running: page polls the status
+        }
+
+        $data = $this->runs->readResult($state['id']);
+        if ($data === null) {
+            return view('jnt.checker', array_merge($vars, ['run' => null, 'runExpired' => true]));
+        }
+
+        unset($data['updatable']);
+        // Ang blade ay nagbabasa ng $row->PAGE atbp., kaya objects ulit (dati Eloquent models sa session).
+        $data['notInExcelRows'] = collect($data['notInExcelRows'] ?? [])->map(fn ($r) => (object) $r);
+
+        $vars['runSuccess'] = $state['success'] ?? null;
+        $vars['update'] = $this->updateState($state['id']);
+
+        return view('jnt.checker', array_merge($vars, $data));
     }
 
-    public function upload(Request $request)
+    /** Estado lang ng run para sa polling ng page: cache read, walang query sa database. */
+    public function status(string $run)
+    {
+        if (!JntCheckerRuns::isValidId($run)) abort(404);
+
+        $state = $this->runs->get($run);
+        if ($state === null) {
+            return response()->json(['status' => 'expired', 'update' => null]);
+        }
+        $this->ensureOwner($state);
+        $state = $this->withStaleCheck($state);
+
+        return response()->json(array_merge($this->publicState($state), ['update' => $this->updateState($run)]));
+    }
+
+    public function upload(Request $request, JntCheckerMatcher $matcher)
     {
         Log::info('📥 Entered upload() function');
 
@@ -50,614 +97,141 @@ class JntCheckerController extends Controller
 
         $uploaded = $request->file('excel_file');
         $ext = strtolower($uploaded->getClientOriginalExtension());
-
-        // Preload Sender -> Page mapping (NO N+1)
-        $senderToPage = PageSenderMapping::select('SENDER_NAME', 'PAGE')->get()
-            ->mapWithKeys(function ($m) {
-                $sender = strtolower($this->normText($m->SENDER_NAME));
-                $page   = $this->normText($m->PAGE);
-                return [$sender => $page];
-            })
-            ->all();
-
-        // =========================
-        // Step A: Read Excel(s)
-        // =========================
-        $allResults = [];
-        $skippedCancelCount = 0;
-        $processedFilesCount = 0;
+        $start = $request->input('filter_date_start');
+        $end = $request->input('filter_date_end');
 
         if ($ext === 'zip') {
-            $zipPath = $uploaded->getRealPath();
-            $tmpDir = storage_path('app/tmp/jnt_checker_' . uniqid());
-            if (!is_dir($tmpDir)) @mkdir($tmpDir, 0775, true);
-
-            $zip = new \ZipArchive();
-            if ($zip->open($zipPath) !== true) {
-                return back()->with('error', 'Failed to open ZIP file.');
-            }
-
-            $zip->extractTo($tmpDir);
-            $zip->close();
-
-            $excelFiles = $this->findExcelFilesRecursive($tmpDir);
-
-            if (empty($excelFiles)) {
-                $this->rrmdir($tmpDir);
-                return back()->with('error', 'ZIP contains no .xlsx or .xls files.');
-            }
-
-            foreach ($excelFiles as $filePath) {
-                $processedFilesCount++;
-                $label = basename($filePath);
-
-                $parsed = $this->parseExcelFileToResults($filePath, $senderToPage, $label);
-                if ($parsed['error']) {
-                    $this->rrmdir($tmpDir);
-                    return back()->with('error', "File {$label}: " . $parsed['error']);
-                }
-
-                $skippedCancelCount += $parsed['skippedCancelCount'];
-                $allResults = array_merge($allResults, $parsed['results']);
-            }
-
-            // cleanup
-            $this->rrmdir($tmpDir);
-        } else {
-            $processedFilesCount = 1;
-
-            $path = $uploaded->getRealPath();
-            $label = $uploaded->getClientOriginalName();
-
-            $parsed = $this->parseExcelFileToResults($path, $senderToPage, $label);
-            if ($parsed['error']) {
-                return back()->with('error', $parsed['error']);
-            }
-
-            $skippedCancelCount = $parsed['skippedCancelCount'];
-            $allResults = $parsed['results'];
-        }
-
-        // If everything got skipped (e.g., all Cancel Order)
-        if (empty($allResults)) {
-            return redirect()
-                ->route('jnt.checker')
-                ->with([
-                    'results'             => [],
-                    'matchedCount'        => 0,
-                    'notMatchedCount'     => 0,
-                    'notInExcelCount'     => 0,
-                    'notInExcelRows'      => collect([]),
-                    'filter_date_start'   => $request->input('filter_date_start'),
-                    'filter_date_end'     => $request->input('filter_date_end'),
-                    'updatableCount'      => 0,
-                    'mappingMissingCount' => 0,
-                    'skippedCancelCount'  => $skippedCancelCount,
-                    'processedFilesCount' => $processedFilesCount,
-                    'perfectMatch'        => false,
-                    'sfMismatchCount'     => 0,
-                    'sfCorrectCount'      => 0,
-                    'sfNoDataCount'       => 0,
-                    'expectedShippingFee' => null,
-                ])
-                ->with('success', 'Uploaded successfully, but all rows were filtered out (Cancel Order).');
-        }
-
-        // =========================
-        // Step SF: Get expected shipping fee from Fee Settings
-        // =========================
-        $host = strtolower((string) $request->getHost());
-        // SF lookup uses filter_date_start + 1 day (e.g. checking May 5 orders → look up May 6 rate)
-        $refDate = Carbon::parse($request->input('filter_date_start'))->addDay()->toDateString();
-        $expectedSF = FeeSetting::getRate('shipping_fee_per_order', $host, $refDate);
-
-        // Compare shipping fee for each row
-        $sfMismatchCount = 0;
-        $sfCorrectCount  = 0;
-        $sfNoDataCount   = 0;
-
-        foreach ($allResults as &$row) {
-            if (!isset($row['shipping_fee']) || $row['shipping_fee'] === null || $row['shipping_fee'] === '') {
-                $row['sf_status'] = 'no_data';
-                $sfNoDataCount++;
-            } elseif ($expectedSF === null) {
-                // No shipping fee setting configured yet
-                $row['sf_status'] = 'no_setting';
-                $sfNoDataCount++;
-            } else {
-                $actualSF = (float) $row['shipping_fee'];
-                $diff = abs($actualSF - $expectedSF);
-                if ($diff < 0.01) {
-                    $row['sf_status'] = 'correct';
-                    $sfCorrectCount++;
-                } else {
-                    $row['sf_status'] = 'mismatch';
-                    $row['sf_expected'] = $expectedSF;
-                    $sfMismatchCount++;
-                }
-            }
-        }
-        unset($row);
-
-        // =========================
-        // Step B: Filter MacroOutput by date if provided
-        // =========================
-        $start = $request->input('filter_date_start');
-        $end   = $request->input('filter_date_end');
-
-        $query = MacroOutput::select('id', 'PAGE', 'PHONE NUMBER', 'ITEM_NAME', 'COD', 'TIMESTAMP', 'FULL NAME')
-            ->where('STATUS', 'PROCEED');
-
-        $driver = DB::getDriverName();
-
-        if ($start && $end) {
-            try {
-                if ($driver === 'pgsql') {
-                    $query->whereRaw(
-                        "to_date(substring(\"TIMESTAMP\" from '.{10}$'), 'DD-MM-YYYY') BETWEEN ? AND ?",
-                        [$start, $end]
-                    );
-                } else {
-                    $query->whereBetween(
-                        DB::raw("STR_TO_DATE(RIGHT(`TIMESTAMP`, 10), '%d-%m-%Y')"),
-                        [date('Y-m-d', strtotime($start)), date('Y-m-d', strtotime($end))]
-                    );
-                }
-            } catch (\Throwable $e) {
-                Log::warning('⚠️ Invalid date range.', ['err' => $e->getMessage()]);
-            }
-        } elseif ($start) {
-            try {
-                if ($driver === 'pgsql') {
-                    $query->whereRaw(
-                        "to_date(substring(\"TIMESTAMP\" from '.{10}$'), 'DD-MM-YYYY') = ?",
-                        [$start]
-                    );
-                } else {
-                    $query->where(
-                        DB::raw("STR_TO_DATE(RIGHT(`TIMESTAMP`, 10), '%d-%m-%Y')"),
-                        '=',
-                        date('Y-m-d', strtotime($start))
-                    );
-                }
-            } catch (\Throwable $e) {
-                Log::warning('⚠️ Invalid single date.', ['err' => $e->getMessage()]);
+            // Mabilis na check (listahan lang ng laman, walang extract) para agad ang parehong error gaya ng dati.
+            $zipError = $matcher->zipPrecheckError($uploaded->getRealPath());
+            if ($zipError !== null) {
+                return back()->with('error', $zipError);
             }
         }
 
-        Log::info('🗓️ Date Filter Start:', ['start' => $start]);
-        Log::info('🗓️ Date Filter End:', ['end' => $end]);
-        Log::info('📦 MacroOutput count after date + status filter:', ['count' => $query->count()]);
+        $userId = (int) $request->user()->id;
 
-        $macroOutputRecords = $query->get();
-
-        // =========================
-        // Step C: Build Macro multiset (key -> list of ids)
-        // =========================
-        $macroKeyToRows = [];
-        $phoneNames     = []; // normPhone → [normName => true] — para ma-detect ang SHARED phone
-        foreach ($macroOutputRecords as $mo) {
-            $k = $this->makeKey(
-                $mo->PAGE,
-                $mo->{'PHONE NUMBER'},
-                $mo->ITEM_NAME,
-                $mo->COD
-            );
-            $normName = strtolower($this->normText($mo->{'FULL NAME'} ?? ''));
-            $macroKeyToRows[$k][] = [
-                'id'        => (int) $mo->id,
-                'full_name' => $this->normText($mo->{'FULL NAME'} ?? ''), // display
-                'name'      => $normName,                                  // para sa name match
-                'used'      => false,
-            ];
-            if ($normName !== '') {
-                $phoneNames[$this->normPhone($mo->{'PHONE NUMBER'})][$normName] = true;
+        // Dobleng pindot / dalawang tab na parehong file at petsa habang hindi pa tapos ang una:
+        // iisang run lang, para isang beses lang ang trabaho at iisa ang resulta.
+        $sameKey = 'jnt_checker:same_upload:' . $userId . ':'
+            . sha1(sha1_file($uploaded->getRealPath()) . '|' . $ext . '|' . $start . '|' . $end);
+        $existing = Cache::get($sameKey);
+        if (is_string($existing)) {
+            $prev = $this->runs->get($existing);
+            if ($prev && in_array($prev['status'], [JntCheckerRuns::STATUS_QUEUED, JntCheckerRuns::STATUS_RUNNING], true)) {
+                session(['jnt_checker_run' => $existing]);
+                return redirect()->route('jnt.checker', ['run' => $existing]);
             }
         }
 
-        // SHARED / placeholder phone = isang phone na pag-aari ng 2+ MAGKAIBANG tao
-        // (hal. ang "fixed phone" na inilalagay kapag invalid ang totoong number).
-        // Isinasama ang Excel names para mahuli kahit iisa lang ang macro row sa range.
-        // Sa ganitong phone, HINDI maaasahan ang phone bilang identity → kailangan ng
-        // name match kahit singleton ang key.
-        foreach ($allResults as $r0) {
-            $nm = $r0['receiver_name_norm'] ?? '';
-            if ($nm !== '' && !empty($r0['receiver'])) $phoneNames[$r0['receiver']][$nm] = true;
-        }
-        $sharedPhone = [];
-        foreach ($phoneNames as $ph => $names) {
-            if (count($names) >= 2) $sharedPhone[$ph] = true;
+        $runId = $this->runs->create($userId, $start, $end);
+        if (!Cache::add($sameKey, $runId, self::SAME_UPLOAD_SECONDS)) {
+            $other = Cache::get($sameKey);
+            $prev = is_string($other) ? $this->runs->get($other) : null;
+            if ($prev && in_array($prev['status'], [JntCheckerRuns::STATUS_QUEUED, JntCheckerRuns::STATUS_RUNNING], true)) {
+                session(['jnt_checker_run' => $other]);
+                return redirect()->route('jnt.checker', ['run' => $other]);
+            }
+            Cache::put($sameKey, $runId, self::SAME_UPLOAD_SECONDS);
         }
 
-        // =========================
-        // Step D: STRICT 1-to-1 match (duplicates MUST match)
-        // =========================
-        $mappingMissingCount = 0;
+        $workDir = $this->runs->workDir($runId);
+        if (!is_dir($workDir)) @mkdir($workDir, 0775, true);
+        $fileName = 'upload.' . $ext;
+        $uploaded->move($workDir, $fileName);
 
-        foreach ($allResults as &$res) {
-            if (!$res['key']) {
-                $mappingMissingCount++;
-                $res['matched'] = false;
-                $res['matched_id'] = null;
-                continue;
-            }
+        RunJntCheckerUpload::dispatch(
+            $runId,
+            $fileName,
+            $ext,
+            (string) $uploaded->getClientOriginalName(),
+            $start,
+            $end,
+            strtolower((string) $request->getHost()),
+        );
 
-            $k = $res['key'];
+        session(['jnt_checker_run' => $runId]);
 
-            if (empty($macroKeyToRows[$k])) {
-                $res['matched'] = false;
-                $res['matched_id'] = null;
-                continue;
-            }
-
-            // Kapag SHARED/placeholder ang phone (2+ tao ang gumagamit), hindi
-            // maaasahan ang phone → KAILANGAN ang name match kahit singleton ang key.
-            $needName = !empty($sharedPhone[$res['receiver']]);
-            $excelName = $res['receiver_name_norm'] ?? '';
-            $pick = -1;
-
-            // 1) Name match: unused macro row na TUGMANG-TUGMA ang FULL NAME ↔ Receiver.
-            if ($excelName !== '') {
-                foreach ($macroKeyToRows[$k] as $i => $g) {
-                    if (!$g['used'] && $g['name'] !== '' && $g['name'] === $excelName) { $pick = $i; break; }
-                }
-            }
-            // 2) In-order fallback — TOTOONG phone lang (iisang tao ang may-ari, kaya
-            //    ligtas kahit duplicate). Kapag SHARED/placeholder ang phone at walang
-            //    name match → HINDI mag-fa-fallback → mananatiling "not matched" (hindi
-            //    susulatan ng waybill) para hindi mapunta sa maling tao.
-            if ($pick === -1 && !$needName) {
-                foreach ($macroKeyToRows[$k] as $i => $g) {
-                    if (!$g['used']) { $pick = $i; break; }
-                }
-            }
-
-            if ($pick === -1) {
-                // duplicates exhausted
-                $res['matched'] = false;
-                $res['matched_id'] = null;
-                continue;
-            }
-
-            $macroKeyToRows[$k][$pick]['used'] = true;
-            $res['matched'] = true;
-            $res['matched_id'] = $macroKeyToRows[$k][$pick]['id'];
-            $res['macro_full_name'] = $macroKeyToRows[$k][$pick]['full_name'];
-        }
-        unset($res);
-
-        // =========================
-        // Step E: Not in Excel (EXTRA in Macro) = remaining ids after allocation
-        // =========================
-        $extraMacroIds = [];
-        foreach ($macroKeyToRows as $k => $rows) {
-            foreach ($rows as $g) {
-                if (!$g['used']) $extraMacroIds[] = $g['id'];
-            }
-        }
-
-        // faster membership lookup
-        $extraIdSet = [];
-        foreach ($extraMacroIds as $id) $extraIdSet[$id] = true;
-
-        $notInExcelRows = $macroOutputRecords->filter(function ($row) use ($extraIdSet) {
-            return isset($extraIdSet[(int)$row->id]);
-        })->values();
-
-        $notInExcelCount = $notInExcelRows->count();
-
-        // =========================
-        // Step F: Summary counts + sort
-        // =========================
-        $matchedCount    = collect($allResults)->where('matched', true)->count();
-        $notMatchedCount = collect($allResults)->where('matched', false)->count();
-
-        // Sort: SF mismatch first, then mapping-missing, then unmatched, then matched
-        $allResults = collect($allResults)->sortBy(function ($r) {
-            if (($r['sf_status'] ?? '') === 'mismatch') return 0;
-            if (($r['page'] ?? '') === '❌ Not Found in Mapping') return 1;
-            return ($r['matched'] ? 3 : 2);
-        })->values()->all();
-
-        // remove temp fields
-        foreach ($allResults as &$r) { unset($r['key'], $r['receiver_name_norm']); }
-        unset($r);
-
-        // =========================
-        // Step G: Updatable rows (STRICT: only assigned matched_id)
-        // matched + has waybill + has mapped page
-        // =========================
-        $updatable = collect($allResults)
-            ->filter(fn($r) =>
-                !empty($r['matched']) &&
-                !empty($r['matched_id']) &&
-                !empty($r['waybill']) &&
-                !empty($r['page']) &&
-                $r['page'] !== '❌ Not Found in Mapping'
-            )
-            ->map(fn($r) => [
-                'id' => (int)$r['matched_id'],
-                'waybill' => $r['waybill'],
-            ])
-            ->values()
-            ->all();
-
-        session(['jnt_updatable' => $updatable]);
-        $uniqueUpdatableCount = count(array_unique(array_column($updatable, 'id')));
-
-        // Perfect match definition:
-        // - all excel rows matched
-        // - no extra macro rows
-        // - no mapping missing
-        $perfectMatch = ($notMatchedCount === 0) && ($notInExcelCount === 0) && ($mappingMissingCount === 0);
-
-        return redirect()
-            ->route('jnt.checker')
-            ->with([
-                'results'              => $allResults,
-                'matchedCount'         => $matchedCount,
-                'notMatchedCount'      => $notMatchedCount,
-                'notInExcelCount'      => $notInExcelCount,
-                'notInExcelRows'       => $notInExcelRows,
-                'filter_date_start'    => $start,
-                'filter_date_end'      => $end,
-                'updatableCount'       => $uniqueUpdatableCount,
-
-                'mappingMissingCount'  => $mappingMissingCount,
-                'skippedCancelCount'   => $skippedCancelCount,
-                'processedFilesCount'  => $processedFilesCount,
-                'perfectMatch'         => $perfectMatch,
-
-                // shipping fee
-                'sfMismatchCount'      => $sfMismatchCount,
-                'sfCorrectCount'       => $sfCorrectCount,
-                'sfNoDataCount'        => $sfNoDataCount,
-                'expectedShippingFee'  => $expectedSF,
-            ]);
+        return redirect()->route('jnt.checker', ['run' => $runId]);
     }
 
     public function update(Request $request)
     {
-        $updatable = session('jnt_updatable', []);
-
-        if (empty($updatable)) {
-            return back()->with('error', 'No matched rows with WAYBILL found from the last upload.');
+        $runId = (string) ($request->input('run') ?: session('jnt_checker_run'));
+        if ($runId === '' || !JntCheckerRuns::isValidId($runId)) {
+            return back()->with('error', self::NOTHING_TO_UPDATE);
         }
 
-        // Group MacroOutput IDs by WAYBILL para isang update per waybill
-        $groups = [];
-        foreach ($updatable as $u) {
-            if (!isset($u['id'], $u['waybill'])) continue;
-            $groups[$u['waybill']][] = (int) $u['id'];
+        $state = $this->runs->get($runId);
+        if ($state === null) {
+            return redirect()->route('jnt.checker', ['run' => $runId]);
+        }
+        $this->ensureOwner($state);
+
+        $result = $state['status'] === JntCheckerRuns::STATUS_DONE ? $this->runs->readResult($runId) : null;
+        if ($result === null && $state['status'] === JntCheckerRuns::STATUS_DONE) {
+            return redirect()->route('jnt.checker', ['run' => $runId]); // result file gone: expired message
+        }
+        if (empty($result['updatable'])) {
+            return redirect()->route('jnt.checker', ['run' => $runId])->with('error', self::NOTHING_TO_UPDATE);
         }
 
-        $updated = 0;
-
-        foreach ($groups as $waybill => $ids) {
-            $ids = array_values(array_unique($ids));
-
-            foreach (array_chunk($ids, 200) as $chunk) {
-                $affected = MacroOutput::whereIn('id', $chunk)
-                    ->update(['waybill' => $waybill]);
-
-                $updated += $affected;
-            }
+        // Isang Update lang kada upload: ang pangalawang click o tab ay tumitingin lang sa estado ng una.
+        // Pagkatapos ng bigong Update, puwedeng ulitin: pareho ang isusulat, kaya ligtas.
+        if ($this->runs->claimUpdate($runId)) {
+            RunJntCheckerUpdate::dispatch($runId);
+        } elseif (in_array($this->updateState($runId)['status'] ?? null, [JntCheckerRuns::STATUS_FAILED, JntCheckerRuns::STATUS_ERROR], true)) {
+            $this->runs->resetUpdate($runId);
+            RunJntCheckerUpdate::dispatch($runId);
         }
 
-        return back()->with('success', "WAYBILL updated for {$updated} row(s).");
+        return redirect()->route('jnt.checker', ['run' => $runId]);
     }
 
-    // ============================================================
-    // Excel parsing (supports Order Status filter != "Cancel Order")
-    // ============================================================
-    private function parseExcelFileToResults(string $path, array $senderToPage, string $fileLabel): array
+    private function ensureOwner(array $state): void
     {
-        try {
-            $spreadsheet = IOFactory::load($path);
-            $sheet = $spreadsheet->getActiveSheet();
-            $data = $sheet->toArray(null, true, true, true);
-        } catch (\Throwable $e) {
-            Log::error('❌ Excel load error: ' . $e->getMessage(), ['file' => $fileLabel]);
-            return ['error' => 'Failed to read Excel file.', 'results' => [], 'skippedCancelCount' => 0];
+        if ((int) ($state['user_id'] ?? 0) !== (int) auth()->id()) {
+            abort(404);
         }
-
-        $data = array_values($data);
-        if (empty($data) || !isset($data[0])) {
-            return ['error' => 'Excel file has no header row.', 'results' => [], 'skippedCancelCount' => 0];
-        }
-
-        // header map
-        $headers = $data[0];
-        $headerMap = [];
-        foreach ($headers as $col => $value) {
-            $normalized = strtolower(trim(preg_replace('/\s+/', ' ', (string)($value ?? ''))));
-            if ($normalized !== '') $headerMap[$normalized] = $col;
-        }
-
-        // required columns
-        $senderCol = $this->resolveHeader($headerMap, ['sender name', 'sender', 'shipper']);
-        $receiverCol = $this->resolveHeader($headerMap, [
-            'receiver cellphone', 'receiver phone', 'receiver mobile',
-            'consignee phone', 'consignee cellphone', 'phone number', 'contact number',
-        ]);
-        $itemCol = $this->resolveHeader($headerMap, ['item name', 'item', 'product name', 'product']);
-        $codCol = $this->resolveHeader($headerMap, ['cod', 'cod amt', 'cod amount', 'cod value']);
-
-        // order status (required dahil gusto mo i-filter)
-        $statusCol = $this->resolveHeader($headerMap, ['order status', 'status', 'orderstatus', 'order_status']);
-
-        $missing = [];
-        if (!$senderCol)   $missing[] = 'Sender Name';
-        if (!$receiverCol) $missing[] = 'Receiver Cellphone';
-        if (!$itemCol)     $missing[] = 'Item Name';
-        if (!$codCol)      $missing[] = 'COD';
-        if (!$statusCol)   $missing[] = 'Order Status';
-
-        if (count($missing)) {
-            return ['error' => 'Missing column(s): ' . implode(', ', $missing), 'results' => [], 'skippedCancelCount' => 0];
-        }
-
-        // optional waybill
-        $waybillCol = $this->resolveHeader($headerMap, [
-            'waybill', 'waybill no', 'waybill number',
-            'tracking no', 'tracking number', 'tracking',
-            'airwaybill', 'awb', 'awb no', 'awb number',
-        ]);
-
-        // optional shipping fee
-        $shippingFeeCol = $this->resolveHeader($headerMap, [
-            'total shipping cost', 'shipping cost', 'total freight',
-            'shipping fee', 'freight', 'freight cost', 'sf',
-            'delivery fee', 'delivery cost',
-        ]);
-
-        // optional RECEIVER NAME — para sa tie-breaker kapag may duplicate na
-        // page+phone+item+cod (hal. maraming order na iisang fixed phone).
-        $receiverNameCol = $this->resolveHeader($headerMap, [
-            'receiver name', 'consignee name', 'recipient name', 'customer name',
-            'receiver', 'consignee', 'recipient',
-        ]);
-
-        $rows = array_slice($data, 1);
-
-        $results = [];
-        $skippedCancelCount = 0;
-
-        foreach ($rows as $row) {
-            $status = strtolower($this->normText($row[$statusCol] ?? ''));
-            // Filter: skip Cancel Order (kahit may trailing spaces / different casing)
-            if ($status === 'cancel order') {
-                $skippedCancelCount++;
-                continue;
-            }
-
-            $sender   = $this->normText($row[$senderCol] ?? '');
-            $receiver = $this->normPhone($row[$receiverCol] ?? '');
-            $item     = $this->normText($row[$itemCol] ?? '');
-            $cod      = $this->normCod($row[$codCol] ?? '0');
-            $waybill  = $waybillCol ? $this->normText($row[$waybillCol] ?? '') : '';
-
-            // Parse shipping fee (optional)
-            $shippingFee = null;
-            if ($shippingFeeCol) {
-                $rawSF = $row[$shippingFeeCol] ?? '';
-                $rawSF = preg_replace('/[^0-9.]/', '', (string) $rawSF);
-                if ($rawSF !== '' && $rawSF !== '.') {
-                    $shippingFee = number_format((float) $rawSF, 2, '.', '');
-                }
-            }
-
-            $mappedPage = $senderToPage[strtolower($sender)] ?? '';
-            $key = $mappedPage ? $this->makeKey($mappedPage, $receiver, $item, $cod) : null;
-
-            $results[] = [
-                'source_file'  => $fileLabel,
-                'order_status' => $this->normText($row[$statusCol] ?? ''),
-
-                'sender'       => $sender,
-                'page'         => $mappedPage ?: '❌ Not Found in Mapping',
-                'receiver'     => $receiver,
-                'item'         => $item,
-                'cod'          => $cod, // "299.00"
-                'waybill'      => $waybill,
-                'shipping_fee' => $shippingFee,
-
-                'matched'      => false,
-                'matched_id'   => null,
-                'key'          => $key, // temp
-                // Receiver NAME (display) + normalized temp copy para sa duplicate tie-breaker
-                'receiver_name'      => $receiverNameCol ? $this->normText($row[$receiverNameCol] ?? '') : '',
-                'receiver_name_norm' => $receiverNameCol ? strtolower($this->normText($row[$receiverNameCol] ?? '')) : '',
-                'macro_full_name'    => null, // FULL NAME ng na-match na macro row (display)
-            ];
-        }
-
-        return ['error' => null, 'results' => $results, 'skippedCancelCount' => $skippedCancelCount];
     }
 
-    // ============================================================
-    // ZIP helpers
-    // ============================================================
-    private function findExcelFilesRecursive(string $dir): array
+    /** Hindi iiwang umiikot: ang "running" na lampas sa timeout ng job ay ipinapakitang bigo. */
+    private function withStaleCheck(array $state): array
     {
-        $out = [];
-        $it = new \RecursiveIteratorIterator(
-            new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS)
-        );
-
-        foreach ($it as $file) {
-            /** @var \SplFileInfo $file */
-            if (!$file->isFile()) continue;
-            $ext = strtolower($file->getExtension());
-            if (in_array($ext, ['xlsx', 'xls'], true)) {
-                $out[] = $file->getPathname();
-            }
+        if ($state['status'] === JntCheckerRuns::STATUS_RUNNING
+            && now()->timestamp - (int) ($state['started_at'] ?? $state['created_at']) > JntCheckerRuns::RUNNING_STALE_SECONDS) {
+            $state['status'] = JntCheckerRuns::STATUS_FAILED;
+            $state['error'] = 'The check stopped: it took longer than 10 minutes.';
         }
 
-        return $out;
+        return $state;
     }
 
-    private function rrmdir(string $dir): void
+    private function publicState(array $state): array
     {
-        if (!is_dir($dir)) return;
-        $it = new \RecursiveIteratorIterator(
-            new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS),
-            \RecursiveIteratorIterator::CHILD_FIRST
-        );
+        return [
+            'id'             => $state['id'],
+            'status'         => $state['status'],
+            'error'          => $state['error'] ?? null,
+            'waited_seconds' => max(0, now()->timestamp - (int) $state['created_at']),
+        ];
+    }
 
-        foreach ($it as $file) {
-            /** @var \SplFileInfo $file */
-            if ($file->isDir()) @rmdir($file->getPathname());
-            else @unlink($file->getPathname());
+    private function updateState(string $runId): ?array
+    {
+        $u = $this->runs->getUpdate($runId);
+        if ($u === null) return null;
+
+        if ($u['status'] === JntCheckerRuns::STATUS_RUNNING
+            && now()->timestamp - (int) ($u['started_at'] ?? $u['created_at']) > JntCheckerRuns::RUNNING_STALE_SECONDS) {
+            $u['status'] = JntCheckerRuns::STATUS_FAILED;
+            $u['error'] = 'The update stopped: it took longer than 10 minutes.';
         }
 
-        @rmdir($dir);
-    }
-
-    // ============================================================
-    // Helpers
-    // ============================================================
-    private function resolveHeader(array $headerMap, array $aliases): ?string
-    {
-        foreach ($aliases as $a) {
-            $k = strtolower(trim(preg_replace('/\s+/', ' ', $a)));
-            if (isset($headerMap[$k])) return $headerMap[$k];
-        }
-        return null;
-    }
-
-    private function normText($v): string
-    {
-        $v = (string) $v;
-        $v = str_replace('Ã±', 'ñ', $v);
-        $v = trim(preg_replace('/\s+/', ' ', $v));
-        return $v;
-    }
-
-    private function normPhone($v): string
-    {
-        $p = preg_replace('/\D+/', '', (string) $v);
-
-        // 63xxxxxxxxxx -> 0xxxxxxxxxx
-        if (str_starts_with($p, '63') && strlen($p) === 12) $p = '0' . substr($p, 2);
-        // 9xxxxxxxxx -> 09xxxxxxxxx
-        if (strlen($p) === 10 && str_starts_with($p, '9')) $p = '0' . $p;
-
-        return $p;
-    }
-
-    private function normCod($v): string
-    {
-        $raw = preg_replace('/[^0-9.]/', '', (string) $v);
-        if ($raw === '' || $raw === '.') return '0.00';
-        return number_format((float) $raw, 2, '.', '');
-    }
-
-    private function makeKey($page, $phone, $item, $cod): string
-    {
-        return strtolower($this->normText($page)) . '|' .
-            $this->normPhone($phone) . '|' .
-            strtolower($this->normText($item)) . '|' .
-            $this->normCod($cod);
+        return [
+            'status'         => $u['status'],
+            'count'          => $u['count'],
+            'error'          => $u['error'],
+            'waited_seconds' => max(0, now()->timestamp - (int) $u['created_at']),
+        ];
     }
 }
