@@ -58,7 +58,7 @@ New `tests/Feature/Chatblast/SweepFastTest.php` (SW-1 selection rules and the My
 
 ## What shipped
 
-Commits on `fix/290-chatbot-sweeps-fast` after the docs: f0f9e87e (queries, limit, BotHealth, tests) and 4300432d (an index is named only where the database has it).
+Commits on `fix/290-chatbot-sweeps-fast` after the docs: f0f9e87e (queries, limit, BotHealth, tests), 4300432d (an index is named only where the database has it) and 29466e39 (config test update).
 
 - **`SweepLimit`** (new, app/Services/Chatbot/SweepLimit.php, with `SweepTimedOut`): one time budget per sweep, `queue.pools.sweep_ms` (env `CHATBOT_SWEEP_MS`, default 10000, clamped to 100..60000, config/queue.php). `cap()` puts `/*+ MAX_EXECUTION_TIME(<ms left>) */` right after `select` on MySQL only, and stops the sweep before a SELECT once the budget is used. `run()` turns a timeout (MySQL 3024, MariaDB 1969, or the budget used up) into one `Log::warning` line ("<sweep> stopped at its 10000 ms limit; the next sweep tries again"); any other error is thrown as before. `useIndex()` names an index only if `Schema::hasIndex` finds it (checked once per process), so a database without that index never gets a MySQL "Key doesn't exist" error on every claim.
 - **`ChatbotAiQueue`**: `claim()` reads through `(status, next_at)`. `sweep()` runs inside the limit; late / encode-late / redispatch read through `(status, next_at)`; the three prunes are "SELECT ids on an index (capped), DELETE by id with the same rule"; the text clearing reads one-hour `created_at` slices from a cache mark (`chatbot-ai-sweep:texts-from`), 5000 per sweep as before.
@@ -117,7 +117,7 @@ Migrations: none, so no run time to estimate.
 Yes; see Investigation, first section (TicketPool.php:126-152, :135 claim, :140-148 inline sweep, :22 and :66-71 heartbeat window, ChatbotAiQueue.php:29-33, ChatbotAiQueue.php:106-120 with ChatbotRunner.php:43, ResumeSkippedChatbotWaits.php:29, routes/console.php:90-92).
 
 ### 4. Pushed, evidence, merge danger
-PUSH_PLACEHOLDER
+Pushed: `origin/fix/290-chatbot-sweeps-fast` (code at 29466e39; this result commit follows it). Evidence is above; Merge danger is below.
 
 ## Story changes
 - `SendQueueSweepIndexTest::test_S1_the_redispatch_query_of_the_sweep_reads_the_kind_status_updated_at_index` (spec 251): the redispatch is now one query per status, so it expects 2 queries instead of 1, each `USING INDEX botcake_send_requests_kind_status_updated_at_idx (kind=? AND status=? AND updated_at<?)` and now also without a temp B-tree (no sort).
