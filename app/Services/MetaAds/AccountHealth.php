@@ -111,8 +111,8 @@ class AccountHealth
         $unread = []; // account id => why it was not read through that connection
         $now    = now()->toIso8601String();
 
-        foreach ($this->connections->all() as $userId => $c) {
-            $who   = (string) ($c['fb_user_name'] ?? ('user ' . $userId));
+        foreach ($this->connections->all() as $c) {
+            $who   = (string) ($c['fb_user_name'] ?? ('user ' . $c['user_id']));
             $ids   = array_values(array_filter(array_map(fn ($a) => (string) ($a['id'] ?? ''), $c['ad_accounts'] ?? [])));
             $token = $this->connections->token($c);
             if (($c['status'] ?? 'ok') === 'expired' || $token === null) {
@@ -124,7 +124,7 @@ class AccountHealth
                 [$list, $refused] = $this->fetch($token);
             } catch (GraphException $e) {
                 if ($e->tokenExpired()) {
-                    $this->connections->update($userId, ['status' => 'expired', 'last_error' => $e->getMessage()]);
+                    $this->connections->update($c['ref'], ['status' => 'expired', 'last_error' => $e->getMessage()]);
                     foreach ($ids as $id) $unread[$id][] = "Token expired: {$who} (Reconnect)";
                 } else {
                     $errors[] = "{$who}: " . $e->getMessage();
@@ -132,7 +132,7 @@ class AccountHealth
                 }
                 continue;
             } catch (Throwable $e) {
-                Log::error('MetaAds account health: read failed', ['user' => $userId, 'error' => Graph::clean($e->getMessage())]);
+                Log::error('MetaAds account health: read failed', ['user' => $c['user_id'], 'error' => Graph::clean($e->getMessage())]);
                 $errors[] = "{$who}: read failed";
                 foreach ($ids as $id) $unread[$id][] = "Not read through {$who}: read failed";
                 continue;

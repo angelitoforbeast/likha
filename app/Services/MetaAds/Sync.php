@@ -193,8 +193,8 @@ class Sync
         $noPage   = []; // "ad <id> (page <id>)" ng mga row na nilaktawan dahil walang page_name
         $refused  = []; // ang mga row na tinanggihan dahil may numerong bumaba (DataHealth)
 
-        foreach ($all as $userId => $c) {
-            $who   = (string) ($c['fb_user_name'] ?? ('user ' . $userId));
+        foreach ($all as $c) {
+            $who   = (string) ($c['fb_user_name'] ?? ('user ' . $c['user_id']));
             $token = $this->connections->token($c);
             if (($c['status'] ?? 'ok') === 'expired' || $token === null) {
                 $problems[] = "{$who}: needs Reconnect";
@@ -219,7 +219,7 @@ class Sync
                     $synced = true;
                 } catch (GraphException $e) {
                     if ($e->tokenExpired()) {
-                        $this->connections->update($userId, ['status' => 'expired', 'last_error' => $e->getMessage()]);
+                        $this->connections->update($c['ref'], ['status' => 'expired', 'last_error' => $e->getMessage()]);
                         $problems[] = "{$who}: token expired (Reconnect)";
                         break;
                     }
@@ -229,7 +229,7 @@ class Sync
                     $problems[] = "act_{$accId}: failed";
                 }
             }
-            if ($synced) $this->connections->update($userId, ['last_sync_at' => now()->toIso8601String()]);
+            if ($synced) $this->connections->update($c['ref'], ['last_sync_at' => now()->toIso8601String()]);
         }
 
         $log->update([

@@ -46,7 +46,7 @@ class MetaAdsConnectTest extends MetaAdsTestCase
         $this->assertEqualsWithDelta(now()->addDays(60)->timestamp, $c['expires_at'], 5);
         $this->assertSame(self::TOKEN_ANA, app(Connections::class)->token($c));
 
-        $raw = (string) DB::table('app_settings')->where('key', 'meta_ads.connection.' . $user->id)->value('value');
+        $raw = (string) DB::table('app_settings')->where('key', 'meta_ads.connection.' . $user->id . '.fb-ana')->value('value');
         $this->assertStringNotContainsString(self::TOKEN_ANA, $raw);
         $this->assertSame(self::TOKEN_ANA, Crypt::decryptString(json_decode($raw, true)['token']));
         $this->assertSame('connect', DB::table('upload_logs')->where('type', 'ads_manager_api_event')->value('original_name'));

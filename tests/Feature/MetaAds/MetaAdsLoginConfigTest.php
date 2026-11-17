@@ -116,7 +116,7 @@ class MetaAdsLoginConfigTest extends MetaAdsTestCase
         $this->assertSame($token, collect($this->graphRequests)->firstWhere('path', 'debug_token')['query']['input_token']);
 
         // S-159.4: ang token ay wala sa log, sa sagot, sa page, sa upload_logs at sa hindi naka-encrypt na bahagi ng row.
-        $raw = json_decode((string) DB::table('app_settings')->where('key', 'meta_ads.connection.' . $user->id)->value('value'), true);
+        $raw = json_decode((string) DB::table('app_settings')->where('key', 'meta_ads.connection.' . $user->id . '.fb-ana')->value('value'), true);
         unset($raw['token']);
         foreach ([$res->getContent(), $page->getContent(), implode("\n", $logged), json_encode(DB::table('upload_logs')->get()), json_encode($raw)] as $out) {
             $this->assertStringNotContainsString($token, $out);

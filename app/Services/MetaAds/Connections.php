@@ -9,8 +9,12 @@ use Illuminate\Support\Facades\Schema;
 use Throwable;
 
 /**
- * Ang Facebook na naka-connect sa bawat Likha user (Meta Ads). Isang app_settings row kada tao,
- * key = meta_ads.connection.<user id>, value = JSON: token (naka-encrypt), fb_user_id, fb_user_name, expires_at (unix),
+ * Ang mga Facebook na naka-connect sa bawat Likha user (Meta Ads). Isang app_settings row kada Facebook account ng tao,
+ * key = meta_ads.connection.<user id>.<fb_user_id>, kasi iisang Likha login ang gamit ng staff sa ilang Facebook account (ibang
+ * browser profile bawat isa). Ang lumang key na meta_ads.connection.<user id> (bago ang 287, o kapag walang fb_user_id) ay
+ * binabasa pa rin bilang connection ng user na iyon, para walang kailangang mag-Connect ulit. Ang bahagi ng key pagkatapos ng
+ * PREFIX ang "ref" ng connection; doon dumadaan ang update at disconnect para isang row lang ang tinatamaan.
+ * Value = JSON: token (naka-encrypt), fb_user_id, fb_user_name, expires_at (unix),
  * ad_accounts [{id, name, status}], status (ok | expired), connected_at, last_sync_at, last_error.
  * Hindi page_settings: ang /page-settings grid ay naglilista ng bawat provider, kaya doon lalabas ang token row.
  * Ang Disconnect ay binubura ang row, kaya wala nang kopya ng token.
@@ -108,41 +112,87 @@ class Connections
     {
         $data = array_merge(['status' => 'ok', 'connected_at' => now()->toIso8601String(), 'last_sync_at' => null, 'last_error' => null], $data);
         $data['token'] = Crypt::encryptString($token);
-        DB::table('app_settings')->updateOrInsert(['key' => self::PREFIX . $userId], ['value' => json_encode($data), 'updated_at' => now(), 'created_at' => now()]);
+        $key    = self::key($userId, $data['fb_user_id'] ?? null);
+        $legacy = self::PREFIX . $userId;
 
-        return $this->strip($data);
+        DB::transaction(function () use ($key, $legacy, $userId, $data) {
+            DB::table('app_settings')->updateOrInsert(['key' => $key], ['value' => json_encode($data), 'updated_at' => now(), 'created_at' => now()]);
+            if ($key === $legacy) return;
+            // Ang lumang row ng parehong account (o walang fb_user_id, kaya hindi matukoy at dati ay pinapalitan ng anumang
+            // Connect) ay napalitan na ng bagong row: binubura para walang kambal at walang lumang kopya ng token.
+            $old = $this->raw((string) $userId);
+            if ($old !== null && in_array((string) ($old['fb_user_id'] ?? ''), ['', (string) $data['fb_user_id']], true)) {
+                DB::table('app_settings')->where('key', $legacy)->delete();
+            }
+        });
+
+        return $this->strip($data + ['user_id' => $userId, 'ref' => substr($key, strlen(self::PREFIX))]);
     }
 
-    public function update(int $userId, array $patch): void
+    /**
+     * Ang key: kada Facebook account ng user, kaya ang parehong account ulit ay pinapalitan ang sariling row (walang doble).
+     * Ang walang fb_user_id ay sa lumang key (isa kada user), gaya ng dati.
+     */
+    public static function key(int $userId, ?string $fbUserId): string
     {
-        $raw = $this->raw($userId);
+        $fb = preg_replace('/[^A-Za-z0-9_-]/', '', (string) $fbUserId);
+
+        return self::PREFIX . $userId . ($fb !== '' ? '.' . $fb : '');
+    }
+
+    /** $ref = ang ref ng connection (ang 'ref' sa all()); ang user id lang ay ang lumang key. */
+    public function update(int|string $ref, array $patch): void
+    {
+        $raw = $this->raw((string) $ref);
         if ($raw === null) return;
-        DB::table('app_settings')->where('key', self::PREFIX . $userId)->update(['value' => json_encode(array_merge($raw, $patch)), 'updated_at' => now()]);
+        DB::table('app_settings')->where('key', self::PREFIX . $ref)->update(['value' => json_encode(array_merge($raw, $patch)), 'updated_at' => now()]);
     }
 
-    public function disconnect(int $userId): void
+    /** Isang connection lang (ang ref nito) ang binubura; ang ibang Facebook ng parehong user ay naiiwan. */
+    public function disconnect(int|string $ref): void
     {
-        DB::table('app_settings')->where('key', self::PREFIX . $userId)->delete();
+        DB::table('app_settings')->where('key', self::PREFIX . $ref)->delete();
     }
 
-    /** Ang connection (may naka-encrypt na token pa rin, para sa token()), o null. */
+    /** Isang connection ayon sa ref (may naka-encrypt na token pa rin), o null. */
+    public function find(int|string $ref): ?array
+    {
+        $ref  = (string) $ref;
+        $user = self::userOf($ref);
+        $raw  = $user === null ? null : $this->raw($ref);
+
+        return $raw === null ? null : $raw + ['user_id' => $user, 'ref' => $ref];
+    }
+
+    /** Ang pinakabagong connection ng user (may naka-encrypt na token pa rin, para sa token()), o null. */
     public function get(int $userId): ?array
     {
-        $raw = $this->raw($userId);
+        $mine = $this->of($userId);
 
-        return $raw === null ? null : $raw + ['user_id' => $userId];
+        return $mine ? end($mine) : null;
     }
 
-    /** @return array<int, array> user id => connection, ayon sa user id */
+    /** @return array<string, array> ref => connection ng user, ayon sa pagkakagawa ng row */
+    public function of(int $userId): array
+    {
+        return array_filter($this->all(), fn ($c) => $c['user_id'] === $userId);
+    }
+
+    /**
+     * Lahat ng connection ng lahat ng user: ref => connection (may user_id at ref), ayon sa user id saka sa row, kaya ang
+     * unang nakakabasa ng isang ad account ay gaya ng dati (ang pinakamababang user id).
+     * @return array<string, array>
+     */
     public function all(): array
     {
         $out = [];
         foreach (DB::table('app_settings')->where('key', 'like', self::PREFIX . '%')->orderBy('id')->get(['key', 'value']) as $r) {
-            $id   = (int) substr($r->key, strlen(self::PREFIX));
+            $ref  = substr($r->key, strlen(self::PREFIX));
+            $id   = self::userOf($ref);
             $data = json_decode((string) $r->value, true);
-            if ($id > 0 && is_array($data)) $out[$id] = $data + ['user_id' => $id];
+            if ($id !== null && is_array($data)) $out[$ref] = $data + ['user_id' => $id, 'ref' => $ref];
         }
-        ksort($out);
+        uasort($out, fn ($a, $b) => $a['user_id'] <=> $b['user_id']);
 
         return $out;
     }
@@ -155,8 +205,8 @@ class Connections
     public function accounts(?array $all = null): array
     {
         $out = [];
-        foreach ($all ?? $this->all() as $userId => $c) {
-            $who = (string) ($c['fb_user_name'] ?? ('user ' . $userId));
+        foreach ($all ?? $this->all() as $c) {
+            $who = (string) ($c['fb_user_name'] ?? ('user ' . $c['user_id']));
             foreach ($c['ad_accounts'] ?? [] as $acc) {
                 $id = (string) ($acc['id'] ?? '');
                 if ($id === '') continue;
@@ -237,9 +287,15 @@ class Connections
         ]);
     }
 
-    private function raw(int $userId): ?array
+    /** Ang user id sa ref ("12" o "12.<fb_user_id>"), o null kapag hindi ref ng connection. */
+    private static function userOf(string $ref): ?int
     {
-        $v = DB::table('app_settings')->where('key', self::PREFIX . $userId)->value('value');
+        return preg_match('/^([1-9]\d*)(?:\.[A-Za-z0-9_-]+)?$/D', $ref, $m) ? (int) $m[1] : null;
+    }
+
+    private function raw(string $ref): ?array
+    {
+        $v = DB::table('app_settings')->where('key', self::PREFIX . $ref)->value('value');
         $d = $v === null ? null : json_decode((string) $v, true);
 
         return is_array($d) ? $d : null;

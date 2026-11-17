@@ -58,14 +58,15 @@ class MetaAdsController extends Controller
 
         $people = [];
         $all = $connections->all();
-        $names = $all ? \App\Models\User::whereIn('id', array_keys($all))->pluck('name', 'id') : collect();
+        $names = $all ? \App\Models\User::whereIn('id', array_unique(array_column($all, 'user_id')))->pluck('name', 'id') : collect();
         $shown = array_column($connections->accounts($all), 'name', 'id');
-        foreach ($all as $userId => $c) {
+        // One row per Facebook connection, so a user with several accounts sees each one's status and Disconnect.
+        foreach ($all as $c) {
             foreach ($c['ad_accounts'] ?? [] as $i => $acc) $c['ad_accounts'][$i]['name'] = $shown[(string) ($acc['id'] ?? '')] ?? ($acc['name'] ?? '');
             $people[] = $connections->strip($c) + [
-                'likha_name' => $names[$userId] ?? ('user ' . $userId),
+                'likha_name' => $names[$c['user_id']] ?? ('user ' . $c['user_id']),
                 'reconnect'  => $connections->needsReconnect($c),
-                'mine'       => $userId === (int) Auth::id(),
+                'mine'       => $c['user_id'] === (int) Auth::id(),
             ];
         }
 
@@ -176,18 +177,40 @@ class MetaAdsController extends Controller
             Log::warning('MetaAds: connect failed', ['user' => Auth::id(), 'error' => $e->getMessage()]);
             return $this->back()->withErrors(['meta' => 'Facebook connect failed: ' . $e->getMessage()]);
         }
-        Connections::event('connect', Auth::id());
+        Connections::event('connect', Auth::id(), self::who($c));
 
         return $this->back()->with('status', '✅ Facebook connected: ' . $c['fb_user_name'] . ' (' . count($c['ad_accounts']) . ' ad account(s))');
     }
 
-    public function disconnect()
+    /**
+     * Removes one of the signed-in user's own Facebook connections (ref). Without a ref (a page opened before connections
+     * were per Facebook account) it removes the only one, and refuses when there are several so the wrong one is not dropped.
+     */
+    public function disconnect(Request $request)
     {
         $this->checkAccess();
-        $this->connections->disconnect((int) Auth::id());
-        Connections::event('disconnect', Auth::id());
+        $ref = trim((string) $request->input('ref', ''));
+        if ($ref === '') {
+            $mine = $this->connections->of((int) Auth::id());
+            if (count($mine) > 1) return $this->back()->withErrors(['meta' => 'You have several Facebook connections: use the Disconnect on the row you want to remove.']);
+            if (!$mine) return $this->back()->with('status', 'No Facebook connection to disconnect.');
+            $c = reset($mine);
+        } else {
+            $c = $this->connections->find($ref);
+        }
+        // Only your own connection, as before: another user's ref is treated as not found.
+        if ($c === null || $c['user_id'] !== (int) Auth::id()) abort(404);
 
-        return $this->back()->with('status', 'Facebook disconnected.');
+        $this->connections->disconnect($c['ref']);
+        Connections::event('disconnect', Auth::id(), self::who($c));
+
+        return $this->back()->with('status', 'Facebook disconnected: ' . ($c['fb_user_name'] ?? '') . '.');
+    }
+
+    /** Which Facebook account a connect or disconnect was about, for the audit line (never the token). */
+    private static function who(array $c): array
+    {
+        return ['fb_user_id' => (string) ($c['fb_user_id'] ?? ''), 'fb_user_name' => (string) ($c['fb_user_name'] ?? '')];
     }
 
     public function compare(Request $request)

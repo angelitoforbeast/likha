@@ -27,8 +27,8 @@ class Compare
         $all      = $this->connections->all();
         $selected = array_flip(Sync::accounts(Sync::current($all)));
         $names    = array_column($this->connections->accounts($all), 'name', 'id');
-        foreach ($all as $userId => $c) {
-            $who   = (string) ($c['fb_user_name'] ?? ('user ' . $userId));
+        foreach ($all as $c) {
+            $who   = (string) ($c['fb_user_name'] ?? ('user ' . $c['user_id']));
             $token = $this->connections->token($c);
             if (($c['status'] ?? 'ok') === 'expired' || $token === null) {
                 $problems[] = "{$who}: needs Reconnect";
@@ -41,7 +41,7 @@ class Compare
                     $accounts[$id] = $this->account($id, (string) ($names[$id] ?? $id), $who, $this->insights->rows($id, $from, $to, $token, false), $from, $to);
                 } catch (GraphException $e) {
                     if ($e->tokenExpired()) {
-                        $this->connections->update($userId, ['status' => 'expired', 'last_error' => $e->getMessage()]);
+                        $this->connections->update($c['ref'], ['status' => 'expired', 'last_error' => $e->getMessage()]);
                         $problems[] = "{$who}: token expired (Reconnect)";
                         break;
                     }

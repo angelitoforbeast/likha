@@ -16,14 +16,12 @@
   @if (!$meta['set_up'])
     <p class="text-sm text-gray-600">Meta app not set up yet. Kapag naka-set na ang app, dito magko-connect ng Facebook.@if ($meta['app']) Ilagay ang Meta app sa ibaba.@endif</p>
   @else
-    <div class="flex gap-2 flex-wrap">
+    {{-- Connect stays available: each Facebook account is added from its own browser profile with the same Likha login.
+         Disconnect is on each of your own rows in the table below. --}}
+    <div class="flex gap-2 flex-wrap items-center">
+      <a href="{{ route('ads_manager.meta.connect') }}" id="meta-connect" class="bg-blue-600 hover:bg-blue-700 text-white text-sm px-3 py-1.5 rounded">{{ $meta['mine'] ? 'Connect another Facebook' : 'Connect Facebook' }}</a>
       @if ($meta['mine'])
-        <form method="POST" action="{{ route('ads_manager.meta.disconnect') }}" onsubmit="return confirm('Disconnect your Facebook?');">
-          @csrf
-          <button class="bg-gray-200 hover:bg-gray-300 text-gray-800 text-sm px-3 py-1.5 rounded">Disconnect my Facebook</button>
-        </form>
-      @else
-        <a href="{{ route('ads_manager.meta.connect') }}" class="bg-blue-600 hover:bg-blue-700 text-white text-sm px-3 py-1.5 rounded">Connect Facebook</a>
+        <span class="text-xs text-gray-500">Connects the Facebook account signed in on this browser. The same account again refreshes its row.</span>
       @endif
     </div>
   @endif
@@ -123,7 +121,7 @@
       </thead>
       <tbody>
         @forelse ($meta['people'] as $p)
-          <tr class="border-t align-top">
+          <tr class="border-t align-top" data-connection="{{ $p['ref'] }}">
             <td class="p-2">{{ $p['likha_name'] }}<div class="text-xs text-gray-500">Facebook: {{ $p['fb_user_name'] ?? '—' }}</div></td>
             <td class="p-2 text-xs">
               @foreach ($p['ad_accounts'] ?? [] as $a)
@@ -140,8 +138,18 @@
                   <span class="bg-red-100 text-red-800 text-xs px-2 py-1 rounded">Reconnect</span>
                 @endif
                 <div class="text-xs text-red-700 mt-1">{{ ($p['status'] ?? 'ok') === 'expired' ? 'Token expired' : 'Expires within 7 days' }}</div>
+                @if ($p['mine'] && $meta['set_up'])
+                  <div class="text-xs text-gray-500 mt-1">Reconnect from the browser signed in as {{ $p['fb_user_name'] ?? 'this Facebook account' }}.</div>
+                @endif
               @else
                 <span class="text-xs text-green-700">OK</span>
+              @endif
+              @if ($p['mine'])
+                <form method="POST" action="{{ route('ads_manager.meta.disconnect') }}" class="mt-1" onsubmit="return confirm(@js('Disconnect ' . ($p['fb_user_name'] ?? 'this Facebook') . '?'));">
+                  @csrf
+                  <input type="hidden" name="ref" value="{{ $p['ref'] }}">
+                  <button class="bg-gray-200 hover:bg-gray-300 text-gray-800 text-xs px-2 py-1 rounded">Disconnect</button>
+                </form>
               @endif
             </td>
           </tr>
