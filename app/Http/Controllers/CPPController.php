@@ -20,6 +20,10 @@ class CPPController extends Controller
      */
     public const BUCKETS = ['10AM', '3PM', '7PM', '11:59PM'];
 
+    /** Hourly totals view (spec 291): the longest range, and how old today's hourly spend may be before it is flagged. */
+    public const TOTALS_MAX_DAYS = 31;
+    public const TOTALS_STALE_HOURS = 2;
+
     /**
      * Allow CEO, Marketing - OIC, and Marketing only. Other roles → 404.
      * Used by snapshot + timeline endpoints (sensitive financial data).
@@ -970,135 +974,87 @@ class CPPController extends Controller
      * 15:00 means the same as the 3PM bucket. Each cell also carries what that hour added.
      * Spend, CPI and CPM: cpp_snapshots H00..H23 (meta-ads:hourly, from Meta's hourly breakdown). Orders: macro_output
      * by order time, live, for pages with ad spend that day (as the bucket view counts them).
+     * The figures come from HourlyTimeline, shared with the Hourly totals view (spec 291).
      */
     public function timelineHourly(Request $request)
     {
         $this->checkAccess();
 
         $now   = Carbon::now('Asia/Manila');
-        $today = $now->toDateString();
         $date  = (string) $request->query('date', '');
-        if (preg_match('/^\d{4}-\d{2}-\d{2}$/D', $date) !== 1) $date = $today;
-        $last  = $date === $today ? (int) $now->format('G') : ($date > $today ? -1 : 23);
-        $normalize = fn ($s) => strtolower(preg_replace('/\s+/', '', (string) $s));
-
-        // Spend per page and hour (cumulative), from the hourly rows only.
-        $pages = []; // page_key => ['page' => name, 'spend' => [h => row]]
-        $storedAt = null;
-        $hourly = DB::table('cpp_snapshots')->where('snapshot_date', $date)
-            ->whereIn('snapshot_bucket', \App\Services\MetaAds\HourlySpend::buckets())
-            ->get(['snapshot_bucket', 'page_name', 'page_key', 'amount_spent', 'cpi', 'cpm', 'snapshot_at']);
-        foreach ($hourly as $r) {
-            $key = $normalize($r->page_name);
-            $pages[$key]['page'] ??= (string) $r->page_name;
-            $pages[$key]['spend'][(int) substr((string) $r->snapshot_bucket, 1)] = $r;
-            if ($storedAt === null || $r->snapshot_at > $storedAt) $storedAt = (string) $r->snapshot_at;
-        }
-
-        // Pages with ad spend that day (synced report), so a page shows with its orders before its hourly spend is stored.
-        $castMoney = DB::connection()->getDriverName() === 'pgsql'
-            ? "COALESCE(NULLIF(REGEXP_REPLACE(COALESCE((amount_spent_php)::text, ''), '[^0-9\\.\\-]', '', 'g'), '')::numeric, 0)"
-            : "CAST(REPLACE(REPLACE(REPLACE(COALESCE(amount_spent_php,''), '₱',''), ',', ''), ' ', '') AS DECIMAL(18,2))";
-        if (Schema::hasTable('ads_manager_reports')) {
-            $adPages = DB::table('ads_manager_reports')->where('day', $date)
-                ->selectRaw("page_name, SUM($castMoney) AS spent")->groupBy('page_name')->havingRaw("SUM($castMoney) > 0")->pluck('page_name');
-            foreach ($adPages as $p) {
-                $key = $normalize($p);
-                if ($key !== '') $pages[$key]['page'] ??= (string) $p;
-            }
-        }
-
-        // Orders per page and hour, by order time (macro_output.TIMESTAMP 'H:i d-m-Y', Manila wall clock), parsed here
-        // so the same code reads MySQL, Postgres and sqlite.
-        $orders = []; // page_key => [h => n]
-        $pageCol = null;
-        foreach (['PAGE', 'page', 'page_name', 'Page', 'Page_Name'] as $cand) {
-            if (Schema::hasColumn('macro_output', $cand)) { $pageCol = $cand; break; }
-        }
-        if ($pageCol && $pages && Schema::hasColumn('macro_output', 'TIMESTAMP')) {
-            $dmy = Carbon::parse($date)->format('d-m-Y');
-            $rows = DB::table('macro_output')
-                ->when(Schema::hasColumn('macro_output', 'ts_date'),
-                    fn ($q) => $q->where('ts_date', $date),
-                    fn ($q) => $q->where('TIMESTAMP', 'like', '% ' . $dmy))
-                ->get([$pageCol . ' as pg', 'TIMESTAMP as ts']);
-            foreach ($rows as $o) {
-                $key = $normalize($o->pg);
-                if (!isset($pages[$key]) || !preg_match('/^(\d{1,2}):\d{2}\s+(\d{2}-\d{2}-\d{4})$/', trim((string) $o->ts), $m) || $m[2] !== $dmy) continue;
-                $h = (int) $m[1];
-                if ($h <= 23) $orders[$key][$h] = ($orders[$key][$h] ?? 0) + 1;
-            }
-        }
-
-        // Cells. Impressions and messages are recovered from the stored CPI / CPM to add up the Total row.
-        $out = [];
-        $tot = array_fill(0, 24, ['spend' => 0.0, 'impr' => 0.0, 'msgs' => 0.0, 'orders' => 0, 'has_spend' => false]);
-        foreach ($pages as $key => $p) {
-            $cells = [];
-            $prev  = ['spend' => 0.0, 'orders' => 0];
-            $spend = null;
-            $cumOrders = 0;
-            $cpi = $cpm = null;
-            for ($h = 0; $h < 24; $h++) {
-                if ($h > $last) { $cells[] = null; continue; }
-                if (isset($p['spend'][$h])) {
-                    $row = $p['spend'][$h];
-                    $spend = (float) $row->amount_spent;
-                    $cpi = $row->cpi !== null ? (float) $row->cpi : null;
-                    $cpm = $row->cpm !== null ? (float) $row->cpm : null;
-                }
-                $cumOrders += $orders[$key][$h] ?? 0;
-                if ($spend === null && $cumOrders === 0) { $cells[] = null; continue; }
-                $cells[] = [
-                    'spend'      => $spend,
-                    'orders'     => $cumOrders,
-                    'cpp'        => $spend !== null && $cumOrders > 0 ? round($spend / $cumOrders, 2) : null,
-                    'cpi'        => $cpi,
-                    'cpm'        => $cpm,
-                    'add_spend'  => $spend !== null ? round($spend - $prev['spend'], 2) : null,
-                    'add_orders' => $cumOrders - $prev['orders'],
-                    'source'     => $spend !== null ? 'meta' : 'orders',
-                ];
-                $prev = ['spend' => (float) ($spend ?? 0), 'orders' => $cumOrders];
-
-                $tot[$h]['orders'] += $cumOrders;
-                if ($spend !== null) {
-                    $tot[$h]['spend'] += $spend;
-                    $tot[$h]['has_spend'] = true;
-                    if ($cpi) $tot[$h]['impr'] += $spend * 1000 / $cpi;
-                    if ($cpm) $tot[$h]['msgs'] += $spend / $cpm;
-                }
-            }
-            if (array_filter($cells)) $out[] = ['page' => $p['page'], 'cells' => $cells];
-        }
-        usort($out, fn ($a, $b) => strcasecmp($a['page'], $b['page']));
-
-        $total = [];
-        $prev = ['spend' => 0.0, 'orders' => 0];
-        for ($h = 0; $h < 24; $h++) {
-            $t = $tot[$h];
-            if ($h > $last || (!$t['has_spend'] && $t['orders'] === 0)) { $total[] = null; continue; }
-            $spend = $t['has_spend'] ? round($t['spend'], 2) : null;
-            $total[] = [
-                'spend'      => $spend,
-                'orders'     => $t['orders'],
-                'cpp'        => $spend !== null && $t['orders'] > 0 ? round($spend / $t['orders'], 2) : null,
-                'cpi'        => $t['impr'] > 0 ? round($t['spend'] * 1000 / $t['impr'], 2) : null,
-                'cpm'        => $t['msgs'] > 0 ? round($t['spend'] / $t['msgs'], 2) : null,
-                'add_spend'  => $spend !== null ? round($spend - $prev['spend'], 2) : null,
-                'add_orders' => $t['orders'] - $prev['orders'],
-                'source'     => $spend !== null ? 'meta' : 'orders',
-            ];
-            $prev = ['spend' => (float) ($spend ?? 0), 'orders' => $t['orders']];
-        }
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/D', $date) !== 1) $date = $now->toDateString();
+        $day = (new \App\Services\MetaAds\HourlyTimeline($now))->days([$date])[$date];
 
         return response()->json([
             'date'      => $date,
             'hours'     => range(0, 23),
-            'last_hour' => $last,
-            'stored_at' => $storedAt,
-            'pages'     => $out,
-            'total'     => $total,
+            'last_hour' => $day['last_hour'],
+            'stored_at' => $day['stored_at'],
+            'pages'     => $day['pages'],
+            'total'     => $day['total'],
+        ]);
+    }
+
+    /**
+     * GET /ads_manager/cpp/timeline/hourly-totals?start=Y-m-d&end=Y-m-d (spec 291)
+     *
+     * The Hourly totals view: one row per date (newest first, as the bucket grid orders them), 24 cells per row, each
+     * the day's Total cell of the Hourly view for that hour (cumulative from 00:00, all pages with ad spend that day),
+     * from the same code. Same default range as the bucket grid (the 7 days ending today); at most 31 days, a longer
+     * range is clamped to the 31 days ending at `end`. Spend is stored hourly by meta-ads:hourly --scheduled; orders
+     * are live, so the view refreshes itself.
+     */
+    public function timelineHourlyTotals(Request $request)
+    {
+        $this->checkAccess();
+
+        $now   = Carbon::now('Asia/Manila');
+        $today = $now->toDateString();
+        $parsed = [];
+        foreach (['start', 'end'] as $k) {
+            $v = trim((string) $request->query($k, ''));
+            if ($v === '') { $parsed[$k] = null; continue; }
+            $d = preg_match('/^\d{4}-\d{2}-\d{2}$/D', $v) === 1 ? Carbon::createFromFormat('!Y-m-d', $v, 'Asia/Manila') : false;
+            if (!$d || $d->format('Y-m-d') !== $v) {
+                return response()->json(['ok' => false, 'message' => "Invalid $k date: use YYYY-MM-DD."], 422);
+            }
+            $parsed[$k] = $v;
+        }
+        $end   = $parsed['end'] ?? $today;
+        $start = $parsed['start'] ?? Carbon::parse($end)->subDays(6)->toDateString();
+        if ($start > $end) [$start, $end] = [$end, $start];
+        $clamped = (int) abs(Carbon::parse($start)->diffInDays(Carbon::parse($end))) + 1 > self::TOTALS_MAX_DAYS;
+        if ($clamped) $start = Carbon::parse($end)->subDays(self::TOTALS_MAX_DAYS - 1)->toDateString();
+
+        $dates = [];
+        for ($d = Carbon::parse($end); $d->gte(Carbon::parse($start)); $d->subDay()) $dates[] = $d->format('Y-m-d');
+        $days = (new \App\Services\MetaAds\HourlyTimeline($now))->days($dates);
+
+        $rows = [];
+        $storedAt = null;
+        foreach ($days as $d => $day) {
+            $rows[] = ['date' => $d, 'label' => Carbon::parse($d)->format('M j D'), 'last_hour' => $day['last_hour'], 'total' => $day['total']];
+            if ($day['stored_at'] !== null && ($storedAt === null || $day['stored_at'] > $storedAt)) $storedAt = $day['stored_at'];
+        }
+
+        // A blocked or failing hourly sync shows: today's latest stored hour is more than 2 hours old (or nothing is
+        // stored today once 02:00 has passed; the :10 runs store every hour that has spend).
+        $todayIn = $today >= $start && $today <= $end;
+        $todayAt = $todayIn ? ($days[$today]['stored_at'] ?? null) : null;
+        $since   = $todayAt !== null ? Carbon::parse($todayAt, 'Asia/Manila') : $now->copy()->startOfDay();
+        $stale   = $todayIn && $since->lt($now->copy()->subHours(self::TOTALS_STALE_HOURS));
+
+        return response()->json([
+            'start'           => $start,
+            'end'             => $end,
+            'clamped'         => $clamped,
+            'max_days'        => self::TOTALS_MAX_DAYS,
+            'hours'           => range(0, 23),
+            'stored_at'       => $storedAt,
+            'today'           => $todayIn ? $today : null,
+            'today_stored_at' => $todayAt,
+            'stale'           => $stale,
+            'days'            => $rows,
         ]);
     }
 }

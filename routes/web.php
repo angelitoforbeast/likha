@@ -963,6 +963,9 @@ Route::post('/ads_manager/meta/ad-accounts/refresh', [\App\Http\Controllers\Meta
     // Spec 288: CPP per page per hour of one day (the hourly view of the timeline).
     Route::get('/ads_manager/cpp/timeline/hourly', [\App\Http\Controllers\CPPController::class, 'timelineHourly'])
         ->name('ads_manager.cpp.timeline.hourly');
+    // Spec 291: the day's Total of the hourly view per hour, one row per date (the Hourly totals view).
+    Route::get('/ads_manager/cpp/timeline/hourly-totals', [\App\Http\Controllers\CPPController::class, 'timelineHourlyTotals'])
+        ->name('ads_manager.cpp.timeline.hourly_totals');
     Route::get('/ads_manager/cpp/timeline/detail', [\App\Http\Controllers\CPPController::class, 'timelineDetail'])
         ->name('ads_manager.cpp.timeline.detail');
     Route::get(
