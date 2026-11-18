@@ -240,7 +240,7 @@ class ChatMessenger
         $titles = $rows->pluck('title', 'id');
         $people = ChatPeople::lookup($found->pluck('sender_user_id')->all());
 
-        $messages = $found->map(function (ChatMessage $m) use ($me, $people, $titles) {
+        $messages = $found->map(function (ChatMessage $m) use ($me, $people, $titles, $needle) {
             $s = ChatPresenter::sender($m, $me, $people);
 
             return [
