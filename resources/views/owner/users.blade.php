@@ -49,7 +49,11 @@
           👥 Users ({{ count($users) }} total)
           <span style="font-weight:400;color:#94a3b8;margin-left:6px;">— read-only listing · password edit only</span>
         </div>
-        <a href="/owner/private" class="u-btn-ghost">← Back to Page Summary</a>
+        <div style="display:flex;align-items:center;gap:6px;">
+          {{-- Spec 298: dito na gumagawa ng account (CEO at Marketing - OIC). --}}
+          <a href="{{ route('accounts.create') }}" class="u-btn" style="text-decoration:none;" data-new-account>＋ New account</a>
+          <a href="/owner/private" class="u-btn-ghost">← Back to Page Summary</a>
+        </div>
       </div>
 
       <div style="overflow-x:auto;">
@@ -61,6 +65,7 @@
               <th style="min-width:220px;">Email</th>
               <th style="min-width:220px;">Password</th>
               <th style="min-width:160px;">Date Created</th>
+              <th style="min-width:180px;">Created by</th>
             </tr>
           </thead>
           <tbody>
@@ -106,10 +111,14 @@
                 <td style="font-family:ui-monospace,monospace;font-size:11.5px;color:#64748b;">
                   {{ $u->created_at ? \Carbon\Carbon::parse($u->created_at)->format('Y-m-d H:i') : '—' }}
                 </td>
+                {{-- Sino ang gumawa sa /accounts/create (spec 298); "—" sa mga account na nauna roon. --}}
+                <td style="font-size:12px;color:#475569;" data-created-by>
+                  {{ ($u->created_by_name ?? null) ?: (($u->created_by_email ?? null) ?: '—') }}
+                </td>
               </tr>
             @empty
               <tr>
-                <td colspan="5" style="text-align:center;padding:30px;color:#94a3b8;">No users found.</td>
+                <td colspan="6"style="text-align:center;padding:30px;color:#94a3b8;">No users found.</td>
               </tr>
             @endforelse
           </tbody>
@@ -117,7 +126,7 @@
       </div>
 
       <div style="padding:9px 14px;font-size:10.5px;color:#94a3b8;border-top:1px solid #f1f5f9;">
-        ⚠ Plaintext passwords stored sa <code>users.password_plain</code> column. Only populated after a CEO-driven password set via this page.
+        ⚠ Plaintext passwords stored sa <code>users.password_plain</code> column. Only populated after a CEO-driven password set via this page, or when an account is made at /accounts/create.
       </div>
     </div>
 

@@ -38,8 +38,9 @@ class OwnerUsersController extends Controller
         $this->checkAccess();
 
         $hasPlain = Schema::hasColumn('users', 'password_plain');
+        $hasCreator = Schema::hasColumn('users', 'created_by');
 
-        $rows = DB::table('users as u')
+        $query = DB::table('users as u')
             ->leftJoin('employee_profiles as ep', 'ep.user_id', '=', 'u.id')
             ->select([
                 'u.id',
@@ -50,7 +51,22 @@ class OwnerUsersController extends Controller
                 'ep.role',
                 'ep.employment_type',
                 'ep.status as employment_status',
-            ])
+            ]);
+
+        // Sino ang gumawa ng account sa /accounts/create (spec 298): pangalan sa employee_profiles, email kung wala.
+        // Subquery ang pangalan (hindi join) para hindi dumoble ang row kahit may dalawang profile ang gumawa.
+        if ($hasCreator) {
+            $query->leftJoin('users as cu', 'cu.id', '=', 'u.created_by')
+                ->addSelect('cu.email as created_by_email')
+                ->selectSub(
+                    DB::table('employee_profiles')->select('name')->whereColumn('user_id', 'u.created_by')->limit(1),
+                    'created_by_name'
+                );
+        } else {
+            $query->addSelect(DB::raw('NULL as created_by_email'), DB::raw('NULL as created_by_name'));
+        }
+
+        $rows = $query
             ->orderBy('ep.role')
             ->orderBy('ep.name')
             ->orderBy('u.email')
