@@ -166,6 +166,8 @@
     const root = document.getElementById('ib'), $ = id => document.getElementById(id), D = root.dataset;
     const csrf = document.querySelector('meta[name="csrf-token"]').content;
     const POLL = 5000, PAGE_KEY = 'chatbot-inbox:page', EVENTS_KEY = 'chatbot-inbox:events';
+    // Ang kuhang hindi pa sumasagot pagkalipas nito ay ina-abort (hindi naghihintay ng isang minuto ang susunod).
+    const REQUEST_LIMIT = 15000, TOO_SLOW = 'The list is taking too long. Pick a shorter time (24h or 7d) or fewer filters.';
     const S = {page: '', tab: '', psid: null, name: '', older: null, newer: null, seen: new Set(), panel: null, pausedAsked: false, busy: false, lastDay: null};
 
     function el(tag, attrs = {}, children = []) {
@@ -175,7 +177,7 @@
         return e;
     }
     const qs = o => { const p = new URLSearchParams(); for (const [k, v] of Object.entries(o)) { if (v == null) continue; if (typeof v === 'object') { for (const [a, b] of Object.entries(v)) if (b != null) p.set(k + '[' + a + ']', b); } else p.set(k, v); } return p.toString(); };
-    const getJson = async (url, params) => { const r = await fetch(url + '?' + qs(params), {headers: {'Accept': 'application/json'}}); if (!r.ok) throw r; return r.json(); };
+    const getJson = async (url, params, signal) => { const r = await fetch(url + '?' + qs(params), {headers: {'Accept': 'application/json'}, signal}); if (!r.ok) throw r; return r.json(); };
     const postJson = async (url, body) => {
         const r = await fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrf}, body: JSON.stringify(body)});
         const data = await r.json().catch(() => ({}));
@@ -202,12 +204,35 @@
     root.querySelectorAll('[data-go]').forEach(b => b.addEventListener('click', () => show(b.dataset.go)));
 
     // ---- Listahan ----
+    // inbox-list-loop:start
+    // Ang pagkuha ng listahan nang hindi nagpapatong: ang susunod na kuha ay o.every ms pagkatapos sumagot (o ma-abort)
+    // ang nauna; bawat kuha ay ina-abort pagkalipas ng o.limit ms; ang nakatagong tab ay hindi kumukuha (hinihintay ang
+    // susunod na ikot); ang now() (bagong filter, bagong usapan) ay ina-abort ang naghihintay at kumukuha agad.
+    // o.run(signal, st): st.timedOut kapag naubos ang o.limit, st.stale() kapag may mas bagong kuha na.
+    function inboxListLoop(o) {
+        let ctl = null, wait = null, seq = 0;
+        const later = () => { o.clearTimeout(wait); wait = o.setTimeout(turn, o.every); };
+        function turn() { if (o.hidden()) later(); else now(); }
+        async function now() {
+            if (ctl) ctl.abort();
+            o.clearTimeout(wait);
+            const n = ++seq, mine = ctl = new o.AbortController(), st = {timedOut: false, stale: () => n !== seq};
+            const limit = o.setTimeout(() => { st.timedOut = true; mine.abort(); }, o.limit);
+            try { await o.run(mine.signal, st); } catch (e) { /* ang run ang nagpapakita ng sarili nitong error */ }
+            o.clearTimeout(limit);
+            if (n === seq) { ctl = null; later(); }
+        }
+        return {now, start: later};
+    }
+    // inbox-list-loop:end
     let listTimer = null;
-    async function loadList() {
+    async function fetchList(signal, st) {
         if (!S.page) return;
         try {
             const conds = sendable();
-            const data = await getJson(D.listUrl, {page_id: S.page, window: $('ib-window').value, tab: S.tab, status: $('ib-status').value, q: $('ib-q').value.trim(), conditions: conds.length ? JSON.stringify(conds) : null});
+            const data = await getJson(D.listUrl, {page_id: S.page, window: $('ib-window').value, tab: S.tab, status: $('ib-status').value, q: $('ib-q').value.trim(), conditions: conds.length ? JSON.stringify(conds) : null}, signal);
+            if (st.stale()) return;
+            if (data.slow) { paintCounts(null); $('ib-rows').replaceChildren(); $('ib-list-note').textContent = data.error || TOO_SLOW; return; }
             paintCounts(data.counts || {});
             const rows = data.rows.map(r => {
                 const li = el('li', {}, el('button', {type: 'button', class: 'flex w-full items-start gap-2 px-3 py-2 text-left hover:bg-slate-50' + (r.psid === S.psid ? ' bg-blue-50' : ''), 'aria-current': r.psid === S.psid ? 'true' : null}, [
@@ -225,8 +250,13 @@
             $('ib-rows').replaceChildren(...rows);
             const total = data.total ?? rows.length;
             $('ib-list-note').textContent = rows.length ? total + (total === 1 ? ' conversation' : ' conversations') + (total > rows.length ? ' (showing ' + rows.length + ')' : '') : 'No conversations in this time.';
-        } catch (e) { $('ib-list-note').textContent = 'Could not load the list (' + (e.status || 'network') + ').'; }
+        } catch (e) {
+            if (st.stale()) return; // napalitan ng mas bagong kuha (ibang filter): walang ipapakita
+            $('ib-list-note').textContent = st.timedOut ? TOO_SLOW : 'Could not load the list (' + (e.status || 'network') + ').';
+        }
     }
+    const list = inboxListLoop({run: fetchList, every: POLL, limit: REQUEST_LIMIT, hidden: () => document.hidden, setTimeout, clearTimeout, AbortController});
+    const loadList = () => list.now();
     const reloadList = () => { clearTimeout(listTimer); listTimer = setTimeout(loadList, 250); };
     $('ib-q').addEventListener('input', reloadList);
     $('ib-window').addEventListener('change', loadList);
@@ -287,7 +317,8 @@
         try { const d = await getJson(D.keysUrl, {page_id: page}); if (page === S.page) { S.keys = d.keys || []; paintConds(); } } catch (e) { /* ang listahan ng field ay hindi mahalaga sa pagbukas */ }
     }
     function switchConds() { S.conds = readConds(); S.keys = []; paintConds(); loadKeys(); }
-    function paintCounts(c) { root.querySelectorAll('#ib-status option').forEach(o => { if (!o.value) return; o.dataset.label ??= o.textContent; o.textContent = o.dataset.label + ' (' + (c[o.value] ?? 0) + ')'; }); }
+    // c = null: walang bilang (hal. mabagal ang listahan), ang pangalan lang.
+    function paintCounts(c) { root.querySelectorAll('#ib-status option').forEach(o => { if (!o.value) return; o.dataset.label ??= o.textContent; o.textContent = o.dataset.label + (c ? ' (' + (c[o.value] ?? 0) + ')' : ''); }); }
     root.querySelectorAll('.ib-tab').forEach(b => b.addEventListener('click', () => { S.tab = b.dataset.tab; paintTabs(); loadList(); }));
     function paintTabs() { root.querySelectorAll('.ib-tab').forEach(b => { const on = b.dataset.tab === S.tab; b.setAttribute('aria-selected', on ? 'true' : 'false'); b.className = 'ib-tab rounded-md px-2 py-1 ' + (on ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'); }); }
 
@@ -406,8 +437,10 @@
     async function poll() {
         if (document.hidden || !S.psid || !S.newer || S.busy) return;
         const psid = S.psid; S.busy = true;
+        // Hindi nagpapatong (S.busy); ang kuhang hindi sumasagot ay ina-abort para hindi tumigil ang polling nang isang minuto.
+        const ctl = new AbortController(), limit = setTimeout(() => ctl.abort(), REQUEST_LIMIT);
         try {
-            const data = await getJson(D.threadUrl, {page_id: S.page, psid, after: S.newer, events: eventsOn() ? 1 : 0});
+            const data = await getJson(D.threadUrl, {page_id: S.page, psid, after: S.newer, events: eventsOn() ? 1 : 0}, ctl.signal);
             if (psid !== S.psid) return;
             const stay = nearBottom();
             const added = render(data.items, 'bottom');
@@ -415,9 +448,10 @@
             if (added) { if (stay) toBottom(); else $('ib-pill').classList.remove('hidden'); }
             if (data.items.some(x => x.side === 'in')) loadPanel(threadSeq);
         } catch (e) { /* tahimik; susubok ulit pagkalipas ng 5 segundo */ }
-        finally { S.busy = false; }
+        finally { clearTimeout(limit); S.busy = false; }
     }
-    setInterval(() => { poll(); if (!document.hidden) loadList(); }, POLL);
+    setInterval(poll, POLL);
+    list.start(); // ang listahan: sariling ikot, ang susunod ay pagkatapos lang sumagot ang nauna
 
     // ---- Panel ----
     // Ang mga sequence ng customer; ang puwedeng sumagot ay nakakapag-subscribe at unsubscribe.
