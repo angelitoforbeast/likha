@@ -68,11 +68,14 @@ class AiFollowupAutoApproveTest extends AiFollowupTestCase
         $ceo = $this->ceo();
         $this->actingAs($ceo)->get('/checklist/ai-followups')->assertOk()
             ->assertSee('Auto-approve')
+            ->assertSee('Applies when the Marketing head is on');
+        $this->enable();
+        $this->actingAs($ceo)->get('/checklist/ai-followups')->assertOk()
             ->assertSee('Off: drafts wait for your review')
+            ->assertSee('Turn on auto-approve?')
             ->assertSee('data-auto-approve="off"', false);
 
         $this->autoOn();
-        $this->enable();
         $this->actingAs($ceo)->get('/checklist/ai-followups')->assertOk()
             ->assertSee('On: new drafts go to staff at once, no review')
             ->assertSee('data-auto-approve="on"', false);

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\ChatMessage;
 use App\Models\ChecklistAiFollowup;
 use App\Services\AiFollowups;
 use App\Services\ChecklistDueToday;
@@ -43,7 +44,15 @@ class ChecklistAiFollowupController extends Controller
         $settings = AiFollowups::settings();
         $budget = AiFollowups::budget($now, $settings);
         $window = AiFollowups::window($now);
-        $card = fn (ChecklistAiFollowup $f) => $this->card($f, $settings);
+        // Ang conversation ng bawat follow-up na nasa chat na ("Open chat", spec 299).
+        $messageIds = $sent->pluck('chat_message_id')->filter()->all();
+        $chats = $messageIds ? ChatMessage::withTrashed()->whereIn('id', $messageIds)->pluck('conversation_id', 'id') : collect();
+        $card = fn (ChecklistAiFollowup $f) => $this->card($f, $settings) + [
+            'auto'      => $f->isAuto(),
+            'chat'      => AiFollowups::chatState($f),
+            'chat_url'  => ($cid = $chats[$f->chat_message_id] ?? null) ? url('/chat') . '?c=' . $cid : null,
+            'can_retry' => AiFollowups::chatState($f) === 'failed' && ($states[$f->id] ?? null) === 'waiting',
+        ];
 
         return view('checklist.ai-followups', compact(
             'tab', 'drafts', 'sent', 'rejected', 'states', 'settings', 'budget', 'window', 'card'
@@ -98,13 +107,16 @@ class ChecklistAiFollowupController extends Controller
         $this->authorizeCeo();
         $validated = $request->validate([
             'enabled'           => 'sometimes|boolean',
+            'auto_approve'      => 'sometimes|boolean',
             'monthly_cap_php'   => 'sometimes|numeric|min:0|max:100000',
             'php_per_usd'       => 'sometimes|numeric|gt:0|max:1000',
             'input_usd_per_1m'  => 'sometimes|numeric|min:0|max:1000',
             'output_usd_per_1m' => 'sometimes|numeric|min:0|max:1000',
         ]);
-        if (array_key_exists('enabled', $validated)) {
-            $validated['enabled'] = filter_var($validated['enabled'], FILTER_VALIDATE_BOOLEAN);
+        foreach (['enabled', 'auto_approve'] as $switch) {
+            if (array_key_exists($switch, $validated)) {
+                $validated[$switch] = filter_var($validated[$switch], FILTER_VALIDATE_BOOLEAN);
+            }
         }
         AiFollowups::saveSettings($validated);
 
@@ -112,9 +124,31 @@ class ChecklistAiFollowupController extends Controller
             return response()->json(['ok' => true, 'settings' => AiFollowups::settings()]);
         }
 
-        return back()->with('success', array_keys($validated) === ['enabled']
-            ? ($validated['enabled'] ? 'The Marketing head is on. It checks every 30 minutes from 9 AM to 9 PM.' : 'The Marketing head is off. It drafts nothing until you switch it on.')
-            : 'Settings saved.');
+        return back()->with('success', match (array_keys($validated)) {
+            ['enabled']      => $validated['enabled'] ? 'The Marketing head is on. It checks every 30 minutes from 9 AM to 9 PM.' : 'The Marketing head is off. It drafts nothing until you switch it on.',
+            ['auto_approve'] => $validated['auto_approve'] ? 'Auto-approve is on. New drafts go to staff at once.' : 'Auto-approve is off. New drafts wait for your review.',
+            default          => 'Settings saved.',
+        });
+    }
+
+    /**
+     * Retry ng CEO (spec 299): ipadala ulit sa Likha Chat ang approved follow-up na hindi naipadala. Para lang sa
+     * Waiting (ngayong araw, hindi pa Done): ang lumang "by 3:00 PM" ay nakakalito na. Isang beses pa rin lang.
+     */
+    public function chat(Request $request, int $followup)
+    {
+        $this->authorizeCeo();
+        $f = ChecklistAiFollowup::with('assignedUsers:id')->findOrFail($followup);
+        $now = Carbon::now(AiFollowups::TZ);
+        if ($f->review_status !== 'approved' || AiFollowups::state($f, AiFollowups::doneIds(collect([$f])), $now) !== 'waiting') {
+            return $this->fail('Only a follow-up that is approved and still waiting today can be sent to chat.', 409);
+        }
+        if (!AiFollowups::sendToChat($f)) {
+            return $this->fail('Still not sent to chat. Try again later.', 502);
+        }
+        $name = AiFollowups::firstName($f->person()) ?: 'them';
+
+        return $this->ok($request, $f, "Sent to $name in Likha Chat.");
     }
 
     /** Ang mga value na kailangan ng isang card (draft, sent o rejected), handa na para sa Blade. */

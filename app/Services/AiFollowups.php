@@ -6,6 +6,7 @@ use App\Models\AppSetting;
 use App\Models\ChecklistAiFollowup;
 use App\Models\ChecklistTask;
 use App\Models\User;
+use App\Services\Chat\AiPost;
 use App\Support\StaffEvents;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
@@ -13,6 +14,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Str;
 
 /**
  * Ang "Marketing head" (spec 293): AI na gumagawa ng maikling follow-up para sa marketing staff na late o not_approved
@@ -41,9 +43,13 @@ class AiFollowups
 
     private const SOURCE = 'ai_followups';
 
+    /** Ang AI na nagpapadala ng follow-up sa Likha Chat (config chat.ai_members). */
+    public const CHAT_AI = 'mira';
+
     /** Mga default ng settings sa app_settings (ai_followups.*); ang pinagmulan ng presyo at palitan ay nasa result ng spec 293. */
     public const DEFAULTS = [
         'enabled'           => '0',
+        'auto_approve'      => '0',        // spec 299: bukas = approved agad ang bagong draft, walang review
         'monthly_cap_php'   => '3000',
         'php_per_usd'       => '63.841',   // BSP reference rate, 17 Nov 2026
         'input_usd_per_1m'  => '0.15',     // gpt-4o-mini, OpenAI pricing, 18 Nov 2026
@@ -55,7 +61,7 @@ class AiFollowups
 
     // ── Settings at budget ───────────────────────────────────────────────────
 
-    /** @return array{enabled:bool, monthly_cap_php:float, php_per_usd:float, input_usd_per_1m:float, output_usd_per_1m:float, model:string} */
+    /** @return array{enabled:bool, auto_approve:bool, monthly_cap_php:float, php_per_usd:float, input_usd_per_1m:float, output_usd_per_1m:float, model:string} */
     public static function settings(): array
     {
         $stored = Schema::hasTable('app_settings')
@@ -65,6 +71,7 @@ class AiFollowups
 
         return [
             'enabled'           => filter_var($get('enabled'), FILTER_VALIDATE_BOOLEAN),
+            'auto_approve'      => filter_var($get('auto_approve'), FILTER_VALIDATE_BOOLEAN),
             'monthly_cap_php'   => (float) $get('monthly_cap_php'),
             'php_per_usd'       => (float) $get('php_per_usd'),
             'input_usd_per_1m'  => (float) $get('input_usd_per_1m'),
@@ -321,7 +328,7 @@ class AiFollowups
         $out = (int) $response->json('usage.completion_tokens', 0);
         $cost = round($in * $settings['input_usd_per_1m'] / 1e6 + $out * $settings['output_usd_per_1m'] / 1e6, 6);
 
-        return DB::transaction(function () use ($c, $now, $settings, $message, $deadline, $rawDeadline, $in, $out, $cost) {
+        $f = DB::transaction(function () use ($c, $now, $settings, $message, $deadline, $rawDeadline, $in, $out, $cost) {
             $f = ChecklistAiFollowup::create([
                 'title'           => mb_substr($c['title'], 0, 255),
                 'description'     => $message,
@@ -348,6 +355,13 @@ class AiFollowups
 
             return $f;
         });
+
+        // Auto-approve (spec 299): ang bagong draft ay approved agad, walang reviewer, at ipinapadala gaya ng approved.
+        if ($settings['auto_approve'] ?? false) {
+            self::autoApprove($f);
+        }
+
+        return $f;
     }
 
     /**
@@ -397,8 +411,10 @@ class AiFollowups
     /** Ang huling 20 na na-review (approved, edited, rejected), pinakabago muna. */
     private static function examples(): array
     {
+        // Ang auto-approved (walang reviewed_by) ay hindi desisyon ng CEO, kaya hindi halimbawa.
         return ChecklistAiFollowup::whereIn('review_status', ['approved', 'rejected'])
             ->whereNotNull('reviewed_at')
+            ->whereNotNull('reviewed_by')
             ->orderByDesc('reviewed_at')
             ->orderByDesc('id')
             ->limit(self::EXAMPLES)
@@ -430,6 +446,81 @@ class AiFollowups
             'is_active'     => true,
         ])->save();
         StaffEvents::record((int) $reviewer->id, 'ai_followup.approved', 'POST', 200, (string) $f->id, self::SOURCE);
+        self::sendToChat($f);
+    }
+
+    /** Auto-approve (spec 299): approved na walang reviewer (reviewed_by null), ang text at deadline ng AI. Walang staff event. */
+    public static function autoApprove(ChecklistAiFollowup $f): void
+    {
+        $f->forceFill([
+            'review_status' => 'approved',
+            'reviewed_by'   => null,
+            'reviewed_at'   => now(),
+            'is_active'     => true,
+        ])->save();
+        self::sendToChat($f);
+    }
+
+    // ── Likha Chat (spec 299) ────────────────────────────────────────────────
+
+    /**
+     * Ipinapadala ni Mira ang approved follow-up sa Likha Chat ng tao. Isang beses lang: naka-lock ang row at kapag may
+     * chat_message_id na, tapos na (approve nang dalawang beses, inulit na job, dobleng Retry). Kapag pumalya: isang
+     * log line, chat_failed_at, at approved pa rin (nasa checklist pa rin ang card). true = nasa chat na.
+     */
+    public static function sendToChat(ChecklistAiFollowup $f): bool
+    {
+        if ($f->review_status !== 'approved') {
+            return false;
+        }
+        try {
+            return DB::transaction(function () use ($f) {
+                $row = ChecklistAiFollowup::with('assignedUsers:id')->lockForUpdate()->findOrFail($f->id);
+                if ($row->chat_message_id !== null) {
+                    return true;
+                }
+                if ($row->review_status !== 'approved' || !($person = $row->person())) {
+                    return false;
+                }
+                $m = AiPost::post(self::CHAT_AI, (int) $person->id, self::chatText($row));
+                $row->forceFill(['chat_message_id' => $m->id, 'chat_failed_at' => null])->save();
+                $f->forceFill(['chat_message_id' => $m->id, 'chat_failed_at' => null])->syncOriginal();
+
+                return true;
+            });
+        } catch (\Throwable $e) {
+            Log::warning('AI follow-up: not sent to chat', ['followup_id' => $f->id, 'error' => get_class($e) . ': ' . mb_substr($e->getMessage(), 0, 200)]);
+            try {
+                ChecklistAiFollowup::whereKey($f->id)->update(['chat_failed_at' => now()]);
+            } catch (\Throwable) {
+                // ang log line ay sapat na
+            }
+
+            return false;
+        }
+    }
+
+    /** Ang text ni Mira: ang huling text ng follow-up, ang deadline at ang task, at ang link sa task sa /checklist. */
+    public static function chatText(ChecklistAiFollowup $f): string
+    {
+        $task = $f->followsTask?->title ?? $f->title;
+
+        return implode("\n", [
+            trim((string) $f->description),
+            '',
+            'Due by ' . self::clock($f->deadline_time) . ' · ' . Str::limit(trim(preg_replace('/\s+/u', ' ', (string) $task)), 120),
+            'Open the task: ' . url('/checklist') . '#task-' . $f->follows_task_id,
+        ]);
+    }
+
+    /** sent = nasa chat na; failed = pumalya ang huling pagpadala; null = hindi pa sinubukan. */
+    public static function chatState(ChecklistAiFollowup $f): ?string
+    {
+        return match (true) {
+            $f->chat_message_id !== null => 'sent',
+            $f->chat_failed_at !== null  => 'failed',
+            default                      => null,   // approved bago ang spec 299: hindi sinubukan
+        };
     }
 
     public static function reject(ChecklistAiFollowup $f, User $reviewer, string $note): void

@@ -7,7 +7,8 @@ use App\Models\ChatMember;
 use App\Models\ChatMessage;
 use App\Models\ChecklistAiFollowup;
 use App\Services\AiFollowups;
-use Illuminate\Support\Facades\Log;
+use Illuminate\Log\Events\MessageLogged;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Schema;
 
 /**
@@ -112,7 +113,8 @@ class AiFollowupChatTest extends AiFollowupTestCase
         $task = $this->lateTask($joy);
         $f = $this->followup($joy, $task, ['description' => 'Hi Joy, the stories please.']);
         Schema::rename('chat_messages', 'chat_messages_away');
-        Log::spy();
+        $logged = [];
+        Event::listen(MessageLogged::class, function (MessageLogged $e) use (&$logged) { $logged[] = $e; });
 
         $this->actingAs($ceo)->postJson("/checklist/ai-followups/{$f->id}/approve")->assertOk();
 
@@ -120,7 +122,8 @@ class AiFollowupChatTest extends AiFollowupTestCase
         $this->assertSame('approved', $f->review_status);
         $this->assertNull($f->chat_message_id);
         $this->assertNotNull($f->chat_failed_at);
-        Log::shouldHaveReceived('warning')->withArgs(fn ($msg, $ctx = []) => str_contains($msg, 'not sent to chat') && ($ctx['followup_id'] ?? null) === $f->id)->once();
+        $warnings = array_filter($logged, fn (MessageLogged $e) => $e->level === 'warning' && str_contains($e->message, 'not sent to chat') && ($e->context['followup_id'] ?? null) === $f->id);
+        $this->assertCount(1, $warnings);
         $this->actingAs($joy)->get('/checklist')->assertOk()->assertSee('Hi Joy, the stories please.');
         $this->actingAs($ceo)->get('/checklist/ai-followups?tab=sent')->assertOk()
             ->assertSee('Not sent to chat')

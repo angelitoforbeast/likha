@@ -45,7 +45,8 @@
 
         <div class="mt-3 grid gap-2 sm:gap-3 sm:grid-cols-2">
           {{-- Switch --}}
-          <form method="POST" action="{{ route('checklist.ai-followups.settings') }}" class="flex items-center gap-3 rounded-xl bg-gray-50 px-3 py-2.5">
+          <div class="rounded-xl bg-gray-50 px-3 py-2.5">
+          <form method="POST" action="{{ route('checklist.ai-followups.settings') }}" class="flex items-center gap-3">
             @csrf
             <input type="hidden" name="enabled" value="{{ $settings['enabled'] ? 0 : 1 }}">
             <button type="submit" role="switch" aria-checked="{{ $settings['enabled'] ? 'true' : 'false' }}" aria-label="Marketing head"
@@ -57,6 +58,22 @@
               <p class="text-xs text-gray-500">{{ $settings['enabled'] ? 'On: drafts every 30 minutes, 9 AM to 9 PM' : 'Off: the Marketing head drafts nothing' }}</p>
             </div>
           </form>
+          {{-- Auto-approve (spec 299): new drafts go to staff with no review. Asks once before switching on. --}}
+          <form method="POST" action="{{ route('checklist.ai-followups.settings') }}" data-auto-approve="{{ $settings['auto_approve'] ? 'on' : 'off' }}"
+                class="mt-2.5 pt-2.5 border-t border-gray-200 flex items-center gap-3"
+                @if(!$settings['auto_approve']) @submit="if (!confirm('New drafts will go to staff without your review. Turn on auto-approve?')) $event.preventDefault()" @endif>
+            @csrf
+            <input type="hidden" name="auto_approve" value="{{ $settings['auto_approve'] ? 0 : 1 }}">
+            <button type="submit" role="switch" aria-checked="{{ $settings['auto_approve'] ? 'true' : 'false' }}" aria-label="Auto-approve"
+                    class="relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2 {{ $settings['auto_approve'] ? 'bg-violet-600' : 'bg-gray-500' }}">
+              <span class="absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition {{ $settings['auto_approve'] ? 'left-[22px]' : 'left-0.5' }}"></span>
+            </button>
+            <div class="min-w-0">
+              <p class="text-sm font-semibold text-gray-800">Auto-approve</p>
+              <p class="text-xs text-gray-500">{{ !$settings['enabled'] ? 'Applies when the Marketing head is on' : ($settings['auto_approve'] ? 'On: new drafts go to staff at once, no review' : 'Off: drafts wait for your review') }}</p>
+            </div>
+          </form>
+          </div>
 
           {{-- Budget --}}
           <div class="rounded-xl bg-gray-50 px-3 py-2.5" data-budget="{{ $budget['tone'] }}">
@@ -238,6 +255,9 @@
           @elseif(!$settings['enabled'])
             <p class="text-gray-800 font-semibold">No drafts.</p>
             <p class="text-sm text-gray-500 mt-1">The Marketing head is off. Switch it on to start drafting.</p>
+          @elseif($settings['auto_approve'])
+            <p class="text-gray-800 font-semibold">No drafts.</p>
+            <p class="text-sm text-gray-500 mt-1">Auto-approve is on: new follow-ups go out at once. See <a href="{{ route('checklist.ai-followups', ['tab' => 'sent']) }}" class="font-medium text-blue-700 hover:underline underline-offset-2">Sent</a>.</p>
           @else
             <p class="text-gray-800 font-semibold">No drafts.</p>
             <p class="text-sm text-gray-500 mt-1">The Marketing head checks every 30 minutes from 9 AM to 9 PM.</p>
@@ -275,10 +295,25 @@
                   <p class="mt-1 text-sm text-gray-800 leading-relaxed pretty">{{ $c['message'] }}</p>
                   <div class="mt-1.5 flex items-center gap-2 flex-wrap">
                     <span data-state="{{ $state }}" title="{{ $stateHint }}" class="{{ $chip }} {{ $stateClass }}">{{ $stateLabel }}</span>
+                    @if($c['auto'])
+                      <span data-auto-chip title="Sent with no review (auto-approve)" class="{{ $chip }} bg-violet-50 text-violet-800 border-violet-200">Auto</span>
+                    @endif
                     @if($c['edited'])
                       <span class="{{ $chip }} bg-white text-gray-700 border-gray-300">Edited by you</span>
                     @endif
-                    <span class="text-xs text-gray-500">{{ $state === 'waiting' ? 'Approved ' . $c['reviewed'] : $stateHint }}</span>
+                    @if($c['chat'] === 'failed')
+                      <span data-chat-failed title="Mira could not post it in Likha Chat. It is still on their checklist." class="{{ $chip }} bg-amber-50 text-amber-800 border-amber-200">Not sent to chat</span>
+                    @endif
+                    <span class="text-xs text-gray-500">{{ $state === 'waiting' ? ($c['auto'] ? 'Sent automatically ' : 'Approved ') . $c['reviewed'] : $stateHint }}</span>
+                    @if($c['can_retry'])
+                      <form method="POST" action="{{ route('checklist.ai-followups.chat', $c['id']) }}" class="inline">
+                        @csrf
+                        <button type="submit" data-retry-chat="{{ $c['id'] }}" class="inline-flex items-center min-h-[44px] sm:min-h-0 px-1 text-xs font-semibold text-blue-700 hover:underline underline-offset-2 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">Retry</button>
+                      </form>
+                    @endif
+                    @if($c['chat_url'])
+                      <a href="{{ $c['chat_url'] }}" data-open-chat class="ml-auto inline-flex items-center gap-1.5 min-h-[44px] sm:min-h-0 px-1 text-xs font-semibold text-blue-700 hover:underline underline-offset-2 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"><i class="fa-solid fa-comment-dots text-[11px]" aria-hidden="true"></i>Open chat</a>
+                    @endif
                   </div>
                   @if($c['edited'])
                     <details class="mt-1.5">

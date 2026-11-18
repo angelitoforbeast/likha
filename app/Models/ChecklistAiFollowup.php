@@ -38,6 +38,7 @@ class ChecklistAiFollowup extends Model
     protected $casts = [
         'is_active'   => 'boolean',
         'reviewed_at' => 'datetime',
+        'chat_failed_at' => 'datetime',
         'ai_draft'    => 'array',
         'ai_cost_usd' => 'float',
     ];
@@ -70,6 +71,12 @@ class ChecklistAiFollowup extends Model
     public function person(): ?User
     {
         return $this->assignedUsers->first();
+    }
+
+    /** Approved nang kusa (auto-approve, spec 299): walang tao na nag-approve. */
+    public function isAuto(): bool
+    {
+        return $this->review_status === 'approved' && $this->reviewed_by === null;
     }
 
     /** Binago ng CEO ang text ng AI bago i-approve. */
