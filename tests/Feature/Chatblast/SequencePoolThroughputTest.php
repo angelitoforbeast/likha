@@ -429,6 +429,27 @@ class SequencePoolThroughputTest extends SequenceHandoffTestCase
         $this->assertFalse(SequenceSendPool::capable(), 'one share stopped: steps go inline as with a dead pool');
     }
 
+    public function test_SQ_2_while_the_count_changes_the_tick_never_takes_back_what_the_old_single_pool_still_holds(): void
+    {
+        $this->load(10, 40);
+        config(['services.botcake.sequence_pools' => 1]);
+        $old = $this->shardPool(0, 1);
+        $this->assertTrue($old->start());
+        $this->simulate([$old], 2, 0.0);
+        $held = DB::table(BotcakeSendQueue::TABLE)->where('status', 'sending')->where('claimed_by', $old->owner)->get(['id', 'called_at']);
+        $this->assertNotEmpty($held->whereNotNull('called_at'));
+
+        // The setting is now 2 (deploy) while the old single pool still runs: share 1 has no process yet.
+        config(['services.botcake.sequence_pools' => 2]);
+        $this->assertFalse(SequenceSendPool::capable(), 'steps are not handed off until every share runs');
+        $this->assertFalse($this->shardPool(1, 2)->start(), 'share 1 waits for the old pool to stop');
+        $this->travel(70)->seconds();
+        $old->beat();
+        app(\App\Services\Chatbot\ChatbotSequences::class)->settleInFlight();
+        $this->assertSame($held->count(), DB::table(BotcakeSendQueue::TABLE)->whereIn('id', $held->pluck('id'))->where('status', 'sending')->where('claimed_by', $old->owner)->count(),
+            'the old pool keeps every ticket it holds, called or not');
+    }
+
     public function test_SQ_2_the_minute_tick_leaves_a_live_process_calls_alone_and_cleans_up_a_dead_share_only(): void
     {
         $this->load(10, 40);

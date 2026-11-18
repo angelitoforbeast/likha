@@ -945,7 +945,8 @@ class ChatbotSequences
                 ->when($pools > 1, fn ($q) => $q->whereRaw('page_id % ' . $pools . ' in (' . implode(',', array_map('intval', $dead)) . ')'))
                 ->orderBy('id')->limit(self::BATCH)->get();
             foreach ($rows as $t) $this->cancel($t, 'The sequence send pool was not running; nothing sent');
-            foreach ($dead as $k) BotcakeSendQueue::recoverSequence(null, SequenceSendPool::part($k, $pools));
+            // Ang hawak ng buhay na proseso ay hindi binabawi, kahit nasa bahagi ng patay (hal. ang lumang iisang pool habang pinapalitan ang bilang).
+            foreach ($dead as $k) BotcakeSendQueue::recoverSequence($live ?: null, SequenceSendPool::part($k, $pools));
         }
         // Ang tawag na hawak ng hindi buhay na pool, lampas sa oras ng tawag at mga ulit (ayon sa sariling called_at ng ticket, hindi sa
         // tali): walang sagot, saka ang resume. Ang hawak ng buhay na pool ay hindi ginagalaw (ang sagot nito ang itinatala).

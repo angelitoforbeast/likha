@@ -533,16 +533,16 @@ class BotcakeSendQueue
     }
 
     /**
-     * Ang naiwang "sending" ng sequence pool na namatay (hindi $owner): hindi pa natawag → pending (isang beses ng bagong
-     * pool); natawag na → failed na walang sagot, saka ang resume. Hindi kailanman inuulit. $part: ang mga page lang ng bahaging
-     * iyon ng pool (ang hawak ng ibang buhay na proseso ay hindi ginagalaw).
+     * Ang naiwang "sending" ng sequence pool na namatay (hindi ang $owner: isa, o ang listahan ng mga buhay): hindi pa natawag
+     * → pending (isang beses ng bagong pool); natawag na → failed na walang sagot, saka ang resume. Hindi kailanman inuulit.
+     * $part: ang mga page lang ng bahaging iyon ng pool.
      */
-    public static function recoverSequence(?string $owner, ?array $part = null): int
+    public static function recoverSequence(string|array|null $owner, ?array $part = null): int
     {
         if (!Schema::hasTable(self::TABLE)) return 0;
         $n = 0;
         $rows = DB::table(self::TABLE)->where('status', 'sending')->where('kind', self::SEQUENCE)
-            ->when($owner, fn ($q) => $q->where(fn ($w) => $w->whereNull('claimed_by')->orWhere('claimed_by', '!=', $owner)))->tap(fn ($q) => self::inPart($q, $part))->get();
+            ->when($owner, fn ($q) => $q->where(fn ($w) => $w->whereNull('claimed_by')->orWhereNotIn('claimed_by', (array) $owner)))->tap(fn ($q) => self::inPart($q, $part))->get();
         foreach ($rows as $row) {
             if ($row->called_at === null) {
                 DB::table(self::TABLE)->where('id', $row->id)->where('status', 'sending')->where('claimed_by', $row->claimed_by)->whereNull('called_at')
