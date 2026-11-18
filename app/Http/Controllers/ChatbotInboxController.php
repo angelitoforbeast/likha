@@ -11,12 +11,14 @@ use App\Services\Chatbot\CustomerFields;
 use App\Services\Chatbot\FlowEngine;
 use App\Services\Chatbot\Inbox;
 use App\Services\Chatbot\InboxFilters;
+use App\Services\Chatbot\InboxTooSlow;
 use App\Services\PageSettings;
 use App\Support\NavAccess;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 /**
  * /chatbot/inbox: ang inbox na parang Pancake. Basa: access gaya ng /chatblast (NavAccess; 403 sa iba). Manual na
@@ -110,7 +112,35 @@ class ChatbotInboxController extends Controller
             return response()->json(['error' => $e->getMessage()], 422);
         }
 
-        return response()->json($this->inbox->listWithCounts($pageId, $window, $this->str($request, 'q', 100), $tab, $status, $conditions));
+        // Iisang pagbuo para sa parehong page at filter sa loob ng LIST_CACHE_SECONDS (maraming tab at user ang nagpo-poll
+        // kada 5 segundo); ang "too slow" ay SLOW_CACHE_SECONDS para hindi ito subukan ulit ng bawat poll.
+        $q = $this->str($request, 'q', 100);
+        $key = 'chatbot.inbox.list.' . $pageId . '.' . Cache::get(self::listVersionKey($pageId), '0') . '.' . sha1(json_encode([$window, $q, $tab, $status, $conditions]));
+        $data = Cache::get($key);
+        if (!is_array($data)) {
+            try {
+                $data = $this->inbox->listWithCounts($pageId, $window, $q, $tab, $status, $conditions);
+                Cache::put($key, $data, Inbox::LIST_CACHE_SECONDS);
+            } catch (InboxTooSlow $e) {
+                Log::warning('Chatbot inbox list too slow', ['page_id' => $pageId, 'window' => $window, 'tab' => $tab, 'status' => $status,
+                    'search' => $q !== '', 'conditions' => count($conditions), 'reason' => mb_substr((string) ($e->getPrevious()?->getMessage() ?? 'deadline'), 0, 200)]);
+                $data = ['rows' => [], 'counts' => [], 'total' => 0, 'slow' => true, 'error' => Inbox::TOO_SLOW];
+                Cache::put($key, $data, Inbox::SLOW_CACHE_SECONDS);
+            }
+        }
+
+        return response()->json($data);
+    }
+
+    /** Ang bersyon ng naka-cache na listahan ng page: pinapalitan ng pause at ng manual na sagot para lumabas agad. */
+    private static function listVersionKey(string $pageId): string
+    {
+        return 'chatbot.inbox.list-version.' . $pageId;
+    }
+
+    private static function forgetLists(string $pageId): void
+    {
+        Cache::forever(self::listVersionKey($pageId), (string) hrtime(true));
     }
 
     /** Ang mga customer field ng page para sa filter builder (key at pangalang ipapakita), walang panloob na key (__). */
@@ -178,6 +208,7 @@ class ChatbotInboxController extends Controller
             + ChatbotReply::routeColumn(ChatbotProvider::viaOf($provider), ChatbotProvider::routeOf($provider)) + ChatbotReply::confirmColumns($ref, ChatbotProvider::viaOf($provider), $status, $now)
             + ChatbotTags::columns($tags = ChatbotTags::manual((int) $pageId, (int) $psid, $page, count($messages))));
         ChatbotTags::storeRows($reply, $tags);
+        self::forgetLists($pageId);
 
         return response()->json(['item' => ['key' => 'out-' . $reply->id, 'id' => $reply->id, 'side' => 'out', 'at' => Inbox::iso($reply->sent_at),
             'status' => $status, 'error' => $error, 'messages' => $messages, 'manual' => true, 'by' => Auth::user()?->name ?: 'You', 'via' => ChatbotProvider::viaOf($provider)]
@@ -214,6 +245,7 @@ class ChatbotInboxController extends Controller
         $fields = new CustomerFields((int) $pageId, (int) $psid);
         // Nakapatay ang pause sa Inbox: ang paused=1 mula sa lumang page ay hindi pinapansin; ang unpause ay laging gumagana.
         if ($request->boolean('paused')) { if (config('chatbot.inbox_bot_pause')) $fields->set(CustomerFields::BOT_PAUSED, '1'); } else $fields->clear(CustomerFields::BOT_PAUSED);
+        self::forgetLists($pageId);
 
         return response()->json(['bot_paused' => $fields->get(CustomerFields::BOT_PAUSED) === '1']);
     }

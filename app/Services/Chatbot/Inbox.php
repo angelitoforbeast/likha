@@ -12,7 +12,9 @@ use App\Models\User;
 use App\Services\ChatbotFields;
 use App\Services\PageSettings;
 use Carbon\Carbon;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
@@ -20,8 +22,10 @@ use Illuminate\Support\Facades\Schema;
  * Ang /chatbot/inbox: ang listahan ng usapan ng isang page, ang usapan ng isang customer (papasok mula sa
  * botcake_chats, palabas mula sa chatbot_replies, at ang executed actions mula sa chatbot_events kapag hiningi) at ang
  * panel ng customer. Pang-~1M chat kada araw:
- * - listahan: isang GROUP BY psid kada table, laging may page at simula ng oras (index (page_id, received_at) at
- *   (page_id, sent_at)) at LIMIT; ang mga detalye ay ayon sa id lang;
+ * - listahan: kada table, binabasa ang index (page_id, received_at) / (page_id, sent_at) mula sa pinakabago at humihinto
+ *   kapag sapat na ang customer (hindi ang buong window: milyon ang 30 araw ng malaking page), saka ang MAX(id) at MAX(oras)
+ *   ng mga iyon lang ((page_id, psid, oras)); ang mga detalye ay ayon sa id lang. Hanggang LIST_SECONDS lang ang pagbuo;
+ *   lampas doon ay InboxTooSlow (hindi hinahawakan ang PHP worker na kasalo ng webhook ng bot);
  * - usapan: 50 kada basa ayon sa id ng bawat table ((page_id, psid, id)), pinagsasama ayon sa oras; ang mga event ay
  *   sa parehong saklaw ng oras lang ((page_id, psid, created_at)).
  */
@@ -36,9 +40,42 @@ class Inbox
     public const OUT_KINDS = ['send', 'manual'];
     /** Ang echo na ganito kalapit (segundo) sa sagot ng Likha na may parehong text ay ang echo ng sagot na iyon. */
     private const ECHO_MATCH_SECONDS = 120;
+    public const LIST_SECONDS = 8;        // pinakamatagal na pagbuo ng listahan; lampas dito: InboxTooSlow
+    public const LIST_CACHE_SECONDS = 15; // ang parehong listahan (page + filter) ay iisang pagbuo para sa lahat ng tab at user
+    public const SLOW_CACHE_SECONDS = 60; // ang "too slow" ay hindi inuulit sa bawat poll
+    public const TOO_SLOW = 'The list is taking too long. Pick a shorter time (24h or 7d) or fewer filters.';
+    /** MySQL: ang query na pinutol ng max_execution_time (3024), o na-interrupt (1317). */
+    private const TIMEOUT_CODES = [3024, 1317];
+
+    /** Ilang row ang unang basa ng scan na pinakabago muna; dumodoble hanggang SCAN_CHUNK_MAX habang kulang pa. */
+    protected int $scanChunk = 1000;
+    protected const SCAN_CHUNK_MAX = 16000;
+    private float $deadline = INF;
 
     public function __construct(private PageSettings $settings)
     {
+    }
+
+    /** Ilang segundo ang pagbuo ng listahan (napapalitan sa test). */
+    protected function budget(): float
+    {
+        return self::LIST_SECONDS;
+    }
+
+    /**
+     * Bago ang bawat query ng listahan: lampas na sa budget → InboxTooSlow; sa MySQL, ang natitirang oras ang
+     * max_execution_time ng session para pati ang isang mabagal na SELECT ay huminto nang kusa.
+     */
+    protected function tick(): void
+    {
+        $left = $this->deadline - microtime(true);
+        if ($left <= 0) throw new InboxTooSlow(self::TOO_SLOW);
+        if ($this->deadline !== INF && DB::getDriverName() === 'mysql') DB::statement('SET SESSION max_execution_time = ' . max(1, (int) ceil($left * 1000)));
+    }
+
+    public static function isTimeout(\Throwable $e): bool
+    {
+        return $e instanceof QueryException && in_array((int) ($e->errorInfo[1] ?? 0), self::TIMEOUT_CODES, true);
     }
 
     /** Ang oras bilang ISO 8601 sa Manila (para sa relative time at mga araw sa browser). */
@@ -83,28 +120,49 @@ class Inbox
      * Ang listahan at ang bilang ng bawat status (Ordered, Loop 1-3, Reply failed, Phone no order) sa parehong page, window,
      * tab at hanap. Isang query kada uri ng status para sa mga customer ng listahan (hanggang GROUP_LIMIT x 2), walang N+1.
      * Ang $conditions (InboxFilters::parse) ay dagdag na AND sa lahat; ang total ay ang bilang ng tumugma bago ang LIST_LIMIT.
+     * Hanggang LIST_SECONDS lang (sa MySQL, pati ang bawat SELECT); lampas doon: InboxTooSlow.
      * @return array{rows: array<int, array>, counts: array<string, int>, total: int}
+     * @throws InboxTooSlow
      */
     public function listWithCounts(string $pageId, string $window = '7d', string $q = '', string $tab = '', string $status = '', array $conditions = []): array
+    {
+        $this->deadline = microtime(true) + $this->budget();
+        try {
+            return $this->buildList($pageId, $window, $q, $tab, $status, $conditions);
+        } catch (QueryException $e) {
+            if (self::isTimeout($e)) throw new InboxTooSlow(self::TOO_SLOW, 0, $e);
+            throw $e;
+        } finally {
+            $this->deadline = INF;
+            // Ang ibang query ng request ay walang limit gaya ng dati. Kapag patay na ang koneksyon, wala nang ibabalik (at
+            // hindi dapat matakpan ng error na ito ang orihinal na error).
+            try {
+                if (DB::getDriverName() === 'mysql') DB::statement('SET SESSION max_execution_time = DEFAULT');
+            } catch (QueryException) {
+            }
+        }
+    }
+
+    private function buildList(string $pageId, string $window, string $q, string $tab, string $status, array $conditions): array
     {
         $filters = new InboxFilters();
         $since = now()->subHours(self::WINDOWS[$window] ?? 168);
         $q = trim($q);
         $like = '%' . strtr(mb_strtolower($q), ['!' => '!!', '%' => '!%', '_' => '!_']) . '%';
 
-        $in = BotcakeChat::active()->where('page_id', $pageId)->where('received_at', '>=', $since)
-            ->when($conditions, fn ($w) => $filters->apply($w, $conditions, 'botcake_chats.psid', true, (int) $pageId, $since))
-            ->when($q !== '', fn ($w) => $w->where(fn ($o) => $o->whereRaw("LOWER(name) LIKE ? ESCAPE '!'", [$like])->orWhere('psid', 'like', strtr($q, ['%' => '', '_' => '']) . '%')))
-            ->selectRaw('psid, MAX(id) AS last_id, MAX(received_at) AS last_at')->groupBy('psid')
-            ->orderByDesc('last_at')->limit(self::GROUP_LIMIT)->get()->keyBy(fn ($r) => (string) $r->psid);
-        $out = ChatbotReply::where('page_id', (int) $pageId)->where('sent_at', '>=', $since)->whereIn('kind', self::OUT_KINDS)
-            ->when($conditions, fn ($w) => $filters->apply($w, $conditions, 'chatbot_replies.psid', false, (int) $pageId, $since))
-            ->selectRaw('psid, MAX(id) AS last_id, MAX(sent_at) AS last_at')->groupBy('psid')
-            ->orderByDesc('last_at')->limit(self::GROUP_LIMIT)->get()->keyBy(fn ($r) => (string) $r->psid);
-        // May hanap: ang mga customer na tugma sa papasok lang (ang pangalan ay nasa botcake_chats).
-        if ($q !== '') $out = $out->only($in->keys()->all());
+        $inQ = BotcakeChat::active()->where('page_id', $pageId)->where('received_at', '>=', $since)
+            ->when($q !== '', fn ($w) => $w->where(fn ($o) => $o->whereRaw("LOWER(name) LIKE ? ESCAPE '!'", [$like])->orWhere('psid', 'like', strtr($q, ['%' => '', '_' => '']) . '%')));
+        $in = $this->latest($inQ, 'received_at', false, !$conditions ? null : fn (array $ids) => BotcakeChat::where('page_id', $pageId)->whereIn('id', $ids)
+            ->tap(fn ($w) => $filters->apply($w, $conditions, 'botcake_chats.psid', true, (int) $pageId, $since))->pluck('psid'));
+        // May hanap: ang mga customer na tugma sa papasok lang (ang pangalan ay nasa botcake_chats), at ang papasok lang ang
+        // batayan ng preview at oras. Gaya ng dati: ang dating $out->only() ay sa Eloquent Collection, na pumipili ayon sa id
+        // ng model (wala sa GROUP BY), kaya walang palabas na natitira kailanman; hindi na rin binabasa ang palabas.
+        $outQ = ChatbotReply::where('page_id', (int) $pageId)->where('sent_at', '>=', $since)->whereIn('kind', self::OUT_KINDS);
+        $out = $q !== '' ? collect() : $this->latest($outQ, 'sent_at', true, !$conditions ? null : fn (array $ids) => ChatbotReply::where('page_id', (int) $pageId)->whereIn('id', $ids)
+            ->tap(fn ($w) => $filters->apply($w, $conditions, 'chatbot_replies.psid', false, (int) $pageId, $since))->pluck('psid'));
 
         $all = $in->keys()->merge($out->keys())->unique();
+        $this->tick();
         $paused = array_flip($this->pausedPsids($pageId, $all->map(fn ($p) => (string) $p)->all()));
         $rows = [];
         foreach ($all as $psid) {
@@ -123,6 +181,7 @@ class Inbox
 
         $inIds = array_values(array_filter(array_map(fn ($r) => $r['in']->last_id ?? null, $rows)));
         $outIds = array_values(array_filter(array_map(fn ($r) => $r['out']->last_id ?? null, $rows)));
+        $this->tick();
         $lastIn = $inIds ? BotcakeChat::whereIn('id', $inIds)->where('page_id', $pageId)->get(['id', 'psid', 'name', 'message', 'received_at'])->keyBy('id') : collect();
         $lastOut = $outIds ? ChatbotReply::whereIn('id', $outIds)->where('page_id', (int) $pageId)->get(['id', 'psid', 'kind', 'content', 'status', 'sent_at'])->keyBy('id') : collect();
         // Ang pangalan ng customer na wala pang chat sa window (bot lang): mula sa botcake_psids.
@@ -152,6 +211,63 @@ class Inbox
         return ['rows' => $list, 'counts' => $counts, 'total' => $total];
     }
 
+    /**
+     * Ang GROUP_LIMIT na customer na may pinakabagong row sa $query (page, window at ang mga filter ng row), pinakabago
+     * muna, bawat isa ay may MAX(id) at MAX($at): ang parehong sagot ng dating GROUP BY psid ... ORDER BY MAX($at) DESC
+     * LIMIT. Ang unang GROUP_LIMIT na magkakaibang psid kapag binasa ang mga row mula sa pinakabago ay sila ring may
+     * pinakabagong MAX($at), kaya binabasa ang index (page_id, $at) pabalik nang paunti-unti (cursor ($at, id)) at humihinto
+     * kapag sapat na, sa halip na i-group ang buong window. $keep: ang mga psid na pasok sa mga kondisyon ng filter
+     * builder (pang-customer ang lahat), sinusuri minsan kada bagong customer sa isang row id nito.
+     * @return Collection<string, object{psid: mixed, last_id: int, last_at: string}>
+     */
+    protected function latest($query, string $at, bool $intPsid, ?callable $keep): Collection
+    {
+        $found = $seen = [];
+        $cursor = null;
+        $chunk = $this->scanChunk;
+        [$col, $id] = [DB::getQueryGrammar()->wrap($at), DB::getQueryGrammar()->wrap('id')];
+        $index = $this->pageTimeIndex((clone $query)->toBase()->from, $at);
+        do {
+            $this->tick();
+            $rows = (clone $query)->toBase()->when($index, fn ($w) => $w->forceIndex($index))->select(['id', 'psid', $at])
+                ->when($cursor, fn ($w) => $w->where($at, '<=', $cursor[0])->whereRaw("NOT ({$col} = ? AND {$id} >= ?)", $cursor))
+                ->orderByDesc($at)->orderByDesc('id')->limit($chunk)->get();
+            $new = [];
+            foreach ($rows as $r) {
+                $p = (string) $r->psid;
+                if (!isset($seen[$p])) $new[$p] = $seen[$p] = (int) $r->id;
+            }
+            if ($new && $keep) {
+                $this->tick();
+                $new = array_intersect_key($new, array_flip(array_map('strval', $keep(array_values($new))->all())));
+            }
+            foreach (array_keys($new) as $p) if (count($found) < self::GROUP_LIMIT) $found[] = (string) $p;
+            $last = $rows->last();
+            $cursor = $last ? [$last->{$at}, (int) $last->id] : null;
+            $full = $rows->count() === $chunk;
+            $chunk = min($chunk * 2, self::SCAN_CHUNK_MAX);
+        } while ($full && count($found) < self::GROUP_LIMIT);
+        if (!$found) return collect();
+
+        // Ang eksaktong MAX(id) at MAX($at) ng mga nahanap lang (index (page_id, psid, $at)), gaya ng dating GROUP BY.
+        $this->tick();
+        $agg = (clone $query)->toBase()->whereIn('psid', $intPsid ? array_map('intval', $found) : $found)
+            ->selectRaw("psid, MAX({$id}) AS last_id, MAX({$col}) AS last_at")->groupBy('psid')->limit(self::GROUP_LIMIT)->get()->keyBy(fn ($r) => (string) $r->psid);
+
+        return collect($found)->mapWithKeys(fn ($p) => isset($agg[$p]) ? [$p => $agg[$p]] : []);
+    }
+
+    /**
+     * Ang index (page_id, $at) ng table kung mayroon (naka-cache isang araw). Pinipilit ito ng scan: kung hindi, pinipili
+     * ng MySQL ang index ng oras lang (received_at / sent_at) para sa malaking page, na bumabasa rin ng mga row ng ibang page.
+     */
+    private function pageTimeIndex(string $table, string $at): ?string
+    {
+        $name = "{$table}_page_id_{$at}_index";
+
+        return Cache::remember('chatbot.inbox.index.' . $name, 86400, fn () => Schema::hasIndex($table, $name)) ? $name : null;
+    }
+
     public const STATUSES = ['ordered', 'loop1', 'loop2', 'loop3', 'failed', 'phone'];
 
     /**
@@ -169,6 +285,7 @@ class Inbox
         $phoneKey = ChatbotVars::norm('GPT PHONE NUMBER');
         $phones = [];
         foreach (array_chunk($psids, 500) as $chunk) {
+            $this->tick();
             $ids = array_map('intval', $chunk);
             if ($this->hasEvents()) {
                 foreach (DB::table('chatbot_events')->where('page_id', $pageId)->whereIn('psid', $ids)->where('type', 'order')->where('created_at', '>=', $since)->distinct()->pluck('psid') as $p) $sets['ordered'][(string) $p] = true;
