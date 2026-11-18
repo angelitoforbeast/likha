@@ -65,6 +65,8 @@
       const Ctx = window.AudioContext || window.webkitAudioContext;
       if (!Ctx) return;
       audio = audio || new Ctx();
+      // Chrome starts it suspended until the person has touched the page; resume() works after any gesture.
+      if (audio.state === 'suspended') audio.resume().catch(() => {});
       const t = audio.currentTime;
       [[660, 0], [990, 0.11]].forEach(([hz, at]) => {
         const osc = audio.createOscillator(); const gain = audio.createGain();
@@ -95,12 +97,20 @@
       try {
         const n = new Notification(a.group ? `${a.sender} in ${a.title}` : a.sender, { body: a.text, tag: `likha-chat-${a.conversation_id}` });
         n.onclick = () => { open(a); n.close(); };
-      } catch (e) { /* some phones only allow notifications from a service worker */ }
+      } catch (e) {
+        // Android Chrome allows notifications only from a service worker (a later spec): the sound still plays,
+        // and the chat page's Alerts box says so.
+        notifWorks = false;
+        return;
+      }
     }
   }
+  let notifWorks = true;
 
   function schedule(ms = CFG.poll_ms) { clearTimeout(timer); if (!document.hidden && !stopped) timer = setTimeout(poll, ms); }
-  async function poll() {
+  // quiet: right after the tab comes back, the count is refreshed at once but what arrived meanwhile is not chimed
+  // (the person is looking at the page now; a burst of notifications would only repeat the badge).
+  async function poll(quiet = false) {
     if (busy || stopped || document.hidden) return;
     busy = true;
     const last = store.get(KEY_LAST);
@@ -111,7 +121,7 @@
       if (res.ok) {
         const data = await res.json();
         set(data.unread);
-        if (data.alerts && data.alerts.length) alertAbout(data.alerts);
+        if (!quiet && data.alerts && data.alerts.length) alertAbout(data.alerts);
         // Ibang tab na mas nauna? Ang mas mataas ang itinatago, para walang dobleng alert.
         const now = Number(store.get(KEY_LAST) || 0);
         if (!(now > data.last_id)) store.set(KEY_LAST, String(data.last_id));
@@ -121,9 +131,9 @@
       schedule();
     }
   }
-  document.addEventListener('visibilitychange', () => { if (document.hidden) clearTimeout(timer); else poll(); });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) clearTimeout(timer); else poll(true); });
 
-  window.likhaChatUnread = { set, poll, soundOn, setSound(on) { store.set(KEY_SOUND, on ? '1' : '0'); }, chime };
+  window.likhaChatUnread = { set, poll, soundOn, setSound(on) { store.set(KEY_SOUND, on ? '1' : '0'); }, chime, notifWorks: () => notifWorks };
   poll();
 })();
 </script>

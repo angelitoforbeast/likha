@@ -43,6 +43,7 @@ class ChatMessenger
             $removed = $m->trashed();
             $row['reactions'] = $removed ? [] : self::reactions($m, $viewer, $people);
             $row['edited'] = $m->edited_at !== null;
+            $row['edited_at'] = ChatPresenter::iso($m->edited_at);
             $mine = (int) $m->sender_user_id === $viewer->id && $m->sender_ai === null;
             $row['edit_until'] = $mine && ! $removed && trim((string) $m->body) !== '' && $m->created_at->copy()->addMinutes($editMinutes)->isFuture()
                 ? $m->created_at->copy()->addMinutes($editMinutes)->toIso8601String() : null;

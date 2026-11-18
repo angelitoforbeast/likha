@@ -207,14 +207,17 @@
   .lc-msg.me.run-first .lc-bubble { border-bottom-right-radius: 5px; }
   .lc-msg.me.run-mid .lc-bubble { border-top-right-radius: 5px; border-bottom-right-radius: 5px; }
   .lc-msg.me.run-last .lc-bubble { border-top-right-radius: 5px; }
+  #lc { --lc-online: #16a34a; --lc-rec: #dc2626; --lc-mine-edge: #2563eb; --lc-knob: #ffffff; }
   .lc-av-wrap { position: relative; display: inline-flex; flex: none; }
-  .lc-dot { position: absolute; right: -1px; bottom: -1px; width: 12px; height: 12px; border-radius: 50%; background: #16a34a; box-shadow: 0 0 0 2.5px var(--lc-panel); }
-  .lc-av-wrap.sm .lc-dot { width: 9px; height: 9px; box-shadow: 0 0 0 2px var(--lc-panel); }
+  .lc-dot { position: absolute; right: 0; bottom: 0; width: 10px; height: 10px; border-radius: 50%; background: var(--lc-online); box-shadow: 0 0 0 2px var(--lc-panel); }
+  .lc-av-wrap.sm .lc-dot { width: 8px; height: 8px; }
+  /* Long-press on phones opens the reaction bar, not the phone's text selection or link callout. */
+  @media (pointer: coarse) { .lc-msg .lc-bubble, .lc-msg .lc-voice { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; } }
   .lc-row-muted { flex: none; color: var(--lc-faint); font-size: 12px; }
   .lc-pill.muted { background: var(--lc-line); color: var(--lc-text); }
   .lc-hl { font-weight: 700; color: var(--lc-text); background: transparent; }
   .lc-results h3 { font-size: 12px; font-weight: 700; color: var(--lc-muted); margin: 10px 10px 4px; text-transform: none; }
-  .lc-hit-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .lc-row-last.lc-hit-text { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 
   /* Message tools: react + more, beside the bubble on hover / focus (desktop), by long-press on phones. */
   .lc-tools { align-self: center; display: flex; gap: 2px; opacity: 0; }
@@ -224,15 +227,18 @@
   .lc-msg.me .lc-rbar { right: 36px; } .lc-msg:not(.me) .lc-rbar { left: 36px; }
   .lc-rbar button { width: 40px; height: 40px; border: 0; background: transparent; border-radius: 50%; font-size: 22px; line-height: 1; display: grid; place-items: center; }
   .lc-rbar button:hover { background: var(--lc-hover); }
-  .lc-rbar button[aria-pressed="true"] { background: var(--lc-accent-soft); box-shadow: inset 0 0 0 2px var(--lc-accent); }
+  /* Your reaction: a filled disc and a dot under it (not a ring, which is the focus style). */
+  .lc-rbar button { position: relative; }
+  .lc-rbar button[aria-pressed="true"] { background: var(--lc-accent-soft); }
+  .lc-rbar button[aria-pressed="true"]::after { content: ""; position: absolute; bottom: 1px; left: 50%; width: 4px; height: 4px; margin-left: -2px; border-radius: 50%; background: var(--lc-accent); }
   @media (prefers-reduced-motion: no-preference) {
     .lc-rbar button { transition: transform 120ms cubic-bezier(.16, 1, .3, 1); }
     .lc-rbar button:hover { transform: scale(1.18); }
   }
-  .lc-reacts { position: relative; z-index: 1; margin: -8px 8px 0; display: inline-flex; align-items: center; gap: 2px; padding: 1px 7px 1px 5px; min-height: 22px; border: 1px solid var(--lc-line); background: var(--lc-panel); border-radius: 11px; box-shadow: 0 1px 3px rgba(17, 24, 39, .1); font-size: 13px; color: var(--lc-muted); }
+  .lc-reacts { position: relative; z-index: 1; margin: -8px 8px 0; display: inline-flex; align-items: center; gap: 2px; padding: 2px 8px 2px 6px; min-height: 26px; border: 1px solid var(--lc-line); background: var(--lc-panel); border-radius: 11px; box-shadow: 0 1px 3px rgba(17, 24, 39, .1); font-size: 13px; color: var(--lc-muted); }
   .lc-msg.has-reacts + .lc-msg.cont, .lc-msg.has-reacts + .lc-seen-at { margin-top: 6px; }
   .lc-reacts .n { margin-left: 3px; font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
-  .lc-reacts.mine { border-color: #93c5fd; }
+  .lc-reacts.mine { border-color: var(--lc-mine-edge); }
   .lc-who { position: absolute; z-index: 6; top: 100%; margin-top: 4px; background: var(--lc-panel); border: 1px solid var(--lc-line); border-radius: 10px; box-shadow: 0 8px 24px rgba(17, 24, 39, .14); padding: 6px; min-width: 200px; max-width: 280px; max-height: 260px; overflow-y: auto; }
   .lc-msg.me .lc-who { right: 0; } .lc-msg:not(.me) .lc-who { left: 36px; }
   .lc-who h4 { margin: 2px 6px 6px; font-size: 12px; font-weight: 700; color: var(--lc-muted); }
@@ -242,7 +248,7 @@
   .lc-who button { border: 0; background: transparent; padding: 0; text-align: left; width: 100%; display: flex; align-items: center; gap: 8px; color: inherit; }
   .lc-who small { display: block; font-size: 11.5px; color: var(--lc-faint); }
   .lc-edited { font-size: 11.5px; color: var(--lc-faint); margin: 3px 12px 0; }
-  .lc-edited button { border: 0; background: transparent; padding: 0; color: var(--lc-accent-hover); font-size: 11.5px; text-decoration: underline; text-underline-offset: 2px; }
+  .lc-edited button { border: 0; background: transparent; padding: 6px 4px; margin: -6px -4px; color: var(--lc-accent-hover); font-size: 12px; text-decoration: underline; text-underline-offset: 2px; }
   .lc-history { margin: 6px 0 0; padding: 8px 10px; border-radius: 10px; background: var(--lc-bg); border: 1px solid var(--lc-line); font-size: 13px; color: var(--lc-muted); max-width: 100%; }
   .lc-history ol { margin: 0; padding: 0; list-style: none; }
   .lc-history li + li { margin-top: 6px; }
@@ -268,20 +274,23 @@
   /* Voice message */
   .lc-voice { display: flex; align-items: center; gap: 10px; padding: 6px 12px 6px 6px; border-radius: 18px; background: var(--lc-other); min-width: 200px; max-width: 280px; }
   .lc-msg.me .lc-voice { background: var(--lc-accent); color: var(--lc-on-accent); }
-  .lc-voice button { width: 32px; height: 32px; border-radius: 50%; border: 0; display: grid; place-items: center; flex: none; background: var(--lc-panel); color: var(--lc-accent); }
-  .lc-voice .track { flex: 1; height: 4px; border-radius: 2px; background: rgba(17, 24, 39, .15); overflow: hidden; }
-  .lc-msg.me .lc-voice .track { background: rgba(255, 255, 255, .35); }
+  .lc-voice button { width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--lc-field-edge); display: grid; place-items: center; flex: none; background: var(--lc-knob); color: var(--lc-accent); }
+  .lc-msg.me .lc-voice button { border-color: var(--lc-knob); }
+  .lc-voice .track { flex: 1; height: 4px; border-radius: 2px; background: var(--lc-field-edge); overflow: hidden; }
+  .lc-voice .track span { background: var(--lc-text); }
+  .lc-msg.me .lc-voice .track { background: #1e3a8a; }
+  .lc-msg.me .lc-voice .track span { background: var(--lc-on-accent); }
   .lc-voice .track span { display: block; height: 100%; width: 0; background: currentColor; border-radius: 2px; }
   .lc-voice time { font-size: 12.5px; font-variant-numeric: tabular-nums; flex: none; }
   .lc-msg.me .lc-voice :focus-visible { outline-color: var(--lc-on-accent); }
 
   /* Composer: edit bar, mic, recording */
   .lc-rec { display: flex; align-items: center; gap: 10px; padding: 6px 4px 8px 8px; font-size: 13.5px; color: var(--lc-muted); }
-  .lc-rec .red { width: 10px; height: 10px; border-radius: 50%; background: #dc2626; flex: none; }
+  .lc-rec .red { width: 10px; height: 10px; border-radius: 50%; background: var(--lc-rec); flex: none; }
   @media (prefers-reduced-motion: no-preference) { .lc-rec .red { animation: lc-pulse 1s infinite ease-in-out; } @keyframes lc-pulse { 50% { opacity: .35; } } }
   .lc-rec time { font-weight: 700; color: var(--lc-accent); font-variant-numeric: tabular-nums; }
   .lc-rec .hint { margin-left: auto; font-size: 12.5px; }
-  #lc-mic[aria-pressed="true"] { background: #fee2e2; color: #b91c1c; }
+  #lc-mic[aria-pressed="true"] { background: var(--lc-accent-soft); color: var(--lc-accent-hover); }
   #lc-mic { touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 
   /* Alerts popover (list header) and mute menu (thread header) */
@@ -289,8 +298,9 @@
   .lc-pop h3 { margin: 0 0 8px; font-size: 14px; font-weight: 700; }
   .lc-pop p { margin: 0 0 10px; color: var(--lc-muted); font-size: 13px; }
   .lc-switch { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 0 0; border-top: 1px solid var(--lc-line); margin-top: 10px; }
-  .lc-switch button { width: 42px; height: 24px; border-radius: 12px; border: 0; background: var(--lc-line-strong); position: relative; flex: none; }
-  .lc-switch button::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(17, 24, 39, .25); }
+  .lc-switch button { width: 44px; height: 26px; border-radius: 13px; border: 1px solid var(--lc-field-edge); background: var(--lc-line-strong); position: relative; flex: none; }
+  .lc-switch button[aria-checked="true"] { border-color: var(--lc-accent); }
+  .lc-switch button::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: var(--lc-knob); box-shadow: 0 1px 2px rgba(17, 24, 39, .25); }
   .lc-switch button[aria-checked="true"] { background: var(--lc-accent); }
   .lc-switch button[aria-checked="true"]::after { left: 21px; }
   @media (prefers-reduced-motion: no-preference) { .lc-switch button::after { transition: left 140ms cubic-bezier(.16, 1, .3, 1); } }
@@ -302,7 +312,10 @@
 
   /* phone: one column */
   @media (max-width: 1023px) {
-    .lc-send, #lc-mic, #lc-attach { width: 44px; height: 44px; }
+    .lc-send, #lc-mic, #lc-attach, .lc-head-tools .lc-icon-btn, #lc-alerts-btn, .lc-replybar .lc-icon-btn { width: 44px; height: 44px; }
+    .lc-rbar button { width: 44px; height: 44px; }
+    .lc-reacts { min-height: 30px; }
+    .lc-mute-menu button { min-height: 44px; }
     .lc-tools { opacity: 1; }
     .lc-msg:not(.show) .lc-tools:not(:focus-within) { opacity: 0; pointer-events: none; }
     .lc-tools .lc-icon-btn { width: 40px; height: 40px; }
@@ -325,12 +338,12 @@
     <div class="lc-side-head">
       <h2 class="lc-h">Chats</h2>
       <div class="lc-side-tools">
-        <button type="button" class="lc-icon-btn" id="lc-alerts-btn" aria-label="Alerts" aria-haspopup="dialog" aria-expanded="false" aria-controls="lc-alerts"><i class="fa-regular fa-bell" aria-hidden="true"></i></button>
+        <button type="button" class="lc-icon-btn" id="lc-alerts-btn" aria-label="Alerts and sound" title="Alerts and sound" aria-haspopup="dialog" aria-expanded="false" aria-controls="lc-alerts"><i class="fa-solid fa-sliders" aria-hidden="true"></i></button>
         <button type="button" class="lc-btn primary" id="lc-new-btn"><i class="fa-solid fa-pen-to-square" aria-hidden="true"></i> New chat</button>
         {{-- Alerts: asks the browser for notifications only on this button, never on load (spec 300, MP-2). --}}
         <div class="lc-pop" id="lc-alerts" role="dialog" aria-label="Alerts" hidden>
           <h3>Alerts</h3>
-          <p id="lc-notif-text">Get a notification when a message arrives while Likha is open in another page.</p>
+          <p id="lc-notif-text">Get a notification when a message arrives in a chat that is not open.</p>
           <button type="button" class="lc-btn primary" id="lc-notif-allow">Allow notifications</button>
           <div class="lc-switch">
             <span id="lc-sound-label">Sound for new messages</span>
@@ -350,7 +363,8 @@
       <input id="lc-filter" class="lc-field" type="search" placeholder="Search chats and messages" autocomplete="off">
     </div>
     <ul class="lc-list" id="lc-list" aria-label="Chats"></ul>
-    <div class="lc-list lc-results" id="lc-results" aria-live="polite" hidden></div>
+    <div class="lc-list lc-results" id="lc-results" hidden></div>
+    <div class="lc-sr" id="lc-search-status" role="status" aria-live="polite"></div>
     <div class="lc-empty" id="lc-list-empty" hidden>
       <div class="lc-empty-icon"><i class="fa-regular fa-comments" aria-hidden="true"></i></div>
       <h2>No chats yet</h2>
@@ -433,9 +447,9 @@
           <div>Editing message</div>
           <button type="button" class="lc-icon-btn" id="lc-edit-cancel" aria-label="Cancel editing"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
         </div>
-        <div class="lc-rec" id="lc-rec" role="status" hidden>
+        <div class="lc-rec" id="lc-rec" hidden>
           <span class="red" aria-hidden="true"></span>
-          <span>Recording <time id="lc-rec-time">0:00</time> / 2:00</span>
+          <span aria-hidden="true">Recording <time id="lc-rec-time">0:00</time> / 2:00</span>
           <span class="hint" id="lc-rec-hint">Release to send</span>
         </div>
         <div class="lc-chips" id="lc-chips" hidden></div>
@@ -626,6 +640,7 @@
         h('span', { class: 'lc-row-main' },
           h('span', { class: 'lc-row-top' }, h('span', { class: 'lc-row-name', text: r.title }),
             r.muted ? h('span', { class: 'lc-row-muted', title: 'Muted' }, icon('fa-solid fa-bell-slash'), h('span', { class: 'lc-sr', text: ' (muted)' })) : null,
+            activeText(r.active_at) ? h('span', { class: 'lc-sr', text: ` (${activeText(r.active_at).toLowerCase()})` }) : null,
             !r.member ? h('span', { class: 'lc-tag-reading', text: 'Reading' }) : null,
             h('span', { class: 'lc-row-time', text: listTime(r.at) })),
           h('span', { class: 'lc-row-bottom' },
@@ -653,7 +668,14 @@
   async function runSearch(q) {
     const seq = ++S.searchSeq;
     const data = await api('GET', '/chat/search?q=' + encodeURIComponent(q)).catch(() => null);
-    if (seq !== S.searchSeq || $('lc-filter').value.trim() !== q || !data) return;
+    if (seq !== S.searchSeq || $('lc-filter').value.trim() !== q) return;
+    if (!data) {
+      $('lc-results').replaceChildren(h('p', { class: 'lc-empty', role: 'alert', text: 'Search failed. Check your connection and try again.' }));
+      showResults(true); return;
+    }
+    $('lc-search-status').textContent = data.chats.length || data.messages.length
+      ? `${data.chats.length} chat${data.chats.length === 1 ? '' : 's'}, ${data.messages.length} message${data.messages.length === 1 ? '' : 's'} found`
+      : `Nothing found for ${q}`;
     const parts = [];
     if (data.chats.length) parts.push(h('h3', { text: 'Chats' }), h('ul', { class: 'lc-msgs' }, data.chats.map((r) => rowEl(S.rows.get(r.id) || r))));
     if (data.messages.length) {
@@ -663,7 +685,9 @@
           avatar(row ? row.avatar : { initials: initialsOf(m.title), tone: null }),
           h('span', { class: 'lc-row-main' },
             h('span', { class: 'lc-row-top' }, h('span', { class: 'lc-row-name', text: m.title }), h('span', { class: 'lc-row-time', text: listTime(m.at) })),
-            h('span', { class: 'lc-row-bottom' }, h('span', { class: 'lc-row-last lc-hit-text' }, `${m.sender}: `, ...marked(m.text, q))))));
+            // In a direct chat the title is already the other person; only "You:" is added there (as the list).
+            h('span', { class: 'lc-row-bottom' }, h('span', { class: 'lc-row-last lc-hit-text' },
+              (row && row.kind === 'group') || m.sender === 'You' || !row ? `${m.sender}: ` : null, ...marked(m.text, q))))));
       })));
     }
     if (!parts.length) parts.push(h('p', { class: 'lc-empty', text: `Nothing found for “${q}”.` }));
@@ -678,7 +702,10 @@
 
   // ── thread ──
   async function openConv(id, opts = {}) {
-    closeNew(); closeInfo();
+    closeNew(); closeInfo(); closePops();
+    // A recording belongs to the chat it started in; players of the last chat stop and are let go.
+    if (R.rec || R.starting) stopRec(true);
+    releasePlayers();
     S.open = id; S.conv = null;
     root.dataset.view = 'thread';
     if (!opts.keepUrl) {
@@ -696,8 +723,9 @@
     }
     if (S.open !== id) return;
     S.conv = data.conversation; S.msgs = data.messages; S.hasMore = data.has_more; S.reads = data.reads;
-    S.reply = null; S.files = []; S.edit = null; S.hit = null; S.history.clear();
-    $('lc-editbar').hidden = true; renderTyping([]);
+    if (S.edit) cancelEdit();
+    S.reply = null; S.files = []; S.hit = null; S.history.clear();
+    renderTyping([]);
     const row = S.rows.get(id);
     if (row) { row.unread = 0; renderList(); }
     $('lc-placeholder').hidden = true; $('lc-thread').hidden = false;
@@ -715,6 +743,8 @@
   }
   function closeThread(opts = {}) {
     if (!opts.keepUrl && history.state && history.state.pushed) { history.back(); return; }   // popstate closes it
+    if (R.rec || R.starting) stopRec(true);
+    releasePlayers();
     S.open = null; S.conv = null; root.dataset.view = 'list';
     if (!opts.keepUrl) history.replaceState(null, '', '/chat');
     $('lc-thread').hidden = true; $('lc-placeholder').hidden = false; closeInfo();
@@ -733,7 +763,10 @@
     $('lc-thread-title').textContent = c.title;
     let sub = '';
     if (c.me.left) sub = 'You left this group';
-    else if (c.kind === 'group') sub = `${c.members.length} member${c.members.length === 1 ? '' : 's'}`;
+    else if (c.kind === 'group') {
+      sub = `${c.members.length} member${c.members.length === 1 ? '' : 's'}`;
+      if (c.members.some((m) => m.id !== BOOT.me.id && activeText(m.active_at) === 'Active now')) sub += ' · Active now';
+    }
     else sub = (other && activeText(other.active_at)) || (other && other.role ? other.role : 'Direct chat');
     if (c.me.muted) sub += c.me.muted_until ? ` · Muted until ${clock(new Date(c.me.muted_until))}` : ' · Muted';
     $('lc-thread-sub').textContent = sub;
@@ -786,9 +819,10 @@
   function renderAlerts() {
     const allow = $('lc-notif-allow'); const text = $('lc-notif-text');
     if (!notifSupported) { allow.hidden = true; text.textContent = 'This browser cannot show notifications. Likha plays the sound instead.'; }
-    else if (Notification.permission === 'granted') { allow.hidden = true; text.textContent = 'Notifications are on. You get one when a message arrives in a chat that is not open.'; }
+    else if (Notification.permission === 'granted' && window.likhaChatUnread && !window.likhaChatUnread.notifWorks()) { allow.hidden = true; text.textContent = 'This browser shows Likha alerts as a sound only. Keep Likha open on screen to hear them.'; }
+    else if (Notification.permission === 'granted') { allow.hidden = true; text.textContent = 'Notifications are on. They come while Likha is open on screen in a tab, for chats that are not open.'; }
     else if (Notification.permission === 'denied') { allow.hidden = true; text.textContent = 'Notifications are blocked. Allow them for Likha in this browser’s site settings.'; }
-    else { allow.hidden = false; text.textContent = 'Get a notification when a message arrives in a chat that is not open.'; }
+    else { allow.hidden = false; text.textContent = 'Get a notification when a message arrives in a chat that is not open, while Likha is open on screen in a tab.'; }
     $('lc-sound').setAttribute('aria-checked', String(window.likhaChatUnread ? window.likhaChatUnread.soundOn() : true));
   }
   $('lc-alerts-btn').addEventListener('click', (e) => {
@@ -865,14 +899,16 @@
       out.push(msgEl(e.m, e.cont, nextCont, pos, arrivedIds.has(e.m.id)));
       const who = seen.get(e.m.id);
       if (who) {
-        out.push(h('li', { class: 'lc-seen-at', 'aria-label': `Seen by ${who.map((r) => r.name).join(', ')}` },
+        out.push(h('li', { class: 'lc-seen-at' },
+          h('span', { class: 'lc-sr', text: `Seen by ${who.map((r) => r.name).join(', ')}` }),
           ...who.slice(0, 8).map((r) => { const a = avatar(r, 'xs'); a.setAttribute('title', `Seen by ${r.name}`); return a; }),
           ...(who.length > 8 ? [h('span', { class: 'lc-row-time', text: `+${who.length - 8}` })] : [])));
       }
     });
     const active = document.activeElement;
     const keepLi = active && active.closest && active.closest('#lc-msgs > li');
-    const keep = keepLi ? { id: keepLi.dataset.id, cls: ['lc-act', 'lc-react', 'lc-quote', 'lc-file', 'lc-reacts'].find((c) => active.classList.contains(c)) } : null;
+    // Every control in a message has a stable data-k, so focus survives the redraw of a poll (popovers included).
+    const keep = keepLi && active.dataset && active.dataset.k ? { id: keepLi.dataset.id, k: active.dataset.k } : null;
     // An open menu, reaction bar or "who reacted" survives the redraw of a poll.
     const openPop = list.querySelector('.lc-menu, .lc-rbar, .lc-who');
     const pop = openPop ? { id: openPop.closest('li').dataset.id, kind: openPop.classList.contains('lc-menu') ? 'menu' : openPop.classList.contains('lc-rbar') ? 'rbar' : 'who' } : null;
@@ -880,16 +916,21 @@
     if (pop) {
       const li = list.querySelector(`li[data-id="${pop.id}"]`); const mm = byId(Number(pop.id));
       if (li && mm && !mm.removed) { li.classList.add('show'); (pop.kind === 'menu' ? menu : pop.kind === 'rbar' ? reactBar : whoReacted)(li, mm, false); }
-    } else if (keep) {
-      const li = list.querySelector(`li[data-id="${keep.id}"]`);
-      const el = li && (keep.cls ? li.querySelector('.' + keep.cls) : null);
-      if (el) el.focus({ preventScroll: true });
     }
+    if (keep) refocus(keep.id, keep.k);
     $('lc-earlier').hidden = !S.hasMore;
     const empty = $('lc-thread-empty');
     empty.hidden = S.msgs.length > 0;
     if (!S.msgs.length) empty.textContent = S.conv.kind === 'group' ? 'No messages yet. Say hello to the group.' : `No messages yet. Say hello to ${S.conv.title}.`;
     if (stick) toBottom(stick === 'smooth');
+  }
+  function refocus(id, ...keys) {
+    const li = $('lc-msgs').querySelector(`li[data-id="${id}"]`);
+    if (!li) return;
+    for (const k of keys) {
+      const el = li.querySelector(`[data-k="${CSS.escape(k)}"]`);
+      if (el) { li.classList.add('show'); el.focus({ preventScroll: true }); return; }
+    }
   }
   const canAct = (m) => !m.pending && !m.failed && !m.removed && S.conv.me.can_post;
   function msgEl(m, cont, nextCont, pos, arrived) {
@@ -908,7 +949,7 @@
     if (m.removed) bubble.textContent = 'Message removed';
     else {
       if (m.reply) {
-        bubble.append(h('button', { type: 'button', class: 'lc-quote', onclick: (e) => { e.stopPropagation(); jumpTo(m.reply.id); } },
+        bubble.append(h('button', { type: 'button', class: 'lc-quote', 'data-k': 'quote', onclick: (e) => { e.stopPropagation(); jumpTo(m.reply.id); } },
           h('b', { text: m.reply.name }), h('span', { text: m.reply.removed ? 'Message removed' : (m.reply.text || '') })));
       }
       if (m.html) { const t = h('div'); t.innerHTML = m.html; bubble.append(t); }   // escaped by the server (ChatText)
@@ -920,17 +961,17 @@
     else if (m.removed) col.append(bubble);
     for (const f of voices) col.append(voiceEl(f));
     if (imgs.length) col.append(h('div', { class: 'lc-imgs ' + (imgs.length === 1 ? 'n1' : 'multi') },
-      imgs.map((f) => h('button', { type: 'button', 'aria-label': `Open photo ${f.name}`, onclick: (e) => { e.stopPropagation(); lightbox(f); } },
+      imgs.map((f, i) => h('button', { type: 'button', 'data-k': `photo:${i}`, 'aria-label': `Open photo ${f.name}`, onclick: (e) => { e.stopPropagation(); lightbox(f); } },
         h('img', { src: f.url, alt: f.name, loading: 'lazy' })))));
-    for (const f of docs) col.append(h('a', { class: 'lc-file', href: f.url, download: f.name },
-      icon('fa-regular fa-file-lines'), h('span', {}, f.name, h('small', { text: size(f.size) }))));
+    docs.forEach((f, i) => col.append(h('a', { class: 'lc-file', 'data-k': `file:${i}`, href: f.url, download: f.name },
+      icon('fa-regular fa-file-lines'), h('span', {}, f.name, h('small', { text: size(f.size) })))));
     const li = h('li', { class: cls.join(' '), 'data-id': m.id });
     // Reactions: up to three emoji and the total; tap for who reacted.
     if (!m.removed && m.reactions && m.reactions.length) {
       const total = m.reactions.reduce((n, r) => n + r.count, 0);
       const mine = m.reactions.some((r) => r.mine);
       col.append(h('button', {
-        type: 'button', class: 'lc-reacts' + (mine ? ' mine' : ''), 'aria-haspopup': 'dialog',
+        type: 'button', class: 'lc-reacts' + (mine ? ' mine' : ''), 'data-k': 'reacts', 'aria-haspopup': 'dialog',
         'aria-label': `Reactions: ${m.reactions.map((r) => `${EMOJI_NAMES[r.emoji] || r.emoji} ${r.count}`).join(', ')}. Show who reacted`,
         onclick: (e) => { e.stopPropagation(); whoReacted(li, m); },
       }, ...m.reactions.slice(0, 3).map((r) => h('span', { 'aria-hidden': 'true', text: r.emoji })), total > 1 ? h('span', { class: 'n', 'aria-hidden': 'true', text: String(total) }) : null));
@@ -938,21 +979,21 @@
     // "Edited" always shows; the owner can open the earlier versions.
     if (m.edited && !m.removed) {
       const open = S.history.has(m.id);
-      col.append(h('div', { class: 'lc-edited' }, 'Edited',
-        m.history && m.history.length ? [' · ', h('button', { type: 'button', 'aria-expanded': String(open), onclick: (e) => { e.stopPropagation(); open ? S.history.delete(m.id) : S.history.add(m.id); renderMessages(false); } }, open ? 'Hide history' : 'History')] : null));
+      col.append(h('div', { class: 'lc-edited' }, m.edited_at ? `Edited ${clock(new Date(m.edited_at))}` : 'Edited',
+        m.history && m.history.length ? [' · ', h('button', { type: 'button', 'data-k': 'history', 'aria-expanded': String(open), onclick: (e) => { e.stopPropagation(); open ? S.history.delete(m.id) : S.history.add(m.id); renderMessages(false); } }, open ? 'Hide history' : 'History')] : null));
       if (open && m.history) {
         col.append(h('div', { class: 'lc-history' }, h('ol', {}, m.history.map((x) => h('li', {}, h('time', { text: x.at ? fullTime(x.at) : '' }), h('span', { text: x.text }))))));
       }
     }
-    const meta = m.failed ? h('div', { class: 'lc-meta', role: 'alert' }, icon('fa-solid fa-circle-exclamation'), ` Not sent. ${m.error || ''} `, h('button', { type: 'button', class: 'lc-btn lc-retry', onclick: () => retry(m) }, 'Retry'))
+    const meta = m.failed ? h('div', { class: 'lc-meta', role: 'alert' }, icon('fa-solid fa-circle-exclamation'), ` Not sent. ${m.error || ''} `, h('button', { type: 'button', class: 'lc-btn lc-retry', 'data-k': 'retry', onclick: () => retry(m) }, 'Retry'))
       : h('div', { class: 'lc-meta', text: m.pending ? 'Sending…' : fullTime(m.at) });
     col.append(meta);
 
     li.append(h('div', { class: 'lc-av-slot' }, !me && !nextCont ? avatar({ ...m.sender, ai: m.sender.kind === 'ai' }, 'sm') : null), col);
     if (canAct(m)) {
       li.append(h('div', { class: 'lc-tools' },
-        h('button', { type: 'button', class: 'lc-icon-btn lc-react', 'aria-label': 'React', 'aria-haspopup': 'true', 'aria-expanded': 'false', onclick: (e) => { e.stopPropagation(); reactBar(li, m); } }, icon('fa-regular fa-face-smile')),
-        h('button', { type: 'button', class: 'lc-icon-btn lc-act', 'aria-label': `Actions for ${me ? 'your message' : 'the message from ' + m.sender.name}`, 'aria-haspopup': 'menu', 'aria-expanded': 'false', onclick: (e) => { e.stopPropagation(); menu(li, m); } }, icon('fa-solid fa-ellipsis'))));
+        h('button', { type: 'button', class: 'lc-icon-btn lc-react', 'data-k': 'react', 'aria-label': 'React', 'aria-expanded': 'false', onclick: (e) => { e.stopPropagation(); reactBar(li, m); } }, icon('fa-regular fa-face-smile')),
+        h('button', { type: 'button', class: 'lc-icon-btn lc-act', 'data-k': 'act', 'aria-label': `Actions for ${me ? 'your message' : 'the message from ' + m.sender.name}`, 'aria-haspopup': 'menu', 'aria-expanded': 'false', onclick: (e) => { e.stopPropagation(); menu(li, m); } }, icon('fa-solid fa-ellipsis'))));
     }
     li.addEventListener('click', (e) => {
       if (li._long) { li._long = false; return; }   // the click that ends a long-press
@@ -961,12 +1002,16 @@
     });
     if (canAct(m)) {
       // Long-press on a phone (and right-click): the reaction bar; the ⋯ beside it has Reply, Edit and Remove.
-      li.addEventListener('contextmenu', (e) => { if (e.target.closest('a')) return; e.preventDefault(); li.classList.add('show'); reactBar(li, m, false); });
+      // Android fires contextmenu on a long-press; on a desktop the native right-click menu (Copy…) stays.
+      li.addEventListener('contextmenu', (e) => { if (!coarse || e.target.closest('a')) return; e.preventDefault(); li.classList.add('show'); reactBar(li, m, false); });
       let press = null;
       li.addEventListener('pointerdown', (e) => {
         if (e.pointerType !== 'touch' || e.target.closest('a,button')) return;
         const x = e.clientX; const y = e.clientY;
-        press = { x, y, t: setTimeout(() => { li._long = true; li.classList.add('show'); reactBar(li, m, false); if (navigator.vibrate) navigator.vibrate(10); }, 450) };
+        press = { x, y, t: setTimeout(() => {
+          li._long = true; setTimeout(() => { li._long = false; }, 600);   // only the click that ends this press is skipped
+          li.classList.add('show'); reactBar(li, m, false); if (navigator.vibrate) navigator.vibrate(10);
+        }, 450) };
       });
       const cancel = () => { if (press) { clearTimeout(press.t); press = null; } };
       li.addEventListener('pointermove', (e) => { if (press && Math.hypot(e.clientX - press.x, e.clientY - press.y) > 10) cancel(); });
@@ -974,11 +1019,16 @@
     }
     return li;
   }
+  // Opening another chat stops the players of this one and lets them go (and the local copies of my recordings).
+  function releasePlayers() {
+    for (const [url, el] of S.players) { el._audio.pause(); el._audio.removeAttribute('src'); if (url.startsWith('blob:')) URL.revokeObjectURL(url); }
+    S.players.clear();
+  }
   // One player per voice message, kept across redraws so playback does not stop when a poll redraws the list.
   function voiceEl(f) {
     if (S.players.has(f.url)) return S.players.get(f.url);
     const audio = new Audio(); audio.preload = 'none'; audio.src = f.url;
-    const btn = h('button', { type: 'button', 'aria-label': `Play voice message, ${dur(f.duration)}` }, icon('fa-solid fa-play'));
+    const btn = h('button', { type: 'button', 'data-k': 'voice', 'aria-label': `Play voice message, ${dur(f.duration)}` }, icon('fa-solid fa-play'));
     const fill = h('span'); const time = h('time', { text: dur(f.duration) });
     const length = () => (audio.duration && isFinite(audio.duration) ? audio.duration : f.duration);
     btn.addEventListener('click', (e) => {
@@ -1009,7 +1059,7 @@
     const had = li.querySelector('.lc-rbar'); closeMenus(); if (had && focusFirst) return;
     const mine = myReaction(m);
     const items = BOOT.reactions.map((e) => h('button', {
-      type: 'button', 'aria-label': `${mine === e ? 'Remove' : 'React with'} ${EMOJI_NAMES[e] || e}`, 'aria-pressed': String(mine === e), text: e,
+      type: 'button', 'data-k': `rbar:${e}`, 'aria-label': `${mine === e ? 'Remove' : 'React with'} ${EMOJI_NAMES[e] || e}`, 'aria-pressed': String(mine === e), text: e,
       onclick: (ev) => { ev.stopPropagation(); react(m, e); },
     }));
     const bar = h('div', { class: 'lc-rbar', role: 'toolbar', 'aria-label': 'Reactions' }, items);
@@ -1027,25 +1077,32 @@
     const had = li.querySelector('.lc-who'); closeMenus(); if (had && focusFirst) return;
     const rows = m.reactions.flatMap((r) => r.people.map((p) => ({ p, e: r.emoji })))
       .sort((a, b) => (b.p.id === BOOT.me.id) - (a.p.id === BOOT.me.id));
-    const box = h('div', { class: 'lc-who', role: 'dialog', 'aria-label': 'Who reacted', tabindex: '-1' }, h('h4', { text: 'Reactions' }),
+    const box = h('div', { class: 'lc-who', role: 'dialog', 'aria-label': 'Who reacted', tabindex: '-1' }, h('h4', { text: 'Who reacted' }),
       h('ul', {}, rows.map(({ p, e }) => h('li', {}, p.id === BOOT.me.id && S.conv.me.can_post
-        ? h('button', { type: 'button', onclick: (ev) => { ev.stopPropagation(); react(m, e); } }, personAv(p, 'sm'), h('span', {}, 'You', h('small', { text: 'Tap to remove' })), h('span', { class: 'e', 'aria-label': EMOJI_NAMES[e], text: e }))
-        : [personAv(p, 'sm'), h('span', { text: p.name }), h('span', { class: 'e', 'aria-label': EMOJI_NAMES[e], text: e })]))));
+        ? h('button', { type: 'button', 'data-k': 'who', onclick: (ev) => { ev.stopPropagation(); react(m, e); } }, personAv(p, 'sm'), h('span', {}, 'You', h('small', { text: 'Remove' })), h('span', { class: 'e' }, h('span', { 'aria-hidden': 'true', text: e }), h('span', { class: 'lc-sr', text: ` ${EMOJI_NAMES[e] || ''}` })))
+        : [personAv(p, 'sm'), h('span', { text: p.name }), h('span', { class: 'e' }, h('span', { 'aria-hidden': 'true', text: e }), h('span', { class: 'lc-sr', text: ` ${EMOJI_NAMES[e] || ''}` }))]))));
     box.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeMenus(true); } });
-    li.append(box); if (focusFirst) (box.querySelector('button') || box).focus();
+    li.append(box);
+    // Near the composer it would be cut off: open it above the message instead.
+    const room = $('lc-scroll').getBoundingClientRect().bottom - li.getBoundingClientRect().bottom;
+    if (room < box.offsetHeight + 8) { box.style.top = 'auto'; box.style.bottom = '100%'; box.style.marginTop = '0'; box.style.marginBottom = '4px'; }
+    if (focusFirst) (box.querySelector('button') || box).focus({ preventScroll: true });
   }
   const replaceMsg = (nm) => { const i = S.msgs.findIndex((x) => x.id === nm.id); if (i >= 0) S.msgs[i] = nm; };
   async function react(m, e) {
     closeMenus();
-    try { const d = await api('POST', `/chat/${S.open}/messages/${m.id}/reactions`, { emoji: e }); replaceMsg(d.message); renderMessages(false); }
-    catch (err) { $('lc-err').textContent = err.message; }
+    try {
+      const d = await api('POST', `/chat/${S.open}/messages/${m.id}/reactions`, { emoji: e });
+      replaceMsg(d.message); renderMessages(false);
+      refocus(m.id, 'reacts', 'react');   // keyboard users stay on the message they reacted to
+    } catch (err) { $('lc-err').textContent = err.message; }
   }
   const editable = (m) => m.sender.me && m.edit_until && new Date(m.edit_until) > new Date() && !m.files.some((f) => f.kind === 'audio');
   function menu(li, m, focusFirst = true) {
     const had = li.querySelector('.lc-menu'); closeMenus(); if (had && focusFirst) return;
-    const items = [h('button', { type: 'button', role: 'menuitem', onclick: () => { closeMenus(); startReply(m); } }, icon('fa-solid fa-reply'), 'Reply')];
-    if (editable(m)) items.push(h('button', { type: 'button', role: 'menuitem', onclick: () => { closeMenus(); startEdit(m); } }, icon('fa-solid fa-pen'), 'Edit'));
-    if (m.sender.me) items.push(h('button', { type: 'button', role: 'menuitem', class: 'danger', style: 'color:var(--lc-danger)', onclick: () => { closeMenus(); removeMsg(m); } }, icon('fa-regular fa-trash-can'), 'Remove'));
+    const items = [h('button', { type: 'button', role: 'menuitem', 'data-k': 'menu:reply', onclick: () => { closeMenus(); startReply(m); } }, icon('fa-solid fa-reply'), 'Reply')];
+    if (editable(m)) items.push(h('button', { type: 'button', role: 'menuitem', 'data-k': 'menu:edit', onclick: () => { closeMenus(); startEdit(m); } }, icon('fa-solid fa-pen'), 'Edit'));
+    if (m.sender.me) items.push(h('button', { type: 'button', role: 'menuitem', 'data-k': 'menu:remove', class: 'danger', style: 'color:var(--lc-danger)', onclick: () => { closeMenus(); removeMsg(m); } }, icon('fa-regular fa-trash-can'), 'Remove'));
     const box = h('div', { class: 'lc-menu', role: 'menu' }, items);
     box.addEventListener('keydown', (e) => {
       const i = items.indexOf(document.activeElement);
@@ -1075,14 +1132,18 @@
   $('lc-earlier').addEventListener('click', loadEarlier);
 
   // ── typing (MP-5): "Rey is typing…" from the poll ──
+  // Changed only when the words change, so a screen reader hears "Rey is typing…" once, not every poll.
   function renderTyping(list) {
     S.typing = list;
     const box = $('lc-typing');
-    if (!list.length) { box.replaceChildren(); return; }
     const first = (n) => String(n || 'Someone').split(' ')[0];
-    const text = list.length === 1 ? `${first(list[0].name)} is typing…`
+    const text = !list.length ? '' : list.length === 1 ? `${first(list[0].name)} is typing…`
       : list.length === 2 ? `${first(list[0].name)} and ${first(list[1].name)} are typing…` : 'Several people are typing…';
-    box.replaceChildren(h('span', { class: 'lc-dots', 'aria-hidden': 'true' }, h('i'), h('i'), h('i')), h('span', { text }));
+    if (box.dataset.text === text) return;
+    const stick = S.conv && nearBottom();
+    box.dataset.text = text;
+    box.replaceChildren(...(text ? [h('span', { class: 'lc-dots', 'aria-hidden': 'true' }, h('i'), h('i'), h('i')), h('span', { text })] : []));
+    if (stick) toBottom();
   }
 
   // ── composer ──
@@ -1134,10 +1195,13 @@
   function startEdit(m) {
     S.reply = null; renderReply();
     S.edit = m; $('lc-editbar').hidden = false;
+    input.setAttribute('aria-describedby', 'lc-editbar'); $('lc-send').setAttribute('aria-label', 'Save edit');
     input.value = m.text || ''; grow(); input.focus();
     input.setSelectionRange(input.value.length, input.value.length);
   }
-  function cancelEdit() { S.edit = null; $('lc-editbar').hidden = true; input.value = ''; grow(); $('lc-err').textContent = ''; }
+  function cancelEdit() {
+    input.removeAttribute('aria-describedby'); $('lc-send').setAttribute('aria-label', 'Send');
+    S.edit = null; $('lc-editbar').hidden = true; input.value = ''; grow(); $('lc-err').textContent = ''; }
   $('lc-edit-cancel').addEventListener('click', () => { cancelEdit(); input.focus(); });
   async function saveEdit() {
     const m = S.edit; const body = input.value.trim();
@@ -1168,7 +1232,7 @@
   }
   async function deliver(p) {
     const fd = new FormData();
-    const conv = S.open;
+    const conv = p._form.conv || S.open;   // a voice message goes to the chat it was recorded in
     let url = `/chat/${conv}/messages`;
     if (p._form.voice) {
       fd.append('voice', p._form.voice, `voice.${p._form.ext}`); fd.append('duration', p._form.duration);
@@ -1180,6 +1244,8 @@
     }
     try {
       const data = await api('POST', url, fd);
+      // The local copy of a recording is no longer needed once the server has it.
+      for (const f of p.files || []) if (f.url && f.url.startsWith('blob:')) { const el = S.players.get(f.url); if (el) el._audio.pause(); S.players.delete(f.url); URL.revokeObjectURL(f.url); }
       if (S.open !== conv) return;
       const i = S.msgs.indexOf(p);
       if (byId(data.message.id)) S.msgs.splice(i, 1); else S.msgs[i] = data.message;
@@ -1216,13 +1282,18 @@
     R.chunks = [];
     R.rec.addEventListener('dataavailable', (e) => { if (e.data && e.data.size) R.chunks.push(e.data); });
     R.rec.addEventListener('stop', finishRec);
-    R.rec.start(250); R.start = Date.now();
+    R.rec.start(250); R.start = Date.now(); R.conv = S.open;
+    const stick = nearBottom();
     mic.setAttribute('aria-pressed', 'true'); $('lc-rec').hidden = false; $('lc-rec-hint').textContent = recHint();
+    if (stick) toBottom();
+    // Said once (the timer itself is not read out every second).
+    $('lc-announce').textContent = R.keys ? 'Recording. Press Enter to send, Escape to cancel.' : 'Recording. Release to send.';
     tick(); R.timer = setInterval(tick, 250);
   }
   function tick() {
     const s = Math.floor((Date.now() - R.start) / 1000);
     $('lc-rec-time').textContent = dur(s);
+    if (s === BOOT.voice_max_seconds - 10 && !R.warned) { R.warned = true; $('lc-announce').textContent = '10 seconds left.'; }
     if (s >= BOOT.voice_max_seconds) stopRec(false);   // at 2:00 it sends by itself
   }
   function stopRec(cancel) {
@@ -1234,7 +1305,9 @@
     clearInterval(R.timer); stopStream();
     const ms = Date.now() - R.start;
     const type = (R.rec && R.rec.mimeType) || 'audio/webm';
-    R.rec = null; R.keys = false;
+    const conv = R.conv;
+    R.rec = null; R.keys = false; R.warned = false;
+    $('lc-announce').textContent = R.cancel || ms < 1000 ? 'Recording cancelled.' : '';
     mic.setAttribute('aria-pressed', 'false'); $('lc-rec').hidden = true;
     if (R.cancel || ms < 1000) return;   // under a second: a slip, not a message
     const blob = new Blob(R.chunks, { type });
@@ -1245,11 +1318,15 @@
       id: --tempId, pending: true, removed: false, at: new Date().toISOString(), text: '', html: '', reply: null, reactions: [],
       files: [{ kind: 'audio', url: URL.createObjectURL(blob), duration: secs, name: 'Voice message' }],
       sender: { kind: 'user', id: BOOT.me.id, me: true, name: BOOT.me.name },
-      _form: { voice: blob, ext, duration: secs },
+      _form: { voice: blob, ext, duration: secs, conv },
     };
-    S.msgs.push(pending); renderMessages(true);
+    if (S.open === conv) { S.msgs.push(pending); renderMessages(true); }
     deliver(pending);
   }
+  // A held mic that loses the pointer, the window or the tab is a cancelled recording (it never sends by itself).
+  mic.addEventListener('lostpointercapture', () => { if (!R.keys && (R.rec || R.starting)) stopRec(R.away); });
+  window.addEventListener('blur', () => { if (R.rec || R.starting) stopRec(true); });
+  document.addEventListener('visibilitychange', () => { if (document.hidden && (R.rec || R.starting)) stopRec(true); });
   mic.addEventListener('pointerdown', (e) => {
     if (e.button !== 0) return;
     e.preventDefault();
