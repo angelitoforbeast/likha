@@ -121,7 +121,7 @@ class AiFollowupAutoApproveTest extends AiFollowupTestCase
         $this->reviewed($this->followup($ben, $this->lateTask($ben, ['title' => 'Reply to comments']), ['description' => 'Hi Ben, by hand.']), $ceo, 'approved');
 
         $html = $this->actingAs($ceo)->get('/checklist/ai-followups?tab=sent')->assertOk()
-            ->assertSee('Sent automatically')
+            ->assertSee('Auto-approved Nov 18')
             ->getContent();
         $this->assertSame(1, substr_count($html, 'data-auto-chip'));
         $this->assertMatchesRegularExpression('/data-auto-chip[^>]*>\s*Auto\s*</', $html);
@@ -132,7 +132,7 @@ class AiFollowupAutoApproveTest extends AiFollowupTestCase
         // isa lang: ang kay Ben, na binago talaga ng CEO
         $this->assertSame(1, substr_count($this->actingAs($ceo)->get('/checklist/ai-followups?tab=sent')->assertOk()->getContent(), 'Edited by you'));
         // ang paliwanag sa itaas ay sumusunod sa switch
-        $this->actingAs($ceo)->get('/checklist/ai-followups')->assertSee('Auto-approve is on: new ones go to staff at once, without your review.')
+        $this->actingAs($ceo)->get('/checklist/ai-followups')->assertSee('Auto-approve is on: new follow-ups go to staff at once, without your review.')
             ->assertDontSee('Staff see one only after you approve it.');
     }
 
@@ -192,7 +192,8 @@ class AiFollowupAutoApproveTest extends AiFollowupTestCase
 
         $this->assertSame('draft', $old->fresh()->review_status);
         $this->assertSame(0, ChatMessage::count());
-        $this->actingAs($this->ceo())->get('/checklist/ai-followups')->assertOk()->assertSee('data-card="' . $old->id . '"', false);
+        $this->actingAs($this->ceo())->get('/checklist/ai-followups')->assertOk()->assertSee('data-card="' . $old->id . '"', false)
+            ->assertSee('Made before auto-approve was on. These still wait for you.');
     }
 
     public function test_auto_approved_rows_are_not_fed_to_the_prompt_as_the_ceos_decisions(): void
