@@ -1616,4 +1616,14 @@ Route::middleware(['web', 'auth'])->prefix('chat')->name('chat.')->group(functio
     Route::delete('/{conversation}/members/{user}',            [$group, 'removeMember'])->whereNumber(['conversation', 'user'])->name('members.remove');
     Route::post  ('/{conversation}/leave',                     [$group, 'leave'])       ->whereNumber('conversation')->name('leave');
     Route::post  ('/{conversation}/join',                      [$group, 'join'])        ->whereNumber('conversation')->name('join');
+
+    // Spec 300 (gaya ng Messenger): reactions, edit, typing, mute, search, voice. Membership (o CEO) sa controller.
+    $msgr = \App\Http\Controllers\ChatMessengerController::class;
+    Route::get   ('/search',                                   [$msgr, 'search'])       ->middleware('throttle:60,1')->name('search');
+    Route::post  ('/{conversation}/messages/{message}/reactions', [$msgr, 'react'])     ->whereNumber(['conversation', 'message'])->middleware('throttle:120,1')->name('react');
+    Route::patch ('/{conversation}/messages/{message}',        [$msgr, 'edit'])         ->whereNumber(['conversation', 'message'])->middleware('throttle:60,1')->name('edit');
+    Route::post  ('/{conversation}/typing',                    [$msgr, 'typing'])       ->whereNumber('conversation')->middleware('throttle:60,1')->name('typing');
+    Route::post  ('/{conversation}/mute',                      [$msgr, 'mute'])         ->whereNumber('conversation')->middleware('throttle:30,1')->name('mute');
+    Route::post  ('/{conversation}/voice',                     [$msgr, 'voice'])        ->whereNumber('conversation')->middleware('throttle:30,1')->name('voice.store');
+    Route::get   ('/{conversation}/messages/{message}/voice',  [$msgr, 'voiceFile'])    ->whereNumber(['conversation', 'message'])->name('voice');
 });

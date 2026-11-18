@@ -15,7 +15,13 @@ class ChatMember extends Model
 
     protected function casts(): array
     {
-        return ['joined_at' => 'datetime', 'left_at' => 'datetime'];
+        return ['joined_at' => 'datetime', 'left_at' => 'datetime', 'muted_until' => 'datetime'];
+    }
+
+    /** Spec 300: muted now (no alerts, not in the unread total). */
+    public function isMuted(): bool
+    {
+        return $this->muted_until !== null && $this->muted_until->isFuture();
     }
 
     public function conversation(): BelongsTo
