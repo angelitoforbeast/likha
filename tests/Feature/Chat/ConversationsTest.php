@@ -9,11 +9,15 @@ use Illuminate\Support\Facades\DB;
 /** CH-1: the list of a person's conversations, direct chats (one per pair), the people search. */
 class ConversationsTest extends ChatTestCase
 {
-    public function test_the_page_opens_for_any_signed_in_person_and_states_the_owner_can_read(): void
+    public function test_the_page_opens_for_any_signed_in_person_and_only_the_owner_sees_the_lock_line(): void
     {
         $ana = $this->person('Data Encoder', 'Ana Cruz');
 
+        // Spec 304: "the owner's page says so"; staff do not get the line at all.
         $this->actingAs($ana)->get('/chat')
+            ->assertOk()
+            ->assertDontSee('The owner can read every conversation in Likha Chat');
+        $this->actingAs($this->ceo())->get('/chat')
             ->assertOk()
             ->assertSee('The owner can read every conversation in Likha Chat');
     }

@@ -5,7 +5,7 @@ namespace Tests\Feature\Chat;
 use App\Models\ChatMember;
 use App\Models\ChatMessage;
 
-/** CH-4: the CEO reads any conversation (and the page says so) but joins before posting. */
+/** CH-4: the CEO reads any conversation (and his page says so, spec 304) but joins before posting. */
 class CeoTest extends ChatTestCase
 {
     public function test_the_ceo_has_an_all_conversations_filter_and_others_do_not(): void
@@ -77,11 +77,13 @@ class CeoTest extends ChatTestCase
         $this->actingAs($ceo)->postJson("/chat/{$g->id}/join")->assertUnprocessable();     // already in it
     }
 
-    public function test_every_thread_states_that_the_owner_can_read(): void
+    public function test_only_the_owner_sees_the_lock_line_on_a_thread(): void
     {
         $ana = $this->person();
         $c = $this->direct($ana, $this->person());
 
-        $this->actingAs($ana)->get("/chat?c={$c->id}")->assertSee('The owner can read every conversation in Likha Chat');
+        // Spec 304: the line is for the owner only.
+        $this->actingAs($ana)->get("/chat?c={$c->id}")->assertDontSee('The owner can read every conversation in Likha Chat');
+        $this->actingAs($this->ceo())->get("/chat?c={$c->id}")->assertSee('The owner can read every conversation in Likha Chat');
     }
 }
