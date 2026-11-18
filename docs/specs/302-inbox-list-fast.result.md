@@ -74,7 +74,19 @@ New: `tests/Feature/Chatblast/ChatbotInboxListFastTest.php` (sqlite in memory, l
 
 Existing Inbox tests, unchanged and passing on the branch: `ChatbotInboxTest`, `ChatbotInboxActionsTest`, `ChatbotInboxBotPauseTest`, `ChatbotInboxFilterBuilderTest`, `Botcake\BotcakePsidPageIdTest` (uses `listWithCounts`): with the new file, 58 tests, 812 assertions, OK. No assertion was changed.
 
-FULL_SUITE_PLACEHOLDER
+Full suite (`vendor/bin/phpunit`, Herd PHP 8.4.16, `-d memory_limit=4G`: the whole run peaks at 1.11 to 1.12 GB, and a first base run with the default 1 GB limit died at 88% with "Allowed memory size exhausted", on base and branch alike):
+
+| Run | Tests | Assertions | Failures | Skipped | Time |
+|---|---|---|---|---|---|
+| Base 94aed869 (clean `git archive` of that commit + the same `vendor/`) | 5750 | 85981 | 3 | 6 | 22:02 |
+| Branch `a0f3206b` (code as `8eae3375`) | 5757 (+7, the new file) | 86413 | 3 | 6 | 22:58 |
+
+The same three fail on both, none new (the three that 291, 292, 297 and 298 also list):
+1. `ExampleTest::test_the_application_returns_a_successful_response`
+2. `Item\ItemTableFitScriptTest::test_every_catalog_column_id_has_a_minimum_width_and_a_place_in_the_drop_order`
+3. `OwnerPrivate\SharedPagesBasePinTest::test_S_42_4_the_shared_owner_pages_render_byte_for_byte_as_at_the_base` with `/owner/private`
+
+`php artisan view:cache` compiles all views on the branch.
 
 ### 2. Query cost before and after (seeded MySQL 8.0.42)
 
@@ -187,7 +199,9 @@ MySQL itself stops the running list SELECT at the budget, the session limit is b
 
 ### 3. Branch pushed
 
-PUSH_PLACEHOLDER
+`git push -u origin feat/302-inbox-list-fast`: the branch is on origin. Commits: `4cbeaa0f` plan, `0b5b2f05` code + tests, `8eae3375` the session-reset guard, then docs only. For the other site, cherry-pick `0b5b2f05` and `8eae3375` (app + test files only; no docs). Merge danger below.
+
+The local MySQL (port 3407) was stopped and its data folder deleted after the measurements; it lived in the session scratchpad, never in the repo.
 
 ## Story changes
 
@@ -211,6 +225,6 @@ For the reviewer to confirm or change:
 - **Deploy:** the normal code deploy; `php artisan view:cache` (or the deploy's usual view clear) so the page script changes. Open tabs keep the old script (the 5 s `setInterval`) until they reload; they still benefit from the fast list and the server-side 8 s limit and cache.
 - **Database:** read-only. The only new statement kinds are `SET SESSION max_execution_time = <n>` / `= DEFAULT` on the request's own connection, and one `information_schema.statistics` read per table per day (`Schema::hasIndex`, cached). Needs MySQL 5.7.8+ for `max_execution_time` (the server is MySQL 8).
 - **Cache:** new keys `chatbot.inbox.list.<page>.<version>.<sha1>` (15 s / 60 s), `chatbot.inbox.list-version.<page>` (forever, one per page) and `chatbot.inbox.index.<index>` (1 day) in the default cache store.
-- **Cherry-pick to the other site:** the code commit touches only the four app files and adds two new files; it does not depend on 301 or on any Likha-only file. Conflicts are possible only if the other line changed `Inbox::listWithCounts`, `ChatbotInboxController::conversations`/`send`/`pause` or the list part of the Inbox page script. Before relying on the hint there: `SHOW INDEX FROM botcake_chats` / `chatbot_replies` should list `botcake_chats_page_id_received_at_index` and `chatbot_replies_page_id_sent_at_index` (without them the query runs unhinted, which is correct but may pick the time-only index).
+- **Cherry-pick to the other site:** the two code commits (`0b5b2f05`, `8eae3375`) touch three existing files (`Inbox.php`, `ChatbotInboxController.php`, `chatbot/inbox.blade.php`) and add two (`InboxTooSlow.php`, the test); they do not depend on 301 or on any Likha-only file. Conflicts are possible only if the other line changed `Inbox::listWithCounts`, `ChatbotInboxController::conversations`/`send`/`pause` or the list part of the Inbox page script. Before relying on the hint there: `SHOW INDEX FROM botcake_chats` / `chatbot_replies` should list `botcake_chats_page_id_received_at_index` and `chatbot_replies_page_id_sent_at_index` (without them the query runs unhinted, which is correct but may pick the time-only index).
 - **How to check on the server after deploy:** open the Inbox on the biggest page, 30d + Ordered; `grep "Chatbot inbox list too slow" storage/logs/laravel*.log` for any slow answers; the EXPLAIN statements in Evidence item 2.
-- **Revert:** `git revert` of the code commit (no data or schema to undo); cached entries expire on their own within a minute (the version and index keys are harmless if left).
+- **Revert:** `git revert 8eae3375 0b5b2f05` (no data or schema to undo); cached entries expire on their own within a minute (the version and index keys are harmless if left).
