@@ -4,7 +4,9 @@ namespace Tests\Feature\Chatblast;
 
 use App\Services\Chatbot\ResponseSpeed;
 use Illuminate\Support\Facades\Artisan;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Testing\TestResponse;
 
 /**
  * Ang Sequences ng /chatbot/speed ay binubuksan ng script ng page mula sa sariling endpoint nito (ang section, saka ang
@@ -12,10 +14,38 @@ use Illuminate\Support\Facades\Cache;
  */
 trait LoadsSpeedSequences
 {
+    /**
+     * Spec 306: ang page ay nagbabasa lang ng nabuo ng warm. Binubuo (buildDay) ang araw ng $q at ang naunang araw nito
+     * (ang reference ng mga chart), gaya ng ginagawa ng chatbot:speed-warm bago buksan ng staff ang page.
+     */
+    protected function warmSpeed(array $q = []): void
+    {
+        $date = ResponseSpeed::filters($q)['date'];
+        foreach ([$date, CarbonImmutable::parse($date)->subDay()->toDateString()] as $d) app(ResponseSpeed::class)->buildDay($d);
+    }
+
+    /** Spec 306: ang GET ng page pagkatapos ng warm ng araw nito (warmSpeed). */
+    protected function speedGet(string $uri): TestResponse
+    {
+        parse_str((string) parse_url($uri, PHP_URL_QUERY), $q);
+        $this->warmSpeed($q);
+
+        return $this->get($uri);
+    }
+
+    /** Spec 306: ang JSON ng Not sent pagkatapos ng warm ng araw nito (warmSpeed). */
+    protected function speedJson(string $uri): TestResponse
+    {
+        parse_str((string) parse_url($uri, PHP_URL_QUERY), $q);
+        $this->warmSpeed($q);
+
+        return $this->getJson($uri);
+    }
+
     /** Ang page na may Sequences section mula sa endpoint (gaya ng ginagawa ng script). */
     protected function speedPage(string $query = ''): string
     {
-        return $this->withSequences($this->get('/chatbot/speed' . ($query !== '' ? '?' . $query : ''))->assertOk()->getContent());
+        return $this->withSequences($this->speedGet('/chatbot/speed' . ($query !== '' ? '?' . $query : ''))->assertOk()->getContent());
     }
 
     /** Ang loading line ng Sequences ay pinapalitan ng HTML ng endpoint, mula sa URL na nasa page mismo. */

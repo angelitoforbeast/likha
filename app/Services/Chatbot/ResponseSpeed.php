@@ -14,11 +14,16 @@ use Illuminate\Support\Facades\Schema;
  * mensahe ng customer (received_at ng chat) hanggang sa unang padala ng bot sa parehong customer (page + PSID) pagkatapos
  * nito na talagang naipadala: ang oras ng Meta mula sa send_status (confirmed_at) kapag mayroon, kung wala ay ang sent_at
  * ng talaan (binibilang bilang "unconfirmed"). Hindi ang delivered o seen: oras iyon ng telepono ng customer, hindi ng bot.
- * Dalawang query na may petsa sa index (botcake_chats.received_at at chatbot_replies.sent_at), ang pagtutugma ay sa PHP;
- * naka-cache kada (araw, page, bot): ngayon 2 minuto, ang lumang araw 30 minuto, ang tapos nang araw ng default na view
- * 7 araw. Ang dobleng tala ng isang mensahe ay isa lang; ang pumalyang padala sa parehong pagbasa ang "Not sent". Ang
- * Sequences ay sariling cache at endpoint (sequencesOutput), at ang default na view ay pinapainit ng chatbot:speed-warm
- * (warmDefault); bawat entry ay may built_at ("as of" sa screen).
+ * Dalawang query na may petsa sa index (botcake_chats.received_at at chatbot_replies.sent_at), ang pagtutugma ay sa PHP.
+ * Ang dobleng tala ng isang mensahe ay isa lang; ang pumalyang padala sa parehong pagbasa ang "Not sent".
+ *
+ * Spec 306: ang page ay hindi na kumukuwenta (milyon-milyong row ang isang araw; 7–27 s, minsan 60 s). Ang
+ * chatbot:speed-warm (warmDefault) ang bumubuo ng buong araw sa isang basa (buildDay): bawat chat at padala ay idinadagdag
+ * sa bilang ng lahat, ng page nito at ng bot nito, kaya sabay ang numero ng bawat filter (page, bot, page + bot), gaya ng
+ * dating kuwenta kada filter. Ngayon bawat takbo, kahapon bawat 20 minuto hanggang tapos ito, ang araw bago kahapon isang
+ * beses, at ang araw na hiniling ng page (wanted). Ang page ay nagbabasa lang ng cache (stored); kapag wala pa ang araw o
+ * ang naunang araw nito: "computing" (idinadagdag sa wanted), hindi kinukuwenta rito. Bawat entry ay may built_at ("as of"
+ * sa screen). Ang Sequences ay sariling cache at endpoint (sequencesOutput), gaya ng dati.
  */
 class ResponseSpeed
 {
@@ -47,11 +52,39 @@ class ResponseSpeed
      * Ang dalawang cache: ang mga numero ng page (walang Sequences) at ang Sequences. Ang bersyon sa key ay pinapalitan
      * kapag nagbago ang hugis ng laman, para hindi mabasa ng bagong code ang lumang entry pagkatapos ng deploy.
      */
-    public const PAGE_KEY = 'response-speed:v5:';
+    public const PAGE_KEY = 'response-speed:v6:';
     /** Ang entry ng Sequences: {built_at, final, sequences}. */
     public const SEQUENCES_KEY = 'response-speed-seq:v3:';
-    /** Ang listahan ng "Not sent" ng isang araw at filter: isinusulat kasabay ng entry ng page (iisang kuwenta). */
-    public const NOT_SENT_KEY = 'response-speed-not-sent:v1:';
+    /**
+     * Spec 306: ang tala ng isang nabuong araw (DAY_KEY + petsa): {built_at, final, pages, blank}. pages: ang mga page na
+     * may sariling entry (PAGE_KEY + petsa:page, '' = lahat ng page; bawat isa ay [bot o '' => numero]); blank: ang numero
+     * ng page na walang kahit anong data sa araw (walang sariling entry). Isinusulat pagkatapos ng mga entry.
+     */
+    public const DAY_KEY = 'response-speed-day:v1:';
+    /** Ang mga listahan ng "Not sent" ng isang araw at page ('' = lahat): [bot o '' => listahan], kasabay ng entry ng page. */
+    public const NOT_SENT_KEY = 'response-speed-not-sent:v2:';
+    /** Spec 306: ang mga araw na hiniling ng page at wala pa (petsa => oras ng hiling), binubuo ng warm. */
+    public const WANTED = 'response-speed:wanted:v1';
+    private const WANTED_LOCK = 'response-speed:wanted-lock';
+    /** Ilang hiniling na araw ang binubuo kada takbo (ang araw at ang naunang araw nito: isang page view noon), ang pinakamatanda muna. */
+    public const WANTED_PER_RUN = 2;
+    /** Ang hiling na hindi pa nabubuo pagkalipas nito ay tinatanggal (idadagdag ulit ng page kapag may tumitingin pa). */
+    public const WANTED_MAX_AGE = 1800;
+    public const WANTED_MAX = 30;
+    /**
+     * Spec 306: ang bilang ng sequence step kada page ng isang oras (SEQ_HOUR_KEY + simula + dulo). Ang page ay wala sa index
+     * na (sequence_id, sent_at), kaya bawat step ay isang basa ng row: ang oras na sarado na nang SEQ_HOUR_SETTLE segundo
+     * ay isang beses binibilang at itinatago, kaya ang takbo ng ngayon ay ang kasalukuyang oras lang ang binabasa.
+     */
+    public const SEQ_HOUR_KEY = 'response-speed-seq-hour:v1:';
+    public const SEQ_HOUR_SETTLE = 600;
+    /**
+     * Spec 306: ang hangganan ng bawat SELECT ng web request ng page (session max_execution_time, segundo): cache at listahan
+     * ng page lang ang binabasa nito, kaya ang lampas dito ay sagot na "too slow" agad, hindi isang worker na hawak nang isang minuto.
+     */
+    public const PAGE_SECONDS = 5;
+    /** MySQL: ang query na pinutol ng max_execution_time (3024), o na-interrupt (1317). */
+    private const TIMEOUT_CODES = [3024, 1317];
     /** Ang pinakamaraming row ng listahan na ipinapakita (ang pinakabago); ang bilang ay ang lahat. */
     public const NOT_SENT_SHOWN = 200;
     /**
@@ -73,19 +106,118 @@ class ResponseSpeed
      */
     public const FINAL_KEEP_SECONDS = 7 * 86400;
 
+    /**
+     * Ang mga numero ng page para sa filter, mula lang sa nabuo ng warm (stored). Kapag wala pa ang araw o ang naunang araw
+     * nito (ang reference ng mga chart): {filters, computing: true, dates}, at ang mga araw na iyon ay nasa wanted.
+     */
     public function output(array $q): array
     {
         $f = self::filters($q);
-        $today = now()->toDateString();
-        $out = $this->day($f, $today);
-        $day = CarbonImmutable::parse($f['date']);
-        // Ang reference ng mga chart: ang naunang araw na may parehong filter, mula sa parehong cache ng araw na iyon.
-        $prev = $this->day(['date' => $day->subDay()->toDateString()] + $f, $today);
+        $dates = self::dates($f['date']);
+        $out = $this->stored($f);
+        // Ang reference ng mga chart: ang naunang araw na may parehong filter, mula sa parehong pagbuo ng araw na iyon.
+        $prev = $this->stored(['date' => $dates['prev']] + $f);
+        if ($out === null || $prev === null) {
+            $this->want(array_keys(array_filter([$f['date'] => $out === null, $dates['prev'] => $prev === null])));
 
-        return $out + ['dates' => ['today' => $today, 'yesterday' => CarbonImmutable::parse($today)->subDay()->toDateString(),
-            'prev' => $day->subDay()->toDateString(), 'next' => $f['date'] < $today ? $day->addDay()->toDateString() : null],
+            return ['filters' => $f, 'computing' => true, 'dates' => $dates];
+        }
+
+        return $out + ['dates' => $dates,
             'refused_off' => $f['page_id'] === null && $f['bot'] === null ? $this->refusedOff($f['date']) : null,
             'charts' => self::charts($out, $prev, self::PAGE_CHARTS)];
+    }
+
+    /** Ang mga petsa ng navigation ng page para sa araw na $date: ngayon, kahapon, ang naunang araw at ang kasunod (null kapag ngayon). */
+    public static function dates(string $date): array
+    {
+        $today = now()->toDateString();
+        $day = CarbonImmutable::parse($date);
+
+        return ['today' => $today, 'yesterday' => CarbonImmutable::parse($today)->subDay()->toDateString(),
+            'prev' => $day->subDay()->toDateString(), 'next' => $date < $today ? $day->addDay()->toDateString() : null];
+    }
+
+    /**
+     * Ang nabuong numero ng isang araw at filter, o null kapag wala pa (o nag-expire na) ang araw. Ang page na walang
+     * sariling entry ay walang data sa araw: ang blank ng araw.
+     */
+    public function stored(array $f): ?array
+    {
+        $day = Cache::get(self::DAY_KEY . $f['date']);
+        if (!is_array($day) || !is_array($day['pages'] ?? null)) return null;
+        $scope = $f['page_id'] ?? '';
+        if (!isset($day['pages'][$scope])) return ['filters' => $f] + $day['blank'];
+        $entry = self::unsqueeze(Cache::get(self::PAGE_KEY . $f['date'] . ':' . $scope));
+        $out = is_array($entry) ? ($entry[$f['bot'] ?? ''] ?? null) : null;
+
+        return is_array($out) ? ['filters' => $f] + $out : null;
+    }
+
+    /** Idinadagdag sa wanted ang mga araw na wala pa; ang naunang oras ng hiling ang naiiwan (pinakamatanda muna ang warm). */
+    private function want(array $dates): void
+    {
+        if (!$dates) return;
+        $this->editWanted(function (array $list) use ($dates) {
+            // May hangganan ang listahan: kapag puno, hindi muna idinadagdag (idadagdag ulit ng page sa susunod na bukas).
+            foreach ($dates as $d) if (!isset($list[$d]) && count($list) < self::WANTED_MAX) $list[$d] = now()->getTimestamp();
+
+            return $list;
+        });
+    }
+
+    /** @return array<string, int> petsa => oras ng hiling */
+    public function wanted(): array
+    {
+        $list = Cache::get(self::WANTED);
+
+        return is_array($list) ? $list : [];
+    }
+
+    /** Ang pagbago ng wanted sa ilalim ng maikling lock (sabay ang page at ang warm); kapag hindi makuha, isinusulat pa rin. */
+    private function editWanted(callable $edit): void
+    {
+        $write = fn () => Cache::put(self::WANTED, $edit($this->wanted()), self::WANTED_MAX_AGE * 2);
+        try {
+            Cache::lock(self::WANTED_LOCK, 10)->block(3, $write);
+        } catch (\Illuminate\Contracts\Cache\LockTimeoutException) {
+            $write();
+        }
+    }
+
+    /**
+     * Spec 306: ang $fn na may hangganang $seconds sa bawat SELECT nito (MySQL: session max_execution_time), ibinabalik sa
+     * DEFAULT pagkatapos (sa finally), kaya ang ibang query ng request ay hindi apektado. Ang timeout ay QueryException na
+     * isTimeout() ang sumasagot.
+     */
+    public static function withBudget(float $seconds, \Closure $fn): mixed
+    {
+        self::setStatementLimit($seconds);
+        try {
+            return $fn();
+        } finally {
+            self::resetStatementLimit();
+        }
+    }
+
+    private static function setStatementLimit(float $seconds): void
+    {
+        if (DB::getDriverName() === 'mysql') DB::statement('SET SESSION max_execution_time = ' . max(1, (int) ceil($seconds * 1000)));
+    }
+
+    private static function resetStatementLimit(): void
+    {
+        try {
+            if (DB::getDriverName() === 'mysql') DB::statement('SET SESSION max_execution_time = DEFAULT');
+        } catch (\Illuminate\Database\QueryException) {
+            // Ang session ay sa request na ito lang; matatapos din kasama nito.
+        }
+    }
+
+    /** Ang query na pinutol ng hangganan ng oras ng MySQL. */
+    public static function isTimeout(\Throwable $e): bool
+    {
+        return $e instanceof \Illuminate\Database\QueryException && in_array((int) ($e->errorInfo[1] ?? 0), self::TIMEOUT_CODES, true);
     }
 
     /**
@@ -141,50 +273,77 @@ class ResponseSpeed
     }
 
     /**
-     * Ang mga numero ng isang araw at filter (walang Sequences), naka-cache: ngayon 2 minuto, ang lumang araw 30 minuto, ang
-     * tapos nang araw ng default na view 7 araw; $ttl (ang warm) ang pumapalit dito. Bawat entry ay may built_at (kailan
-     * binasa) at final. Ang listahan ng "Not sent" ay sariling key, isinusulat muna (kaya kapag may entry ang page ay may
-     * listahan din). $fresh: hindi binabasa ang cache.
+     * Spec 306: binubuo ang isang buong araw para sa bawat filter (buildAll) at isinusulat: ang mga listahan ng "Not sent"
+     * at ang mga entry kada page muna, ang tala ng araw (DAY_KEY) sa huli, kaya kapag may tala ay may entry. $ttl: ngayon
+     * at kahapon ayon sa warm; ang tapos nang araw ay FINAL_KEEP_SECONDS. Bawat numero ay may built_at at final.
+     * @return array{pages: int}
      */
-    private function day(array $f, string $today, ?int $ttl = null, bool $fresh = false): array
+    public function buildDay(string $date, ?int $ttl = null): array
     {
-        $key = self::PAGE_KEY . md5(json_encode($f));
-        if (!$fresh) {
-            $hit = Cache::get($key);
-            if (is_array($hit)) return $hit;
-        }
         $at = now()->getTimestamp();
-        $final = self::isFinal($f['date'], self::MAX_WAIT_SECONDS);
-        $out = $this->build($f, $today) + ['built_at' => $at, 'final' => $final];
-        $ttl ??= $final && self::isDefault($f) ? self::FINAL_KEEP_SECONDS : self::ttl($f, $today);
-        Cache::put(self::NOT_SENT_KEY . md5(json_encode($f)), $out['not_sent_list'], $ttl);
-        unset($out['not_sent_list']);
-        Cache::put($key, $out, $ttl);
+        $final = self::isFinal($date, self::MAX_WAIT_SECONDS);
+        $ttl ??= $final ? self::FINAL_KEEP_SECONDS : self::YESTERDAY_WARM_SECONDS + self::WARM_GRACE_SECONDS;
+        [$entries, $lists, $blank] = $this->buildAll($date, now()->toDateString());
+        $stamp = ['built_at' => $at, 'final' => $final];
+        foreach ($entries as $scope => $byBot) {
+            Cache::put(self::NOT_SENT_KEY . $date . ':' . $scope, self::squeeze($lists[$scope]), $ttl);
+            Cache::put(self::PAGE_KEY . $date . ':' . $scope, self::squeeze(array_map(fn (array $o) => $o + $stamp, $byBot)), $ttl);
+        }
+        Cache::put(self::DAY_KEY . $date, $stamp + ['pages' => array_fill_keys(array_map('strval', array_keys($entries)), true), 'blank' => $blank + $stamp], $ttl);
 
-        return $out;
+        return ['pages' => count($entries) - 1];
     }
 
     /**
      * Ang listahan ng "Not sent" ng /chatbot/speed (pinakabago muna), ng buong araw o ng isang oras ($q['hour'], 0–23;
-     * iba = buong araw), mula sa cache ng page; kapag wala, kinukuwenta ang araw (at ang entry ng page kasabay).
-     * @return array{filters: array, hour: ?int, total: int, items: array}
+     * iba = buong araw), mula sa nabuo ng warm. Kapag wala pa ang araw: computing (at nasa wanted), hindi kinukuwenta rito.
+     * @return array{filters: array, hour: ?int, total: int, items: array, computing?: bool}
      */
     public function notSentOutput(array $q): array
     {
         $f = self::filters($q);
-        $today = now()->toDateString();
         $h = $q['hour'] ?? null;
         $hour = is_string($h) && ctype_digit($h) && strlen($h) <= 2 && (int) $h <= 23 ? (int) $h : null;
-        $list = Cache::get(self::NOT_SENT_KEY . md5(json_encode($f)));
-        if (!is_array($list)) {
-            $this->day($f, $today, null, true);
-            $list = Cache::get(self::NOT_SENT_KEY . md5(json_encode($f))) ?? ['counts' => [], 'items' => []];
+        $day = Cache::get(self::DAY_KEY . $f['date']);
+        $scope = $f['page_id'] ?? '';
+        $lists = !is_array($day) ? null : (isset($day['pages'][$scope]) ? self::unsqueeze(Cache::get(self::NOT_SENT_KEY . $f['date'] . ':' . $scope)) : []);
+        if (!is_array($lists)) {
+            $this->want([$f['date']]);
+
+            return ['filters' => $f, 'hour' => $hour, 'total' => 0, 'items' => [], 'computing' => true];
         }
+        $list = $lists[$f['bot'] ?? ''] ?? self::noList();
         $items = $list['items'];
         if ($hour !== null) $items = array_values(array_filter($items, fn ($r) => (int) substr($r['at'], 11, 2) === $hour));
 
         return ['filters' => $f, 'hour' => $hour, 'total' => $hour === null ? array_sum($list['counts']) : (int) ($list['counts'][$hour] ?? 0),
             'items' => array_slice($items, 0, self::NOT_SENT_SHOWN)];
+    }
+
+    /**
+     * Ang entry ng isang page at ang mga listahan nito ay siksik sa cache (gzcompress, base64 para pati ang database store na
+     * text ang column): ang buong araw ng lahat ng filter ay mga 17 MB kapag hindi, mga 1.5 MB kapag siksik.
+     */
+    private static function squeeze(array $v): string
+    {
+        return base64_encode(gzcompress(serialize($v), 6));
+    }
+
+    /** Ang laman ng squeeze(), o null kapag wala o hindi mabasa. */
+    private static function unsqueeze(mixed $v): ?array
+    {
+        if (!is_string($v) || $v === '') return null;
+        $raw = base64_decode($v, true);
+        $raw = $raw === false ? false : @gzuncompress($raw);
+        $out = $raw === false ? false : @unserialize($raw, ['allowed_classes' => false]);
+
+        return is_array($out) ? $out : null;
+    }
+
+    /** Ang walang lamang listahan ng "Not sent": walang bilang kada oras, walang row. */
+    private static function noList(): array
+    {
+        return ['counts' => array_fill(0, 24, 0), 'items' => []];
     }
 
     /**
@@ -222,12 +381,13 @@ class ResponseSpeed
     }
 
     /**
-     * Ang pre-warm ng default na view (walang page, walang bot). Ang mga page muna (mabilis): ang kahapon kapag oras na
-     * (walang entry, o YESTERDAY_WARM_SECONDS na ang tala; ang tapos nang araw ay hindi na), saka ang ngayon (bawat takbo,
-     * TODAY_WARM_SECONDS ang buhay). Saka ang Sequences ng kahapon at ng ngayon (warmSequences). Sinusulat sa parehong key
-     * na binabasa ng page, hindi binabasa ang cache. Bawat bahagi ay sariling try: ang pumalya ay ini-report at hindi
-     * isinusulat. Ang kahapon muna: ito ang reference ng mga chart ng ngayon. Pagkalipas ng hatinggabi ay walang tala ang
-     * bagong kahapon, kaya agad itong kinukuwenta ulit bilang buong araw.
+     * Ang takbo ng warm. Ang mga araw ng page muna (buildDay: lahat ng filter sa isang basa): ang kahapon kapag oras na
+     * (walang tala, o YESTERDAY_WARM_SECONDS na ang tala; ang tapos nang araw ay hindi na), saka ang ngayon (bawat takbo,
+     * TODAY_WARM_SECONDS ang buhay), ang araw bago kahapon kapag wala pa o hindi pa tapos ang tala (isang beses, 7 araw), at hanggang
+     * WANTED_PER_RUN na araw na hiniling ng page (warmWanted). Saka ang Sequences ng kahapon at ng ngayon (warmSequences).
+     * Hindi binabasa ang cache ng page. Bawat bahagi ay sariling try: ang pumalya ay ini-report at hindi isinusulat. Ang
+     * kahapon muna: ito ang reference ng mga chart ng ngayon. Pagkalipas ng hatinggabi ay walang tala ang bagong kahapon,
+     * kaya agad itong kinukuwenta ulit bilang buong araw.
      * @return array{warmed: string[], failed: string[], too_large: string[], secs: array<string, float>}
      */
     public function warmDefault(): array
@@ -235,37 +395,71 @@ class ResponseSpeed
         $today = now()->toDateString();
         $yesterday = CarbonImmutable::parse($today)->subDay()->toDateString();
         $out = ['warmed' => [], 'failed' => [], 'too_large' => [], 'secs' => []];
-        $yf = self::filters(['date' => $yesterday]);
-        $entry = Cache::get(self::PAGE_KEY . md5(json_encode($yf)));
+        $day = Cache::get(self::DAY_KEY . $yesterday);
         $at = self::stamp(Cache::get(self::WARM_STAMP_KEY . $yesterday));
-        if (!is_array($entry) || (empty($entry['final']) && ($at === null || now()->getTimestamp() - $at >= self::YESTERDAY_WARM_SECONDS))) {
+        if (!is_array($day) || (empty($day['final']) && ($at === null || now()->getTimestamp() - $at >= self::YESTERDAY_WARM_SECONDS))) {
             $ttl = self::isFinal($yesterday, self::MAX_WAIT_SECONDS) ? self::FINAL_KEEP_SECONDS : self::YESTERDAY_WARM_SECONDS + self::WARM_GRACE_SECONDS;
-            if ($this->warmPage($yf, $today, $ttl, $out)) Cache::put(self::WARM_STAMP_KEY . $yesterday, now()->getTimestamp(), self::YESTERDAY_WARM_SECONDS + self::WARM_GRACE_SECONDS);
+            if ($this->warmPage($yesterday, $ttl, $out)) Cache::put(self::WARM_STAMP_KEY . $yesterday, now()->getTimestamp(), self::YESTERDAY_WARM_SECONDS + self::WARM_GRACE_SECONDS);
         }
-        $tf = self::filters(['date' => $today]);
-        $this->warmPage($tf, $today, self::TODAY_WARM_SECONDS, $out);
-        $this->warmSequences($yf, $today, $out);
-        $this->warmSequences($tf, $today, $out);
+        $this->warmPage($today, self::TODAY_WARM_SECONDS, $out);
+        // Ang reference ng mga chart ng kahapon: tapos na ito, kaya isang beses (pati pagkalipas ng hatinggabi, kapag ang
+        // tala nito ay mula pa noong kahapon pa ito at hindi pa tapos).
+        $before = CarbonImmutable::parse($yesterday)->subDay()->toDateString();
+        $day = Cache::get(self::DAY_KEY . $before);
+        if (!is_array($day) || empty($day['final'])) $this->warmPage($before, null, $out);
+        $this->warmWanted($out);
+        $this->warmSequences(self::filters(['date' => $yesterday]), $today, $out);
+        $this->warmSequences(self::filters(['date' => $today]), $today, $out);
 
         return $out;
     }
 
-    /** Ang entry ng page ng isang araw ng default na view, kinukuwenta ulit. true kapag naisulat. */
-    private function warmPage(array $f, string $today, int $ttl, array &$out): bool
+    /** Ang lahat ng filter ng isang araw, binubuo ulit. true kapag naisulat. */
+    private function warmPage(string $date, ?int $ttl, array &$out): bool
     {
         $t = microtime(true);
         try {
-            $this->day($f, $today, $ttl, true);
-            $out['warmed'][] = $f['date'];
+            $this->buildDay($date, $ttl);
+            $out['warmed'][] = $date;
 
             return true;
         } catch (\Throwable $e) {
             report($e);
-            $out['failed'][] = $f['date'];
+            $out['failed'][] = $date;
 
             return false;
         } finally {
-            $out['secs'][$f['date']] = round(microtime(true) - $t, 1);
+            $out['secs'][$date] = round(microtime(true) - $t, 1);
+        }
+    }
+
+    /**
+     * Ang mga araw na hiniling ng page: ang lampas WANTED_MAX_AGE, ang may tala na at ang hindi na araw (bukas, sira) ay
+     * inaalis; ang natitira ay pinakamatanda muna, hanggang WANTED_PER_RUN. Ang nabuo o pumalya ay inaalis sa listahan
+     * (idadagdag ulit ng page kapag may tumitingin pa).
+     */
+    private function warmWanted(array &$out): void
+    {
+        $oldest = now()->getTimestamp() - self::WANTED_MAX_AGE;
+        $today = now()->toDateString();
+        $due = [];
+        $this->editWanted(function (array $list) use ($oldest, $today, &$due) {
+            foreach ($list as $date => $at) {
+                $d = \DateTimeImmutable::createFromFormat('!Y-m-d', (string) $date);
+                if (!$d || $d->format('Y-m-d') !== (string) $date || (string) $date > $today || (int) $at < $oldest || is_array(Cache::get(self::DAY_KEY . $date))) unset($list[$date]);
+            }
+            asort($list);
+            $due = array_slice(array_map('strval', array_keys($list)), 0, self::WANTED_PER_RUN);
+
+            return $list;
+        });
+        foreach ($due as $date) {
+            $this->warmPage($date, null, $out);
+            $this->editWanted(function (array $list) use ($date) {
+                unset($list[$date]);
+
+                return $list;
+            });
         }
     }
 
@@ -386,11 +580,20 @@ class ResponseSpeed
         return $n > 0 ? $n : null;
     }
 
-    private function build(array $f, string $today): array
+    /**
+     * Spec 306: ang buong araw para sa bawat filter, sa isang basa ng mga chat at padala (walang page sa query), pareho ang
+     * kuwenta ng dating build ng isang filter: bawat chat ay idinadagdag sa lahat ('') at sa page nito, bawat isa sa lahat
+     * ng bot ('') at sa bot nito; bawat padala sa parehong paraan ayon sa via nito. Ang page na nasa listahan ng mga page o
+     * may data sa araw ay may sariling numero para sa '' at bawat bot ng bots(); ang ibang page ay ang blank.
+     * @return array{0: array<string, array<string, array>>, 1: array<string, array<string, array>>, 2: array}
+     *   [page o '' => [bot o '' => numero]], [page o '' => [bot o '' => listahan ng Not sent]], ang blank
+     */
+    private function buildAll(string $date, string $today): array
     {
-        $start = $f['date'] . ' 00:00:00';
-        $end = CarbonImmutable::parse($f['date'])->addDay()->toDateString() . ' 00:00:00';
+        $start = $date . ' 00:00:00';
+        $end = CarbonImmutable::parse($date)->addDay()->toDateString() . ' 00:00:00';
         $spans = BotHealth::flowSpans();
+        $bots = ChatbotConnections::bots();
 
         // Ang mga mensahe muna (para ang sagot lang ng mga customer na ito ang babasahin), sa magkakahiwalay na listahan ng
         // scalar para magaan ang buong araw: page:PSID, oras, oras sa araw, bot (Botcake, o ang gateway ng page), nasa bot.
@@ -400,8 +603,7 @@ class ResponseSpeed
         foreach (self::windows($start, $end) as [$a, $b]) {
             // Ang dobleng tala ng parehong mensahe ay parehong oras, kaya nasa iisang window: sapat ang tanda kada window.
             $seen = [];
-            foreach (DB::table('botcake_chats')->where('received_at', '>=', $a)->where('received_at', '<', $b)
-                ->when($f['page_id'] !== null, fn ($q) => $q->where('page_id', $f['page_id']))->select(['page_id', 'psid', 'received_at', 'payload'])->cursor() as $c) {
+            foreach (DB::table('botcake_chats')->where('received_at', '>=', $a)->where('received_at', '<', $b)->select(['page_id', 'psid', 'received_at', 'payload'])->cursor() as $c) {
                 $payload = json_decode((string) $c->payload, true) ?: [];
                 // Ang attachment lang ay sadyang hindi sinasagot; ang standby ay kopya ng Botcake sa page na nasa Forbeast; ang
                 // pagbukas ng ad ay hindi mensahe (ang mensahe kasunod nito ang sinasagot). Bago ang tanda ng doble: ang pagbukas
@@ -421,33 +623,38 @@ class ResponseSpeed
         $want = [];
         foreach ($keys as $i => $k) if ($ons[$i]) $want[$k] = true;
         $until = date('Y-m-d H:i:s', strtotime($end) + self::MAX_WAIT_SECONDS);
-        // Habang binabasa ang mga padala: ang pushed → sent sa Meta ng mga sagot ng araw (parehong query, walang bago).
+        // Habang binabasa ang mga padala: ang pushed → sent sa Meta ng mga sagot ng araw (parehong query, walang bago), kada
+        // page ('' = lahat) at bot ('' = lahat; ang bot ng padala ay ang via nito).
         $pushBlank = ['pushed' => 0, 'unconfirmed' => 0, 'botcake' => 0, 'secs' => []];
-        $push = ['hours' => array_fill(0, 24, $pushBlank), 'total' => $pushBlank];
-        $replies = $this->replies($start, $until, $f['page_id'], $want, function (object $r) use (&$push, $end, $f): void {
+        $push = [];
+        $replies = $this->replies($start, $until, null, $want, function (object $r) use (&$push, $end, $pushBlank): void {
             if ($r->sent_at >= $end) return;
             $forbeast = Gateways::valid($r->via ?? null); // alinmang gateway: may oras ng Meta (send_status)
-            if ($f['bot'] !== null && $f['bot'] !== ChatbotProvider::viaLabel((string) ($r->via ?? ''))) return;
             $confirmed = in_array($r->confirmed_status ?? null, SendStatus::DELIVERED, true) && ($r->confirmed_at ?? null) !== null;
-            foreach ([&$push['hours'][(int) substr($r->sent_at, 11, 2)], &$push['total']] as &$b) {
-                // Ang Botcake ay walang oras ng Meta (sabay ang padala): bilang lang, hiwalay.
-                if (!$forbeast) {
-                    $b['botcake']++;
-                    continue;
+            $secs = $forbeast && $confirmed ? max(0, strtotime($r->confirmed_at) - strtotime($r->sent_at)) : null;
+            $h = (int) substr($r->sent_at, 11, 2);
+            foreach (['', (string) $r->page_id] as $scope) {
+                foreach (['', ChatbotProvider::viaLabel((string) ($r->via ?? ''))] as $bot) {
+                    $p = &$push[$scope][$bot];
+                    $p ??= ['hours' => array_fill(0, 24, $pushBlank), 'total' => $pushBlank];
+                    foreach ([&$p['hours'][$h], &$p['total']] as &$b) {
+                        // Ang Botcake ay walang oras ng Meta (sabay ang padala): bilang lang, hiwalay.
+                        if (!$forbeast) {
+                            $b['botcake']++;
+                            continue;
+                        }
+                        $b['pushed']++;
+                        if ($secs !== null) $b['secs'][] = $secs;
+                        else $b['unconfirmed']++;
+                    }
+                    unset($b, $p);
                 }
-                $b['pushed']++;
-                if ($confirmed) $b['secs'][] = max(0, strtotime($r->confirmed_at) - strtotime($r->sent_at));
-                else $b['unconfirmed']++;
             }
-            unset($b);
         }, true);
         unset($want);
-        $ai = $this->aiTimes($start, $until, $f['page_id']);
+        $ai = $this->aiTimes($start, $until, null);
 
         $blank = ['n' => 0, 'off' => 0, 'unconfirmed' => 0, 'secs' => [], 'ai' => [], 'flow' => [], 'ai_time' => [], 'never' => 0, 'attempts' => 0, 'late' => []];
-        $hours = array_fill(0, 24, $blank);
-        $total = $blank;
-        $byBot = array_fill_keys(ChatbotConnections::bots(), $blank);
         // $tries: ilang pumalyang padala bago ang sagot (o ng walang sagot); kasama pa rin sa average gaya ng ibang mensahe.
         $add = function (array &$b, bool $on, ?int $secs, bool $confirmed, ?int $chat, int $tries) use ($ai): void {
             if (!$on) {
@@ -471,44 +678,137 @@ class ResponseSpeed
                 $b['flow'][] = $secs;
             }
         };
-        $list = [];
+        // Kada page ('' = lahat) at bot ('' = lahat): ang bilang kada oras at ng araw, at ang listahan ng Not sent.
+        [$acc, $lists] = [[], []];
         foreach ($keys as $i => $key) {
             [$secs, $confirmed, $chat] = $ons[$i] ? self::firstReply($replies, $key, $ats[$i]) : [null, true, null];
             [$tries, $err] = $ons[$i] ? self::failedBefore($replies, $key, $ats[$i], $secs !== null) : [0, null];
-            $bot = $fbs[$i];
-            $byBot[$bot] ??= $blank;
-            $add($byBot[$bot], $ons[$i], $secs, $confirmed, $chat, $tries);
-            if ($f['bot'] !== null && $f['bot'] !== $bot) continue;
-            $add($hours[$hrs[$i]], $ons[$i], $secs, $confirmed, $chat, $tries);
-            $add($total, $ons[$i], $secs, $confirmed, $chat, $tries);
-            if ($tries === 0) continue;
             [$page, $psid] = explode(':', $key, 2);
-            $list[] = ['at' => date('Y-m-d H:i:s', $ats[$i]), 'page' => $names[$page] ?? 'Page ' . $page, 'bot' => $bot, 'kind' => $secs === null ? 'never' : 'late',
+            $item = $tries === 0 ? null : ['at' => date('Y-m-d H:i:s', $ats[$i]), 'page' => $names[$page] ?? 'Page ' . $page, 'bot' => $fbs[$i], 'kind' => $secs === null ? 'never' : 'late',
                 'attempts' => $tries, 'wait' => $secs, 'code' => $err[0] ?? null, 'subcode' => $err[1] ?? null,
                 'inbox' => route('chatbot.inbox', ['page_id' => $page, 'psid' => $psid], false)];
+            foreach (['', $page] as $scope) {
+                foreach (['', $fbs[$i]] as $bot) {
+                    $a = &$acc[$scope][$bot];
+                    $a ??= ['hours' => array_fill(0, 24, $blank), 'total' => $blank];
+                    $add($a['hours'][$hrs[$i]], $ons[$i], $secs, $confirmed, $chat, $tries);
+                    $add($a['total'], $ons[$i], $secs, $confirmed, $chat, $tries);
+                    unset($a);
+                    if ($item !== null) $lists[$scope][$bot][] = $item;
+                }
+            }
         }
-        // Pinakabago muna; ang tabla ay ayon sa page at link, para pareho ang ayos anuman ang pagkabasa ng mga row. Kada oras
-        // ay ang NOT_SENT_SHOWN na pinakabago lang ang itinatabi (ang bilang ay ang lahat), para maliit ang cache sa araw ng
-        // malawakang pagpalya; ang pinakabagong NOT_SENT_SHOWN ng buong araw ay nasa mga ito rin.
+        unset($keys, $ats, $hrs, $fbs, $ons, $replies, $ai);
+
+        $nowHour = $date === $today ? (int) now()->format('G') : 23;
+        $seqs = $this->sequenceCounts($start, $end);
+        $blast = $this->chatblastCounts($start, $end);
+        [$seqAll, $blastAll] = [[], []];
+        foreach ($seqs as $byHour) foreach ($byHour as $h => $n) $seqAll[$h] = ($seqAll[$h] ?? 0) + $n;
+        foreach ($blast as $byKind) foreach ($byKind as $k => $byHour) foreach ($byHour as $h => $n) $blastAll[$k][$h] = ($blastAll[$k][$h] ?? 0) + $n;
+
+        $scopes = [''];
+        foreach ([$names, $acc, $push, $seqs] as $m) foreach (array_keys($m) as $p) $scopes[] = (string) $p;
+        $entries = $outLists = [];
+        foreach (array_unique($scopes) as $scope) {
+            // Ang Forbeast at Botcake ay para sa buong araw ng page, anuman ang bot filter (gaya ng dati).
+            $byBot = array_fill_keys($bots, $blank);
+            foreach ($acc[$scope] ?? [] as $bot => $a) if ($bot !== '') $byBot[$bot] = $a['total'];
+            $seq = $scope === '' ? $seqAll : ($seqs[$scope] ?? []);
+            $bl = $scope === '' ? $blastAll : ($blast[$names[$scope] ?? ''] ?? []);
+            foreach (array_merge([''], $bots) as $bot) {
+                $entries[$scope][$bot] = self::assemble($acc[$scope][$bot] ?? null, $push[$scope][$bot] ?? null, $byBot, $seq, $bl, $nowHour, $blank, $pushBlank);
+                $outLists[$scope][$bot] = self::notSentList($lists[$scope][$bot] ?? []);
+            }
+        }
+        // Ang page na walang data sa araw (at wala sa listahan ng mga page): walang pangalan, kaya ang chatblast na walang page.
+        $none = self::assemble(null, null, array_fill_keys($bots, $blank), [], $blast[''] ?? [], $nowHour, $blank, $pushBlank);
+
+        return [$entries, $outLists, $none];
+    }
+
+    /** Ang numero ng isang filter mula sa bilang nito ($a: kada oras at araw; $p: ang mga padala), gaya ng dating build. */
+    private static function assemble(?array $a, ?array $p, array $byBot, array $sequences, array $blast, int $nowHour, array $blank, array $pushBlank): array
+    {
+        $hours = $a['hours'] ?? array_fill(0, 24, $blank);
+        $push = $p ?? ['hours' => array_fill(0, 24, $pushBlank), 'total' => $pushBlank];
+
+        return [
+            'hours' => array_map(fn ($h) => $h > $nowHour ? null : ['hour' => $h] + self::row($hours[$h]), range(0, 23)),
+            'total' => self::row($a['total'] ?? $blank),
+            'by_bot' => array_map(fn ($x) => self::row($x), $byBot),
+            'push' => ['hours' => array_map(fn ($h) => $h > $nowHour ? null : ['hour' => $h] + self::pushRow($push['hours'][$h]), range(0, 23)),
+                'total' => self::pushRow($push['total'])],
+            'volume' => self::volume($nowHour, $hours, $push, $sequences, $blast),
+        ];
+    }
+
+    /**
+     * Ang listahan ng Not sent ng isang filter: pinakabago muna; ang tabla ay ayon sa page at link, para pareho ang ayos
+     * anuman ang pagkabasa ng mga row. Kada oras ay ang NOT_SENT_SHOWN na pinakabago lang ang itinatabi (ang bilang ay ang
+     * lahat), para maliit ang cache sa araw ng malawakang pagpalya; ang pinakabagong NOT_SENT_SHOWN ng buong araw ay nasa
+     * mga ito rin.
+     */
+    private static function notSentList(array $list): array
+    {
         usort($list, fn ($x, $y) => [$y['at'], $x['page'], $x['inbox']] <=> [$x['at'], $y['page'], $y['inbox']]);
         $counts = array_fill(0, 24, 0);
         $list = array_values(array_filter($list, function ($r) use (&$counts) {
             return ++$counts[(int) substr($r['at'], 11, 2)] <= self::NOT_SENT_SHOWN;
         }));
-        $list = ['counts' => $counts, 'items' => $list];
 
-        $nowHour = $f['date'] === $today ? (int) now()->format('G') : 23;
+        return ['counts' => $counts, 'items' => $list];
+    }
 
-        return [
-            'filters' => $f,
-            'hours' => array_map(fn ($h) => $h > $nowHour ? null : ['hour' => $h] + self::row($hours[$h]), range(0, 23)),
-            'total' => self::row($total),
-            'by_bot' => array_map(fn ($x) => self::row($x), $byBot),
-            'push' => ['hours' => array_map(fn ($h) => $h > $nowHour ? null : ['hour' => $h] + self::pushRow($push['hours'][$h]), range(0, 23)),
-                'total' => self::pushRow($push['total'])],
-            'volume' => $this->volume($f, $start, $end, $nowHour, $hours, $push, $names),
-            'not_sent_list' => $list,
-        ];
+    /**
+     * Spec 306: ang sequence steps na naipadala kada page at oras ([page => [oras => bilang]]), bawat padala ng step (sent o
+     * hindi), ng mga sequence na nasa chatbot_sequences. Kada oras ang basa sa index na (sequence_id, sent_at); ang page ay
+     * nasa row, kaya ang oras na sarado na nang SEQ_HOUR_SETTLE ay isang beses lang binabasa (itinatago FINAL_KEEP_SECONDS).
+     * Ang kasalukuyang oras hanggang sa dulo ng araw ay isang basa, hindi itinatago.
+     * @return array<string, array<int, int>>
+     */
+    private function sequenceCounts(string $start, string $end): array
+    {
+        $out = [];
+        if (!Schema::hasColumn('chatbot_replies', 'sequence_id') || !Schema::hasTable('chatbot_sequences')) return $out;
+        $ids = DB::table('chatbot_sequences')->pluck('id')->all();
+        if (!$ids) return $out;
+        $now = now()->format('Y-m-d H:i:s');
+        foreach (self::windows($start, $end) as [$a, $b]) {
+            if ($b > $now) $b = $end;
+            $settled = strtotime($b) + self::SEQ_HOUR_SETTLE <= now()->getTimestamp();
+            $key = self::SEQ_HOUR_KEY . $a . '|' . $b;
+            $rows = $settled ? Cache::get($key) : null;
+            if (!is_array($rows)) {
+                $rows = [];
+                foreach (array_chunk($ids, 1000) as $chunk) {
+                    foreach (DB::table('chatbot_replies')->whereIn('sequence_id', $chunk)->where('sent_at', '>=', $a)->where('sent_at', '<', $b)
+                        ->selectRaw('page_id, substr(sent_at, 12, 2) as h, count(*) as n')->groupByRaw('page_id, substr(sent_at, 12, 2)')->get() as $r) $rows[] = [(string) $r->page_id, (int) $r->h, (int) $r->n];
+                }
+                if ($settled) Cache::put($key, $rows, self::FINAL_KEEP_SECONDS);
+            }
+            foreach ($rows as [$page, $h, $n]) $out[$page][$h] = ($out[$page][$h] ?? 0) + $n;
+            if ($b === $end) break;
+        }
+
+        return $out;
+    }
+
+    /**
+     * Ang chatblast na naipadala (hindi test) kada pangalan ng page, kind at oras ([page_name => [kind => [oras => bilang]]]),
+     * isang basa ng araw gaya ng dati, kasama ang page_name sa GROUP BY.
+     * @return array<string, array<string, array<int, int>>>
+     */
+    private function chatblastCounts(string $start, string $end): array
+    {
+        $out = [];
+        if (!Schema::hasTable('botcake_messages')) return $out;
+        foreach (DB::table('botcake_messages')->where('is_test', false)->where('status', 'sent')->where('sent_at', '>=', $start)->where('sent_at', '<', $end)
+            ->selectRaw('page_name, substr(sent_at, 12, 2) as h, kind, count(*) as n')->groupByRaw('page_name, substr(sent_at, 12, 2), kind')->get() as $r) {
+            $out[(string) $r->page_name][(string) $r->kind][(int) $r->h] = ($out[(string) $r->page_name][(string) $r->kind][(int) $r->h] ?? 0) + (int) $r->n;
+        }
+
+        return $out;
     }
 
     /**
@@ -516,31 +816,12 @@ class ResponseSpeed
      * (the same chats the speed table counts, on the bot or not), the bot's replies sent (Botcake and Forbeast, from the
      * same read as "pushed"), the sequence steps sent, and the chatblast messages sent per kind. Chats and replies follow
      * the bot filter like the rest of the page; sequences and chatblast count every bot (they share the page's Botcake
-     * rate either way). The page filter applies to all. Counts only, grouped in SQL.
+     * rate either way). The page filter applies to all. Spec 306: from the day's counts per page (sequenceCounts,
+     * chatblastCounts), not a query per filter.
      * @return array{hours: array<int, ?array>, total: array, kinds: string[]}
      */
-    private function volume(array $f, string $start, string $end, int $nowHour, array $hours, array $push, array $names): array
+    private static function volume(int $nowHour, array $hours, array $push, array $sequences, array $blast): array
     {
-        $hourOf = fn (object $r) => (int) $r->h;
-        // Sequence steps: one range read per sequence on the (sequence_id, sent_at) index, counted from the index alone (every
-        // step send, sent or not). Filtering status over the whole day read ~1.5M rows (325 s on Incepxion, every 2 minutes).
-        $sequences = array_fill(0, 24, 0);
-        if (Schema::hasColumn('chatbot_replies', 'sequence_id') && Schema::hasTable('chatbot_sequences')) {
-            foreach (DB::table('chatbot_sequences')->pluck('id') as $seqId) {
-                foreach (DB::table('chatbot_replies')->where('sequence_id', $seqId)->where('sent_at', '>=', $start)->where('sent_at', '<', $end)
-                    ->when($f['page_id'] !== null, fn ($q) => $q->where('page_id', (int) $f['page_id']))
-                    ->selectRaw('substr(sent_at, 12, 2) as h, count(*) as n')->groupByRaw('substr(sent_at, 12, 2)')->get() as $r) $sequences[$hourOf($r)] += (int) $r->n;
-            }
-        }
-        $blast = [];
-        if (Schema::hasTable('botcake_messages')) {
-            $page = $f['page_id'] !== null ? ($names[(string) $f['page_id']] ?? '') : null;
-            foreach (DB::table('botcake_messages')->where('is_test', false)->where('status', 'sent')->where('sent_at', '>=', $start)->where('sent_at', '<', $end)
-                ->when($page !== null, fn ($q) => $q->where('page_name', $page))
-                ->selectRaw('substr(sent_at, 12, 2) as h, kind, count(*) as n')->groupByRaw('substr(sent_at, 12, 2), kind')->get() as $r) {
-                $blast[(string) $r->kind][$hourOf($r)] = (int) $r->n;
-            }
-        }
         $kinds = array_keys($blast);
         sort($kinds);
         $row = function (?int $h) use ($hours, $push, $sequences, $blast, $kinds): array {
@@ -572,6 +853,10 @@ class ResponseSpeed
             report($e);
 
             return ['too_large' => true, 'hours' => array_fill(0, 24, null), 'total' => null, 'slowest' => []];
+        } finally {
+            // Spec 306: ang hangganan ng bawat SELECT (web request lang) ay hindi lumalampas sa kuwentang ito.
+            if ($this->sequenceDeadline !== null) self::resetStatementLimit();
+            $this->sequenceDeadline = null;
         }
     }
 
@@ -616,6 +901,9 @@ class ResponseSpeed
     {
         if (memory_get_usage(true) > $budget) throw new \OverflowException('Speed: the sequences section is over its memory budget.');
         if ($this->sequenceDeadline !== null && microtime(true) > $this->sequenceDeadline) throw new \OverflowException('Speed: the sequences section is over its time budget.');
+        // Spec 306: ang susunod na SELECT ay may hangganan din ng natitirang oras (MySQL), kaya ang isang mabagal na basa ay
+        // hindi lumalampas sa badyet; ang timeout ay nagiging too_large gaya ng ibang pagpalya.
+        if ($this->sequenceDeadline !== null) self::setStatementLimit($this->sequenceDeadline - microtime(true));
     }
 
     /** Ang isang oras o ang araw ng pushed → sent sa Meta: pushed (Forbeast), measured, average, median, p90, max, unconfirmed, botcake. */
@@ -848,6 +1136,7 @@ class ResponseSpeed
         $budget = $this->sequenceBudget();
         $secs = $this->sequenceSeconds();
         $this->sequenceDeadline = $secs === null ? null : microtime(true) + $secs;
+        if ($secs !== null) self::setStatementLimit($secs);
         $blank = ['due' => 0, 'sent' => 0, 'failed' => 0, 'skipped' => 0, 'none' => 0, 'botcake' => 0, 'push' => [], 'meta' => [], 'sent_d' => []];
         $hours = array_fill(0, 24, $blank);
         $total = $blank;

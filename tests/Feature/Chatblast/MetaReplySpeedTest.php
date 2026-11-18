@@ -95,7 +95,7 @@ class MetaReplySpeedTest extends ChatblastTestCase
     private function screen(string $query = ''): array
     {
         $this->actingAs($this->ceo ??= $this->user('CEO', 'ceo-meta@example.test'));
-        $res = $this->get('/chatbot/speed' . ($query !== '' ? '?' . $query : ''))->assertOk();
+        $res = $this->speedGet('/chatbot/speed' . ($query !== '' ? '?' . $query : ''))->assertOk();
         $this->assertSame(1, preg_match('#<script type="application/json" id="sp-data">(.*?)</script>#s', $res->getContent(), $m));
 
         return [json_decode($m[1], true), $res];

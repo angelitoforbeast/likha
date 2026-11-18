@@ -87,6 +87,7 @@ class ResponseSpeedTest extends ChatblastTestCase
     {
         Cache::flush();
         $s = app(ResponseSpeed::class);
+        $this->warmSpeed($q);
 
         // Ang Sequences ay mula sa sariling endpoint nito; kasama rito para buo ang mga numero ng screen.
         return $s->output($q) + ['sequences' => $s->sequencesOutput($q)['sequences']];
@@ -160,7 +161,7 @@ class ResponseSpeedTest extends ChatblastTestCase
     public function test_S_182_2_yesterday_and_the_day_arrows_move_by_one_day(): void
     {
         $this->actingAs($this->user('CEO', 'ceo@example.test'));
-        $html = $this->get('/chatbot/speed')->assertOk()->getContent();
+        $html = $this->speedGet('/chatbot/speed')->assertOk()->getContent();
         $this->assertMatchesRegularExpression('#href="/chatbot/speed\?date=2026-10-20"[^>]*>Yesterday<#', $html);
         $this->assertStringNotContainsString('date=2026-10-22', $html); // walang → lampas ngayon
 
@@ -171,14 +172,14 @@ class ResponseSpeedTest extends ChatblastTestCase
         $this->assertSame(3, $y['hours'][9]['median']);
         $this->assertNotNull($y['hours'][23]); // tapos na ang buong araw
 
-        $html = $this->get('/chatbot/speed?date=2026-10-20')->assertOk()->getContent();
+        $html = $this->speedGet('/chatbot/speed?date=2026-10-20')->assertOk()->getContent();
         $this->assertStringContainsString('date=2026-10-19', $html);
         $this->assertStringContainsString('date=2026-10-21', $html);
         // Ang petsa sa hinaharap o sira ay ngayon.
         $this->assertSame('2026-10-21', $this->out(['date' => '2026-10-25'])['filters']['date']);
         foreach (['2026-02-30', ['x'], '<script>', '2026-10-1'] as $bad) $this->assertSame('2026-10-21', $this->out(['date' => $bad])['filters']['date']);
         $this->assertNull($this->out(['page_id' => ['1002']])['filters']['page_id']);
-        $this->get('/chatbot/speed?date[]=x&page_id[]=1')->assertOk();
+        $this->speedGet('/chatbot/speed?date[]=x&page_id[]=1')->assertOk();
     }
 
     public function test_S_182_1_a_message_just_before_midnight_counts_in_hour_23_with_its_reply_after_midnight(): void
@@ -198,6 +199,7 @@ class ResponseSpeedTest extends ChatblastTestCase
         Cache::put('botcake-chat:refused:2026-10-21:bot_off', 2);
         Cache::put('gateway-events:2026-10-21:bot_off', 3);
         $s = app(ResponseSpeed::class);
+        $this->warmSpeed();
 
         $this->assertSame(5, $s->output([])['refused_off']);
         $this->assertNull($s->output(['page_id' => '1002'])['refused_off']);
@@ -239,10 +241,10 @@ class ResponseSpeedTest extends ChatblastTestCase
 
     public function test_S_182_6_access_is_like_bot_health(): void
     {
-        $this->actingAs($this->user('Data Encoder', 'enc@example.test'))->get('/chatbot/speed')->assertForbidden();
+        $this->actingAs($this->user('Data Encoder', 'enc@example.test'))->speedGet('/chatbot/speed')->assertForbidden();
 
         $this->actingAs($this->user('CEO', 'ceo@example.test'));
-        $html = $this->get('/chatbot/speed')->assertOk()->getContent();
+        $html = $this->speedGet('/chatbot/speed')->assertOk()->getContent();
         $this->assertMatchesRegularExpression('#href="http://localhost/chatbot/speed"[^>]*>\s*Speed#', $html); // nasa nav ng Chatbot
         $this->assertStringContainsString('id="sp-data"', $html);
     }
@@ -250,24 +252,26 @@ class ResponseSpeedTest extends ChatblastTestCase
     public function test_S_182_8_the_table_scrolls_inside_its_box_on_a_phone(): void
     {
         $this->actingAs($this->user('CEO', 'ceo@example.test'));
-        $html = $this->get('/chatbot/speed')->assertOk()->getContent();
+        $html = $this->speedGet('/chatbot/speed')->assertOk()->getContent();
         $this->assertMatchesRegularExpression('#<div class="[^"]*overflow-x-auto[^"]*"[^>]*>\s*<table#', $html);
     }
 
-    public function test_today_is_cached_two_minutes_and_past_days_longer(): void
+    public function test_S_306_today_shows_the_numbers_of_the_last_warm_run_for_every_filter(): void
     {
         Cache::flush();
         $s = app(ResponseSpeed::class);
+        $this->warmSpeed();
         $this->assertSame(3, $s->output([])['hours'][10]['messages']);
         $this->chat('1002', '7010', '2026-10-21 10:20:00');
+        // Spec 306: ang page ay hindi kumukuwenta; ang bagong chat ay lalabas pagkatapos ng susunod na takbo ng warm (bawat 2 minuto).
         $this->assertSame(3, $s->output([])['hours'][10]['messages']);
         $this->travel(121)->seconds();
+        $this->assertSame(3, $s->output([])['hours'][10]['messages']);
+        $s->warmDefault();
         $this->assertSame(4, $s->output([])['hours'][10]['messages']);
-        // Bawat filter ay may sariling cache.
+        // Bawat filter ay mula sa parehong takbo.
         $this->assertSame(2, $s->output(['page_id' => '1002'])['hours'][10]['messages']);
         $this->assertSame(2, $s->output(['bot' => 'Forbeast'])['hours'][10]['messages']);
-        $this->assertSame(120, ResponseSpeed::TODAY_CACHE_SECONDS);
-        $this->assertGreaterThan(120, ResponseSpeed::PAST_CACHE_SECONDS);
     }
 
     /** Ang tawag sa AI ng takbo ng isang chat (created → answered). */
@@ -310,7 +314,7 @@ class ResponseSpeedTest extends ChatblastTestCase
         $this->assertNull($o['hours'][3]['max']);
 
         $this->actingAs($this->user('CEO', 'ceo@example.test'));
-        $this->assertStringContainsString('>Max<', $this->get('/chatbot/speed')->assertOk()->getContent());
+        $this->assertStringContainsString('>Max<', $this->speedGet('/chatbot/speed')->assertOk()->getContent());
     }
 
     /** Isang step ng sequence: ang event ng takbo (kailan due, kailan tumakbo) at ang padala nito. */
@@ -385,7 +389,7 @@ class ResponseSpeedTest extends ChatblastTestCase
     {
         Cache::flush();
         $this->actingAs($this->ceo ??= $this->user('CEO', 'ceo-charts@example.test'));
-        $res = $this->get('/chatbot/speed' . ($query !== '' ? '?' . $query : ''))->assertOk();
+        $res = $this->speedGet('/chatbot/speed' . ($query !== '' ? '?' . $query : ''))->assertOk();
         $this->assertSame(1, preg_match('#<script type="application/json" id="sp-data">(.*?)</script>#s', $res->getContent(), $m));
         $c = json_decode($m[1], true);
         $c['seq'] = $this->speedSequences($query, true)['seq'];
@@ -513,7 +517,7 @@ class ResponseSpeedTest extends ChatblastTestCase
 
     public function test_S_185_7_access_as_before(): void
     {
-        $this->actingAs($this->user('Data Encoder', 'enc@example.test'))->get('/chatbot/speed')->assertForbidden();
+        $this->actingAs($this->user('Data Encoder', 'enc@example.test'))->speedGet('/chatbot/speed')->assertForbidden();
         $html = $this->actingAs($this->user('CEO', 'ceo@example.test'))->speedPage();
         foreach (['reply', 'ai', 'push', 'seq'] as $k) $this->assertStringContainsString('id="sp-chart-' . $k . '"', $html);
     }
@@ -566,7 +570,7 @@ class ResponseSpeedTest extends ChatblastTestCase
         [$page] = $this->screen('page_id=1002');
         $this->assertEquals(3, $page['reply']['prev']['avg'][9]);
         $this->assertNull($page['reply']['prev']['avg'][10]); // ang 40 s ay sa Page Uno
-        $this->assertStringContainsString('dotted = 2026-10-20', $this->get('/chatbot/speed')->getContent());
+        $this->assertStringContainsString('dotted = 2026-10-20', $this->speedGet('/chatbot/speed')->getContent());
     }
 
     /** Ang mga padala ng bot noong 2026-10-20 10:00: tatlo sa Forbeast (3 s, 30 s, hindi pa kumpirmado) at isa sa Botcake. */
@@ -606,7 +610,7 @@ class ResponseSpeedTest extends ChatblastTestCase
         $this->assertSame([0, 1], [$this->out(['date' => '2026-10-20', 'page_id' => '1002'])['push']['hours'][10]['pushed'], $this->out(['date' => '2026-10-20', 'page_id' => '1002'])['push']['hours'][10]['botcake']]);
 
         $this->actingAs($this->user('CEO', 'ceo@example.test'));
-        $html = $this->get('/chatbot/speed?date=2026-10-20')->assertOk()->getContent();
+        $html = $this->speedGet('/chatbot/speed?date=2026-10-20')->assertOk()->getContent();
         $this->assertMatchesRegularExpression('#data-table="push".*?<tr data-hour="10">\s*<td[^>]*>10:00</td>\s*<td[^>]*>3</td>\s*<td[^>]*>2</td>\s*<td[^>]*>16\.5 s</td>#s', $html);
     }
 
@@ -647,6 +651,7 @@ class ResponseSpeedTest extends ChatblastTestCase
         $f = ResponseSpeed::filters([]);
         Cache::flush();
         Cache::put('response-speed:' . md5(json_encode($f)), ['filters' => $f, 'hours' => [], 'total' => [], 'by_bot' => [], 'sequences' => []], 120);
+        $this->warmSpeed();
 
         $this->assertArrayHasKey('push', app(ResponseSpeed::class)->output([]));
     }
@@ -697,7 +702,7 @@ class ResponseSpeedTest extends ChatblastTestCase
     {
         $this->seedAi();
         $this->seedSteps();
-        $res = $this->actingAs($this->user('CEO', 'ceo@example.test'))->get('/chatbot/speed')->assertOk();
+        $res = $this->actingAs($this->user('CEO', 'ceo@example.test'))->speedGet('/chatbot/speed')->assertOk();
         $html = $this->withSequences($res->getContent());
         $sec = fn ($v) => $v === null ? '—' : rtrim(rtrim(number_format($v, 1), '0'), '.') . ' s';
 
