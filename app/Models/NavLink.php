@@ -162,6 +162,7 @@ class NavLink extends Model
             ['key'=>'checklist_ai_followups','label'=>'Marketing Head',     'route_url'=>'/checklist/ai-followups',               'icon'=>'fa-solid fa-wand-magic-sparkles', 'active_pattern'=>'checklist/ai-followups*',     'visible'=>['CEO']],
             // No pattern: the link covers /chat and below by its url (see the narrow_chat_nav_link_pattern migration).
             ['key'=>'chat',                  'label'=>'Chat',               'route_url'=>'/chat',                                 'icon'=>'fa-solid fa-comment-dots',     'active_pattern'=>null,                             'visible'=>['CEO','Marketing - OIC','Marketing','Data Encoder - OIC','Data Encoder']],
+            ['key'=>'accounts_create',       'label'=>'New Account',        'route_url'=>'/accounts/create',                      'icon'=>'fa-solid fa-user-plus',        'active_pattern'=>'accounts*',                      'visible'=>['CEO','Marketing - OIC']],
         ]);
     }
 }

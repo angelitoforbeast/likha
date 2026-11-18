@@ -47,6 +47,7 @@ class NavSections
         '/owner/column-settings' => 'Settings', '/allowed-ips' => 'Settings', '/jnt/config' => 'Settings',
         '/jnt/fee-settings' => 'Settings', '/jnt/supply/excluded-pages' => 'Settings', '/queue-manager' => 'Settings',
         '/system-monitor/storage' => 'Settings', '/owner/access-report' => 'Settings',
+        '/accounts/create' => 'Settings', // spec 298, next to Users
     ];
 
     /** @return string[] */
