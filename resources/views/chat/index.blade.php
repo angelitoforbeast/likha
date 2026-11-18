@@ -407,7 +407,10 @@
       <div>
         <div class="lc-empty-icon"><i class="fa-regular fa-comment-dots" aria-hidden="true"></i></div>
         <p style="margin: 0 0 8px; font-weight: 600; color: var(--lc-text)" id="lc-placeholder-text">Pick a chat on the left, or start a new one.</p>
-        <p style="margin: 0; font-size: 13px"><i class="fa-solid fa-lock" aria-hidden="true"></i> The owner can read every conversation in Likha Chat.</p>
+        {{-- Spec 304: ang lock line ay para sa owner (CEO) lang; hindi ito ipinapadala sa staff. --}}
+        @if ($boot['me']['ceo'])
+          <p style="margin: 0; font-size: 13px"><i class="fa-solid fa-lock" aria-hidden="true"></i> The owner can read every conversation in Likha Chat.</p>
+        @endif
       </div>
     </div>
 
@@ -425,7 +428,9 @@
           <div class="lc-pop lc-mute-menu" id="lc-mute-menu" role="menu" aria-label="Mute" hidden></div>
         </div>
       </header>
-      <div class="lc-lock"><i class="fa-solid fa-lock" aria-hidden="true"></i> The owner can read every conversation in Likha Chat</div>
+      @if ($boot['me']['ceo'])
+        <div class="lc-lock"><i class="fa-solid fa-lock" aria-hidden="true"></i> The owner can read every conversation in Likha Chat</div>
+      @endif
       <div class="lc-reconnect" id="lc-reconnect" role="status" hidden>Reconnecting…</div>
       <div class="lc-scroll" id="lc-scroll">
         <button type="button" class="lc-btn lc-earlier" id="lc-earlier" hidden>Load earlier messages</button>
