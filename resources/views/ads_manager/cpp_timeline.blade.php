@@ -151,7 +151,16 @@
        side padding and the 1 px border a cell keeps 43.8 px, room for a figure of 7 characters (at most 7 × 6 px = 42 px
        of 10 px monospace). A longer figure falls back to the compact form (1.02M). min-width 46 + 44 + 24 × 44 = 1146 px
        is still inside the 1165 px box. */
-    .tl-tot { min-width: 1146px; }
+    /* Spec 297: the Hourly totals view uses the whole window width (a 16 px side gutter) instead of the 1280 px box, so
+       the 24 columns share the extra width. Done here, not in the layout: while the view is shown the page root gets
+       tl-wide, and the layout's content box (main > div.max-w-7xl, the same with or without the sidebar of spec 295)
+       drops its max-width. Buckets and Hourly keep the box. min-width 46 + 44 + 24 × 43 = 1122 px: a cell keeps
+       43 − 1 border = 42 px, the 7 figures × 6 px of spec 292, and the table fits a 1280 px window with the sidebar
+       collapsed to its rail (1280 − 17 scroll bar − 64 rail − 2×16 gutter − 2×16 card padding − 2 border = 1133 px).
+       With the full sidebar open (248 px) the box is 949 px and only the wrapper scrolls, never the page. */
+    #tl-root.tl-wide { max-width: none; }
+    main > div:has(> #tl-root.tl-wide) { max-width: none; padding-left: 16px; padding-right: 16px; }
+    .tl-tot { min-width: 1122px; }
     .tl-tot col.tl-tot-date { width: 46px; }
     .tl-tot col.tl-tot-lbl { width: 44px; }
     .tl-tot th.tl-hour-name { font-size: 11px; padding-left: 3px; line-height: 1.25; vertical-align: top; }
@@ -207,7 +216,7 @@
     }
   </style>
 
-  <div class="max-w-7xl mx-auto" x-data="cppTimeline()" x-init="init()">
+  <div class="max-w-7xl mx-auto" id="tl-root" :class="view === 'totals' ? 'tl-wide' : ''" x-data="cppTimeline()" x-init="init()">
 
     {{-- Spec 288: Buckets (many days, the 4 snapshot times) or Hourly (one day, every hour).
          Spec 291: Hourly totals (many days, every hour, the day's total). --}}
@@ -279,7 +288,7 @@
       </div>
     </div>
 
-    {{-- ── Hourly totals view: rows = date, columns = hour 00–23 (Manila), each cell the day's total to that hour ── --}}
+    {{-- ── Hourly totals view: rows = date, columns = as of 1AM … 12AM (Manila), each cell the day's total as of that time ── --}}
     <div x-show="view === 'totals'" x-cloak class="bg-white border border-gray-200 rounded-lg p-4 mb-4" id="tl-totals">
       <div class="flex flex-wrap items-end gap-3 mb-2">
         <div>
@@ -294,9 +303,10 @@
           Apply
         </button>
         <div class="text-xs text-gray-600 flex-1 min-w-0">
-          Each cell: Adspent (₱), Orders and CPP (₱) of all pages with ad spend, from 00:00 to the end of that hour
-          (cumulative, so 15 matches the 3PM bucket). Hover for the exact figures; click a cell for the pages.
-          Amber edge = orders but no hourly spend stored yet. Refreshes every 5 minutes.
+          Each cell: Adspent (₱), Orders and CPP (₱) of all pages with ad spend, as of that time (cumulative from 00:00,
+          so 3PM matches the 3PM bucket; 12AM = end of day). Today a column fills after the hourly sync that covers its
+          full hour (about 10 minutes past). Hover for the exact figures; click a cell for the pages.
+          Amber edge = orders but no hourly spend stored. Refreshes every 5 minutes.
           <template x-if="totals.stored_at"><span> · Meta hourly spend as of <span x-text="fmtSavedAt(totals.stored_at)"></span></span></template>
         </div>
         <div class="text-xs text-gray-500" x-show="totalsLoading">⏳ Loading…</div>
@@ -315,7 +325,8 @@
             <tr>
               <th class="tl-hour-name">Date</th>
               <th class="tl-tot-lbls" title="Per cell, top to bottom: Adspent (₱), Orders, CPP (₱)"></th>
-              @for ($h = 0; $h < 24; $h++)<th class="tl-tot-h" title="{{ sprintf('00:00–%02d:59', $h) }}">{{ sprintf('%02d', $h) }}</th>@endfor
+              {{-- Spec 297: column h is the day as of (h + 1):00, 1AM … 12AM (the end of the day). --}}
+              @for ($h = 0; $h < 24; $h++)<th class="tl-tot-h" title="{{ sprintf('As of %s: 00:00 – %d:59 %s%s', \Carbon\Carbon::createFromTime(($h + 1) % 24)->format('gA'), $h === 0 ? 0 : ($h % 12 === 0 ? 12 : $h % 12), $h < 12 ? 'AM' : 'PM', $h === 23 ? ' (end of day)' : '') }}">{{ \Carbon\Carbon::createFromTime(($h + 1) % 24)->format('gA') }}</th>@endfor
             </tr>
           </thead>
           <tbody>
@@ -323,7 +334,7 @@
               <tr>
                 <th class="tl-hour-name" :title="row.date + ' (' + row.label + ')'"><div x-text="dayLines(row.label)[0]"></div><div x-text="dayLines(row.label)[1]"></div></th>
                 <th class="tl-tot-lbls"><div title="Adspent (₱)">Adspent</div><div>Orders</div><div title="CPP (₱)">CPP</div></th>
-                <template x-for="(c, h) in row.total" :key="row.date + '|' + h">
+                <template x-for="(c, h) in totCells(row)" :key="row.date + '|' + h">
                   <td :class="totClass(row, c, h) + (c ? ' tl-tot-click' : '')" :title="totTip(row.label, c, h)" @click="c && openHour(row, h)">
                     <template x-if="c">
                       <div>
@@ -625,8 +636,8 @@
                     <th class="num" tabindex="0" :aria-sort="hmAria(1)" @click="sortHour(1)" @keydown.enter.prevent="sortHour(1)" @keydown.space.prevent="sortHour(1)">Adspent</th>
                     <th class="num" tabindex="0" :aria-sort="hmAria(2)" @click="sortHour(2)" @keydown.enter.prevent="sortHour(2)" @keydown.space.prevent="sortHour(2)">Orders</th>
                     <th class="num" tabindex="0" :aria-sort="hmAria(3)" @click="sortHour(3)" @keydown.enter.prevent="sortHour(3)" @keydown.space.prevent="sortHour(3)">CPP</th>
-                    <th class="num" tabindex="0" :aria-sort="hmAria(4)" @click="sortHour(4)" @keydown.enter.prevent="sortHour(4)" @keydown.space.prevent="sortHour(4)" title="Adspent added in this hour">+ Adspent this hour</th>
-                    <th class="num" tabindex="0" :aria-sort="hmAria(5)" @click="sortHour(5)" @keydown.enter.prevent="sortHour(5)" @keydown.space.prevent="sortHour(5)" title="Orders added in this hour">+ Orders this hour</th>
+                    <th class="num" tabindex="0" :aria-sort="hmAria(4)" @click="sortHour(4)" @keydown.enter.prevent="sortHour(4)" @keydown.space.prevent="sortHour(4)" :title="'Adspent added ' + hmLastHour()">+ Adspent last hour</th>
+                    <th class="num" tabindex="0" :aria-sort="hmAria(5)" @click="sortHour(5)" @keydown.enter.prevent="sortHour(5)" @keydown.space.prevent="sortHour(5)" :title="'Orders added ' + hmLastHour()">+ Orders last hour</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -853,24 +864,33 @@
             this.totalsLoading = false;
           }
         },
-        // The hourly view's cell colours, plus a stronger right edge on the day's last filled hour.
+        // Spec 297: the row's 24 "as of" cells. Cell h is the day as of (h + 1):00, which is the Total cell of hour h
+        // (spend from H(h), orders before (h + 1):00), shown only while h < asof_hours: today a column waits for the
+        // hourly run that stored its full hour, so orders alone never fill it.
+        totCells(row) {
+          const total = (row && row.total) || [];
+          const n = row && Number.isInteger(row.asof_hours) ? row.asof_hours : total.length;
+          return total.map((c, h) => (h < n ? c : null));
+        },
+        // The hourly view's cell colours, plus a stronger right edge on the day's last filled column.
         totClass(row, c, h) {
           let last = -1;
-          (row.total || []).forEach((x, i) => { if (x) last = i; });
+          this.totCells(row).forEach((x, i) => { if (x) last = i; });
           return this.hourClass(c) + (c && h === last ? ' tl-tot-last' : '');
         },
-        // The hourly view's tooltip; a cell with orders but no stored spend has no CPP (never one from missing spend).
+        // The hourly view's tooltip, "as of" the column's time; a cell with orders but no stored spend has no CPP (never
+        // one from missing spend).
         totTip(label, c, h) {
-          const hh = String(h).padStart(2, '0');
-          if (!c) return `${label} · ${hh}:00–${hh}:59 · no data`;
+          if (!c) return `${label} · as of ${this.asofLabel(h)} · no data`;
           const lines = [
-            `${label} · all pages · 00:00–${hh}:59 (cumulative)`,
+            `${label} · all pages · as of ${this.asofLabel(h)}`,
+            `${this.asofRange(h)} (cumulative)`,
             `CPP: ${c.cpp != null ? this.money(c.cpp) : (c.spend == null ? '— (no hourly spend yet)' : 'no orders yet')}`,
             `Spend: ${c.spend != null ? this.money(c.spend) : 'no hourly spend stored yet'}`,
             `Orders: ${this.num(c.orders)}`,
             `CPI (per 1k impressions): ${c.cpi != null ? this.money(c.cpi) : '—'}`,
             `CPM (per message): ${c.cpm != null ? this.money(c.cpm) : '—'}`,
-            `This hour: ${c.add_spend != null ? '+' + this.money(c.add_spend) : '—'} spend, +${this.num(c.add_orders)} orders`,
+            `Last hour (${this.hourSpan(h)}): ${c.add_spend != null ? '+' + this.money(c.add_spend) : '—'} spend, +${this.num(c.add_orders)} orders`,
           ];
           if (c.source === 'orders') lines.push('Orders only: Meta hourly spend not stored yet');
           return lines.join('\n');
@@ -894,6 +914,15 @@
         },
         // 0 → 12AM, 9 → 9AM, 12 → 12PM, 15 → 3PM: the way the bucket names read.
         hourLabel(h) { return `${h % 12 === 0 ? 12 : h % 12}${h < 12 ? 'AM' : 'PM'}`; },
+        // Spec 297: column h (0–23) is "as of" (h + 1):00: 0 → 1AM, 7 → 8AM, 11 → 12PM, 23 → 12AM (the end of the day).
+        asofLabel(h) { return this.hourLabel((h + 1) % 24); },
+        // What the column covers: 0 → "00:00 – 0:59 AM", 7 → "00:00 – 7:59 AM", 23 → "00:00 – 11:59 PM".
+        asofRange(h) { return `00:00 – ${h === 0 ? 0 : (h % 12 === 0 ? 12 : h % 12)}:59 ${h < 12 ? 'AM' : 'PM'}`; },
+        // The hour before the as-of time, what its "+" figures added: 7 → "7:00 – 7:59 AM".
+        hourSpan(h) {
+          const n = h % 12 === 0 ? 12 : h % 12;
+          return `${n}:00 – ${n}:59 ${h < 12 ? 'AM' : 'PM'}`;
+        },
 
         // Opens the detail of a filled cell. The date and hour come from the page, so they are checked before the fetch;
         // the Hourly endpoint falls back to today on a bad date, so its reply must carry the date that was asked for.
@@ -902,7 +931,7 @@
         async openHour(row, h) {
           const date = row && row.date;
           if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isInteger(h) || h < 0 || h > 23) return;
-          if (!row.total || !row.total[h]) return;
+          if (!row.total || !this.totCells(row)[h]) return; // only a filled "as of" column opens (spec 297)
           this.hm = { open: true, loading: true, error: '', date, hour: h, label: row.label, rows: [], total: row.total[h], sort: { col: null, dir: null } };
           try {
             const qs = new URLSearchParams({ date });
@@ -922,11 +951,10 @@
           }
         },
         closeHour() { this.hm.open = false; },
-        hmTitle() { return `${this.fmtDate(this.hm.date)} · ${this.hourLabel(this.hm.hour)}`; },
-        hmRange() {
-          const h = this.hm.hour;
-          return `Cumulative 00:00 – ${h % 12 === 0 ? 12 : h % 12}:59 ${h < 12 ? 'AM' : 'PM'}`;
-        },
+        // Spec 297: "Nov 17, 2026 · as of 8AM" over "00:00 – 7:59 AM"; the rows and the TOTAL are the same bucket.
+        hmTitle() { return `${this.fmtDate(this.hm.date)} · as of ${this.asofLabel(this.hm.hour)}`; },
+        hmRange() { return this.asofRange(this.hm.hour); },
+        hmLastHour() { return this.hourSpan(this.hm.hour); },
         hmTotalsLine() {
           const t = this.hm.total;
           if (!t) return '';
@@ -935,7 +963,7 @@
         hmRows() { return CppSort.sortItems(this.hm.rows, this.hmSortFields, this.hm.sort); },
         sortHour(col) { this.hm.sort = CppSort.nextFor(this.hm.sort, this.hm.rows, this.hmSortFields, col); },
         hmAria(col) { return CppSort.aria(this.hm.sort, col); },
-        // Adspent, Orders, CPP, + Adspent this hour, + Orders this hour; "—" where no hourly spend is stored.
+        // Adspent, Orders, CPP, + Adspent last hour, + Orders last hour (the hour before the as-of time); "—" where no hourly spend is stored.
         hmCells(r) {
           if (!r) return ['', '', '', '', ''];
           return [

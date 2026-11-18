@@ -17,7 +17,8 @@ use Illuminate\Support\Facades\Schema;
  * - Pages of a day: those with hourly spend rows plus those with report spend that day (synced ads_manager_reports),
  *   so a page shows with its orders before its hourly spend is stored.
  * - Spend, CPI and CPM: cpp_snapshots H00..H23 (meta-ads:hourly, from Meta's hourly breakdown), carried forward from
- *   the page's latest stored hour.
+ *   the page's latest stored hour. On a past day, not past the day's last stored hour (spec 297): when the sync stopped
+ *   early (blocked, failing), the later hours have orders only, never the spend of an earlier hour.
  * - Orders: macro_output by order time (TIMESTAMP 'H:i d-m-Y', Manila wall clock), live, for those pages only.
  *
  * Three queries for the whole range (spend, ad-spend pages, orders), so a 31-day range costs the same round trips as
@@ -45,7 +46,7 @@ class HourlyTimeline
 
     /**
      * @param list<string> $dates Y-m-d
-     * @return array<string, array{last_hour:int, stored_at:?string, pages:list<array{page:string, cells:list<?array>}>, total:list<?array>}>
+     * @return array<string, array{last_hour:int, stored_at:?string, asof_hours:int, pages:list<array{page:string, cells:list<?array>}>, total:list<?array>}>
      *         keyed by date, in the order given
      */
     public function days(array $dates): array
@@ -58,6 +59,7 @@ class HourlyTimeline
         // Spend per page and hour (cumulative), from the hourly rows only.
         $pages = [];    // date => page_key => ['page' => name, 'spend' => [h => row]]
         $storedAt = []; // date => latest snapshot_at
+        $lastBucket = []; // date => the latest hour stored for any page
         $hourly = DB::table('cpp_snapshots')->whereBetween('snapshot_date', [$start, $end])
             ->whereIn('snapshot_bucket', HourlySpend::buckets())
             ->get(['snapshot_date', 'snapshot_bucket', 'page_name', 'page_key', 'amount_spent', 'cpi', 'cpm', 'snapshot_at']);
@@ -67,6 +69,7 @@ class HourlyTimeline
             $pages[$d][$key]['page'] ??= (string) $r->page_name;
             $pages[$d][$key]['spend'][(int) substr((string) $r->snapshot_bucket, 1)] = $r;
             if (!isset($storedAt[$d]) || $r->snapshot_at > $storedAt[$d]) $storedAt[$d] = (string) $r->snapshot_at;
+            $lastBucket[$d] = max($lastBucket[$d] ?? -1, (int) substr((string) $r->snapshot_bucket, 1));
         }
 
         // Pages with ad spend that day (synced report).
@@ -87,11 +90,40 @@ class HourlyTimeline
         $out = [];
         foreach ($dates as $d) {
             $last = $d === $this->now->toDateString() ? (int) $this->now->format('G') : ($d > $this->now->toDateString() ? -1 : 23);
-            $out[$d] = ['last_hour' => $last, 'stored_at' => $storedAt[$d] ?? null]
-                + $this->day($pages[$d] ?? [], $orders[$d] ?? [], $last);
+            $out[$d] = ['last_hour' => $last, 'stored_at' => $storedAt[$d] ?? null, 'asof_hours' => $this->asOfHours($d, $storedAt[$d] ?? null)]
+                + $this->day($pages[$d] ?? [], $orders[$d] ?? [], $last, $d < $this->now->toDateString() ? ($lastBucket[$d] ?? -1) : $last);
         }
 
         return $out;
+    }
+
+    /**
+     * Spec 297: how many "as of" columns of the day are filled. Column k (1..24) is the day as of k:00, which is the
+     * Total cell of hour k−1 (spend from H(k−1), orders before k:00).
+     * - A past day: all 24; a bucket never stored shows its orders without spend, as before.
+     * - A future day: none.
+     * - Today: column k only once k:00 has passed and the day's hourly spend was stored at or after k:00. Each run
+     *   rewrites the day's H-rows with one snapshot_at, so the latest one is the time of the latest run that stored the
+     *   day, and a run at or after k:00 read Meta's breakdown with hour k−1 finished. The run at :10 writes the
+     *   current hour with about ten minutes of spend; that hour's column waits for the next run. Orders alone never
+     *   fill a column.
+     */
+    public function asOfHours(string $date, ?string $storedAt): int
+    {
+        $today = $this->now->toDateString();
+        if ($date !== $today) return $date < $today ? 24 : 0;
+        if ($storedAt === null) return 0;
+
+        $start  = Carbon::parse($date, 'Asia/Manila')->startOfDay();
+        $stored = Carbon::parse($storedAt, 'Asia/Manila');
+        $n = 0;
+        for ($k = 1; $k <= 24; $k++) {
+            $at = $start->copy()->addHours($k);
+            if ($at->gt($this->now) || $at->gt($stored)) break;
+            $n = $k;
+        }
+
+        return $n;
     }
 
     /**
@@ -159,10 +191,10 @@ class HourlyTimeline
     }
 
     /**
-     * One day's page rows and Total row. Hours after $last are null. Impressions and messages are recovered from the
-     * stored CPI / CPM to add up the Total row.
+     * One day's page rows and Total row. Hours after $last are null; hours after $spendUntil have no spend (orders only).
+     * Impressions and messages are recovered from the stored CPI / CPM to add up the Total row.
      */
-    private function day(array $pages, array $orders, int $last): array
+    private function day(array $pages, array $orders, int $last, int $spendUntil): array
     {
         $out = [];
         $tot = array_fill(0, 24, ['spend' => 0.0, 'impr' => 0.0, 'msgs' => 0.0, 'orders' => 0, 'has_spend' => false]);
@@ -174,7 +206,9 @@ class HourlyTimeline
             $cpi = $cpm = null;
             for ($h = 0; $h < 24; $h++) {
                 if ($h > $last) { $cells[] = null; continue; }
-                if (isset($p['spend'][$h])) {
+                if ($h > $spendUntil) {
+                    $spend = $cpi = $cpm = null; // the sync never stored this hour of the day
+                } elseif (isset($p['spend'][$h])) {
                     $row = $p['spend'][$h];
                     $spend = (float) $row->amount_spent;
                     $cpi = $row->cpi !== null ? (float) $row->cpi : null;

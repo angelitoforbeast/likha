@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Jobs\ProcessPaymentActivityUpload;
 use App\Models\UploadLog;
+use App\Services\MetaAds\HourlySpend;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Carbon\Carbon;
@@ -11,17 +12,39 @@ use App\Models\PaymentActivity;
 
 class PaymentActivityController extends Controller
 {
-    /** Upload form (multi-file). */
-    public function create()
+    /** Upload History rows per type (spec 297). */
+    public const HISTORY_PAYMENT = 50;
+    public const HISTORY_HOURLY_ALL = 24;    // one day of hourly runs, so they never push the payment uploads out
+    public const HISTORY_HOURLY_ONLY = 72;   // three days when only "Hourly sync" is shown
+
+    /**
+     * Upload form (multi-file).
+     * Spec 297: Upload History also lists the Meta hourly sync runs (upload_logs type meta_ads_hourly), newest first,
+     * with a filter ?show=all|payment|hourly. Each type has its own count, so 24 runs a day never push the payment
+     * uploads out of the list.
+     */
+    public function create(Request $request)
     {
-        $logs = UploadLog::where('type', 'payment_activity')
+        $show = in_array($request->query('show'), ['payment', 'hourly'], true) ? $request->query('show') : 'all';
+
+        $payment = $show === 'hourly' ? collect() : UploadLog::where('type', 'payment_activity')
             ->orderBy('created_at', 'desc')
-            ->limit(50)
+            ->limit(self::HISTORY_PAYMENT)
             ->get();
+        $hourly = $show === 'payment' ? collect() : UploadLog::where('type', HourlySpend::LOG_TYPE)
+            ->orderBy('created_at', 'desc')
+            ->orderBy('id', 'desc')
+            ->limit($show === 'hourly' ? self::HISTORY_HOURLY_ONLY : self::HISTORY_HOURLY_ALL)
+            ->get();
+
+        $logs = $payment->concat($hourly)
+            ->sortByDesc(fn ($log) => sprintf('%012d.%012d', $log->created_at?->getTimestamp() ?? 0, $log->id))
+            ->values();
 
         return view('ads_manager.payment.upload', [
             'heading' => 'Upload Payment Activity',
             'logs'    => $logs,
+            'show'    => $show,
         ]);
     }
 
