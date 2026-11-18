@@ -83,6 +83,7 @@ class ChecklistAiFollowup extends Model
     public function wasEdited(): bool
     {
         return $this->review_status === 'approved'
+            && $this->reviewed_by !== null   // ang auto-approved ay hindi kailanman binago ng tao (spec 299)
             && trim((string) $this->description) !== trim((string) ($this->ai_draft['message'] ?? ''));
     }
 }

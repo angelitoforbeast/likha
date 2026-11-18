@@ -125,6 +125,14 @@ class AiFollowupAutoApproveTest extends AiFollowupTestCase
             ->getContent();
         $this->assertSame(1, substr_count($html, 'data-auto-chip'));
         $this->assertMatchesRegularExpression('/data-auto-chip[^>]*>\s*Auto\s*</', $html);
+        // kahit iba ang text sa ai_draft, ang auto row ay hindi "Edited by you"
+        $auto = ChecklistAiFollowup::whereNull('reviewed_by')->sole();
+        $auto->forceFill(['description' => 'Changed elsewhere'])->save();
+        $this->assertFalse($auto->fresh()->wasEdited());
+        $this->actingAs($ceo)->get('/checklist/ai-followups?tab=sent')->assertOk()->assertDontSee('Edited by you');
+        // ang paliwanag sa itaas ay sumusunod sa switch
+        $this->actingAs($ceo)->get('/checklist/ai-followups')->assertSee('Auto-approve is on: new ones go to staff at once, without your review.')
+            ->assertDontSee('Staff see one only after you approve it.');
     }
 
     public function test_switched_off_nothing_is_drafted_or_sent_even_with_auto_approve_on(): void

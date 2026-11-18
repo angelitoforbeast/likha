@@ -38,7 +38,7 @@
         <div class="flex items-start justify-between gap-4">
           <div class="min-w-0">
             <h1 class="text-base font-bold text-gray-800">Marketing head</h1>
-            <p class="text-xs text-gray-500 pretty">Mira, the AI marketing head, drafts follow-ups for late or not approved tasks. Staff see one only after you approve it.</p>
+            <p class="text-xs text-gray-500 pretty">Mira, the AI marketing head, drafts follow-ups for late or not approved tasks. {{ $settings['auto_approve'] ? 'Auto-approve is on: new ones go to staff at once, without your review.' : 'Staff see one only after you approve it.' }}</p>
           </div>
           <a href="{{ route('checklist.index') }}" class="flex-shrink-0 text-xs px-3 py-1.5 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">Checklist</a>
         </div>
