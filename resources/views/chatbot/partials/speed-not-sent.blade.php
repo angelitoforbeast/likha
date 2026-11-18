@@ -1,4 +1,7 @@
 {{-- Ang listahan ng Not sent ng /chatbot/speed (pinakabago muna): walang teksto ng customer, ang code lang ng error ng Meta. --}}
+@if(!empty($computing))
+<p class="mt-2 text-sm text-slate-600" role="status" data-sp-notsent-state="computing">Computing the numbers for this day. Open the list again in a minute.</p>
+@else
 <div class="mt-2 flex flex-wrap items-center gap-2 text-sm">
     <label class="flex items-center gap-1 text-xs">Hour
         <select data-sp-notsent-hour class="border px-2 py-1 text-sm text-gray-900">
@@ -30,3 +33,4 @@
     </table>
 </div>
 <p class="mt-2 text-xs text-slate-500">Message = when the customer's message arrived. Never sent = no reply went through within 24 hours; Sent late = a reply went through after the failed tries, Wait = how long the customer waited for it. Meta error = the code (and subcode) of the last failed try, when Meta gave one.</p>
+@endif

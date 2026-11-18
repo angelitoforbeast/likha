@@ -140,7 +140,7 @@ class SpeedMemoryTest extends ChatblastTestCase
         $base = memory_get_usage();
         $t = microtime(true);
         // Ang page, saka ang dalawang tawag ng script nito sa Sequences (ang section, saka ang chart).
-        $res = $this->get('/chatbot/speed?date=' . self::DAY)->assertOk();
+        $res = $this->speedGet('/chatbot/speed?date=' . self::DAY)->assertOk();
         $seq = $this->speedSequences('date=' . self::DAY);
         $chart = $this->speedSequences('date=' . self::DAY, true);
         $secs = round(microtime(true) - $t, 1);
@@ -235,7 +235,7 @@ class SpeedMemoryTest extends ChatblastTestCase
         });
         foreach (['over', 'error'] as $mode) {
             Cache::flush();
-            $res = $this->get('/chatbot/speed?date=' . self::DAY)->assertOk();
+            $res = $this->speedGet('/chatbot/speed?date=' . self::DAY)->assertOk();
             $html = $this->withSequences($res->getContent());
 
             $this->assertStringContainsString('Sequences section too large to compute now', $html);

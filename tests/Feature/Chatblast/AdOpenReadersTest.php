@@ -19,6 +19,8 @@ use Illuminate\Support\Facades\DB;
  */
 class AdOpenReadersTest extends ChatblastTestCase
 {
+    use LoadsSpeedSequences;
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -63,6 +65,7 @@ class AdOpenReadersTest extends ChatblastTestCase
         $today = app(BotHealth::class)->output([])['tiles']['today'];
         $this->assertSame([1, 1, 0], [$today['inbound'], $today['answered'], $today['not_answered']]);
 
+        $this->warmSpeed();
         $speed = app(ResponseSpeed::class)->output([])['total'];
         $this->assertSame([1, 1, 0], [$speed['messages'], $speed['answered'], $speed['unanswered']]);
 

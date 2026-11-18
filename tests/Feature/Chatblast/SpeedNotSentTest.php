@@ -14,6 +14,8 @@ use Illuminate\Support\Facades\DB;
  */
 class SpeedNotSentTest extends ChatblastTestCase
 {
+    use LoadsSpeedSequences;
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -93,6 +95,7 @@ class SpeedNotSentTest extends ChatblastTestCase
     private function out(array $q = []): array
     {
         Cache::flush();
+        $this->warmSpeed($q);
 
         return app(ResponseSpeed::class)->output($q);
     }
@@ -154,7 +157,7 @@ class SpeedNotSentTest extends ChatblastTestCase
         // Ang table ng mga oras: ang tatlong bagong column sa dulo, at ang chart script ay may sariling axis para rito.
         $this->ceo();
         Cache::flush();
-        $html = $this->get('/chatbot/speed')->assertOk()->getContent();
+        $html = $this->speedGet('/chatbot/speed')->assertOk()->getContent();
         $this->assertMatchesRegularExpression('#data-table="hours">\s*<thead><tr><th>Hour</th>(<th[^>]*>[^<]*</th>){11}<th class="!text-right">Never sent</th><th class="!text-right">Sent late</th><th class="!text-right">Late avg</th></tr>#', $html);
         $this->assertMatchesRegularExpression('#<tr data-hour="11">(?:(?!</tr>).)*<td class="text-right tabular-nums">0</td>\s*<td class="text-right tabular-nums">2</td>\s*<td class="text-right tabular-nums">80.5 s</td>\s*</tr>#s', $html);
         $this->assertStringContainsString("c.not_sent", $html);
@@ -176,7 +179,7 @@ class SpeedNotSentTest extends ChatblastTestCase
     public function test_S_201_9_the_not_sent_list_newest_first_with_page_bot_error_attempts_and_inbox_link(): void
     {
         $this->ceo();
-        $j = $this->getJson('/chatbot/speed/not-sent')->assertOk()->json();
+        $j = $this->speedJson('/chatbot/speed/not-sent')->assertOk()->json();
         $this->assertSame(['date' => '2026-10-21', 'page_id' => null, 'bot' => null], $j['filters']);
         $this->assertNull($j['hour']);
         $this->assertSame(3, $j['total']);
@@ -191,25 +194,25 @@ class SpeedNotSentTest extends ChatblastTestCase
         foreach (['data-table="not-sent"', '11:30:00', 'Never sent', 'Sent late', '#368 / 1390008', 'href="/chatbot/inbox?page_id=1001&amp;psid=7002"'] as $part) $this->assertStringContainsString($part, $j['html']);
 
         // Ang oras, ang Page at Bot filter, at ang araw.
-        $at = fn (string $q) => array_column($this->getJson('/chatbot/speed/not-sent?' . $q)->assertOk()->json('items'), 'at');
+        $at = fn (string $q) => array_column($this->speedJson('/chatbot/speed/not-sent?' . $q)->assertOk()->json('items'), 'at');
         $this->assertSame(['2026-10-21 11:30:00', '2026-10-21 11:00:00'], $at('hour=11'));
         $this->assertSame(['2026-10-21 10:10:00'], $at('hour=10'));
         $this->assertSame([], $at('hour=9'));
         $this->assertSame(['2026-10-21 11:00:00'], $at('page_id=1002'));
         $this->assertSame(['2026-10-21 11:30:00', '2026-10-21 10:10:00'], $at('bot=Forbeast'));
         $this->assertSame(['2026-10-20 16:00:00', '2026-10-20 15:00:00'], $at('date=2026-10-20'));
-        $this->assertSame(1, $this->getJson('/chatbot/speed/not-sent?date=2026-10-20&hour=16')->json('total'));
+        $this->assertSame(1, $this->speedJson('/chatbot/speed/not-sent?date=2026-10-20&hour=16')->json('total'));
         // Ang maling oras ay ang buong araw.
-        foreach (['hour=24', 'hour=x', 'hour[]=1', 'hour=-1'] as $q) $this->assertNull($this->getJson('/chatbot/speed/not-sent?' . $q)->assertOk()->json('hour'), $q);
+        foreach (['hour=24', 'hour=x', 'hour[]=1', 'hour=-1'] as $q) $this->assertNull($this->speedJson('/chatbot/speed/not-sent?' . $q)->assertOk()->json('hour'), $q);
         // Ang access ay gaya ng page.
         $this->actingAs($this->user('Data Encoder', 'enc-201n@example.test'));
-        $this->getJson('/chatbot/speed/not-sent')->assertForbidden();
+        $this->speedJson('/chatbot/speed/not-sent')->assertForbidden();
     }
 
     public function test_S_201_9_the_page_loads_the_list_when_it_is_opened(): void
     {
         $this->ceo();
-        $html = $this->get('/chatbot/speed?page_id=1001')->assertOk()->getContent();
+        $html = $this->speedGet('/chatbot/speed?page_id=1001')->assertOk()->getContent();
         $this->assertMatchesRegularExpression('#<details class="sp-table mt-3" data-sp-notsent="/chatbot/speed/not-sent\?page_id=1001&amp;date=2026-10-21">#', $html);
         $this->assertStringContainsString('Not sent list', $html);
         $this->assertStringContainsString("searchParams.set('hour'", $html);

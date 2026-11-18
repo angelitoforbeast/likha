@@ -44,6 +44,10 @@
     </form>
     @if(isset($built_at))<p class="text-xs text-slate-500" data-sp-asof="page">Numbers as of {{ \Carbon\Carbon::createFromTimestamp($built_at, 'Asia/Manila')->format('H:i') }}</p>@endif
 
+    {{-- Spec 306: ang mga numero ay binubuo ng warm, hindi rito; kapag wala pa ang araw (o mabagal ang basa), maikling tala lang at ang page ay nagre-reload pagkalipas ng isang minuto. --}}
+    @if(!empty($computing) || !empty($slow))
+    <p class="text-sm text-slate-600" role="status" data-sp-state="{{ !empty($slow) ? 'slow' : 'computing' }}">@if(!empty($slow))The numbers are taking too long to load. This page tries again in a minute.@else Computing the numbers for {{ $f['date'] }}. This page refreshes in a minute.@endif</p>
+    @else
     <section aria-labelledby="h-meta">
         <h2 id="h-meta" class="mb-1 text-base font-semibold">Reply time at Meta (customer sent → our reply sent, Meta's clock)</h2>
         @if($meta['state'] === 'botcake')
@@ -236,9 +240,12 @@
             <p class="text-sm text-slate-600" role="status" data-sp-seq-state="loading">Loading sequences…</p>
         </div>
     </section>
+    @endif
 </div>
 
+@if(empty($computing) && empty($slow))
 <script type="application/json" id="sp-data">{!! json_encode($charts, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) !!}</script>
+@endif
 @endsection
 
 @push('styles')
@@ -249,6 +256,12 @@
 @endpush
 
 @push('scripts')
+@if(!empty($computing) || !empty($slow))
+<script>
+// Spec 306: binubuo pa ang araw (o mabagal ang basa): subukan ulit pagkalipas ng isang minuto, gaya ng Sequences.
+setTimeout(() => location.reload(), 60000);
+</script>
+@else
 <script>
 // Sarado ang mga table sa simula; ang binuksan ay naaalala ng browser na ito (localStorage). Kapag walang storage
 // (private window o naka-block), sarado lang ang lahat. Function, dahil ang mga table ng Sequences ay dumarating mamaya.
@@ -370,6 +383,8 @@ window.spRemember(document);
             const url = new URL(box.dataset.spSeq, location.href);
             const s = await get(url);
             body.innerHTML = s.html;
+            // Spec 306: ang basang lampas sa hangganan ng oras: ang tala lang, at subukan ulit pagkalipas ng isang minuto.
+            if (s.slow) { setTimeout(load, 60000); return; }
             // Binubuo pa ng warm: subukan ulit pagkalipas ng isang minuto (walang chart pa).
             if (s.sequences && s.sequences.building) { setTimeout(load, 60000); return; }
             window.spRemember(body);
@@ -384,4 +399,5 @@ window.spRemember(document);
     load();
 })();
 </script>
+@endif
 @endpush
