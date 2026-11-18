@@ -22,10 +22,12 @@ Commits on `feat/301-sequence-pool-throughput` (after the two docs commits):
 - `d44e717e` feat(sequences): sequence pool in N processes, each with a fixed share of the pages
 - `5fc2d206` feat(speed): Sequences chart shows due → sent per due hour
 - `90f013ff` fix(sequences): a dead share's recovery never takes back what a live process holds
+- `08f314f1` feat(sequences): number of sequence pools from the app_settings row chatbot.sequence_pools (review follow-up)
 
 **Sequence pool (SQ-1, SQ-2)**
 
-- `config/services.php`: `botcake.sequence_pools` = `env('BOTCAKE_SEQUENCE_POOLS', 1)`. 1 = today's single process, byte for byte the same SQL, beat key and beat content.
+- **The number of processes, N** (`SequenceSendPool::pools()`): the `app_settings` row `chatbot.sequence_pools` first, read with the app's existing helper **`App\Models\AppSetting::get()`** (the same table and helper as `hold_snapshot_time`, `jnt_pickup_days_offset`, Bot Health's settings); no row (or an empty value) → `services.botcake.sequence_pools` = `env('BOTCAKE_SEQUENCE_POOLS', 1)`; then 1. Any value outside 1..8 (0, 9, -2, "abc", "2.5") → 1. The resolved value is cached for 60 s in the shared cache (`sequence-send-pool:pools:<site>`), so every reader sees the same N and a changed row takes effect within a minute, without `config:cache`. Readers: the command's `--shard` check and its start refusal (`new SequenceSendPool()`), the hand-off's "all shares running" check (`capable()`), the minute tick's shares and dead-share clean-up (`settleInFlight`, `owners()`). N = 1 is today's single process, byte for byte the same SQL, beat key and beat content.
+- A running process checks the count at most every 5 s (`poolsChanged()`); when it differs from the N it started with, it stops cleanly (drains its calls) and supervisor starts it again with the new N. A process whose `--shard` is outside the new N exits with an error after 10 s (supervisor keeps retrying it, harmlessly, until numprocs matches).
 - `chatbot:sequence-pool --shard=K` (default 0). A share outside 0..N-1 exits with an error after 10 s (as the "another pool is running" refusal does).
 - `SequenceSendPool`: `shard` and `pools` fixed for the life of the process. Claim (`BotcakeSendQueue::claim(..., $part)`), recover (`recoverSequence($owner, $part)`) and the progress check (`sequencePending($part)`) only see rows with `page_id % N = K`. Every page, therefore every customer (`sequence:<page_id>:<psid>`) and every ticket of that customer, belongs to exactly one process; inside the process nothing changed: lane per token, `BotcakeClient::slot` (shared with the bot's replies through the cache), lane cap, gateway per-page cap, 429 pause, `ChatbotSequences::sendCheck`, reply-open wait, `calledSequence` before the call, recovery without resend.
 - Share 0 keeps the beat key `sequence-send-pool:beat:<site>`; share K > 0 uses `…:<site>:K`. The beat carries `pools` and `shard` only when N > 1. `start()` refuses when its own share is live (as today), when the share is outside the count, or when any live beat (0..15) belongs to a pool with another N (e.g. the old single pool still draining after the change): two processes can never hold the same page.
@@ -99,6 +101,9 @@ Other tests (all in `SequencePoolThroughputTest`):
 - `test_SQ_2_a_process_refuses_to_start_beside_a_live_pool_of_another_count_or_outside_the_count`: N=1 keeps today's beat key; with N=3 a share refuses beside the live single pool, `capable()` is false until all three run, a share outside the count or twice refuses, another count refuses while these run, one stopped share makes `capable()` false.
 - `test_SQ_2_while_the_count_changes_the_tick_never_takes_back_what_the_old_single_pool_still_holds`: fails without the fix in `90f013ff` (checked), passes with it.
 - `test_SQ_2_the_minute_tick_leaves_a_live_process_calls_alone_and_cleans_up_a_dead_share_only`.
+- `test_SQ_2_the_pool_count_comes_from_the_app_setting_then_the_config_then_1`: row missing → config (3); empty row → config; row 4 → 4 (also what `new SequenceSendPool()` uses for the `--shard` check); rows 0, 9, -2, abc, 2.5, 100 → 1; row 8 → 8; config 12 with no row → 1.
+- `test_SQ_2_a_changed_row_reaches_every_reader_within_a_minute_and_a_running_process_notices`: row 2 → `capable()` needs both shares; the row changed to 3 is still 2 for everyone until the 60 s cache ends, then 3 (hand-off waits for three shares); a running process of the old count sees the change; a new share of 3 refuses while the processes of 2 are live; once those stop, three shares start; a process started with the old count (2, or the single pool) refuses beside the live processes of the new count; a share outside the count refuses.
+- All the multi-process tests set N through the `app_settings` row (as on the servers).
 - The existing pool and sequence tests (handoff, safety, durability, bench, gateway route, reply pool, sweeps) run unchanged and pass: they use the default N=1.
 
 **E: the smaller site and the bot's first replies.** With the default N=1 the code path is today's: no `page_id %` filter in any query, the same beat key and beat content (no `pools` key), the same recover and sweep; the whole existing sequence/pool test set passes without edits. The reply pools (`botcake:send-pool` / reply-pool) are not changed (`TicketPool::ownBeatKey()` returns their same key; `claim()` gets one optional trailing argument, default null). A page's total Botcake rate is still one shared `BotcakeClient::slot` per token, and each page sits in one sequence process, so a page never gets more sequence requests than today's rule allows, and `SequenceBenchTest::test_S_215e_7_a_first_reply_on_a_busy_page_is_not_slower_than_with_the_old_code` passes. What does grow on the busy site: about 4× the sequence pool's DB queries per second (≈ 10 per ticket, ~430/s at 42 tickets/s instead of ~107/s), on a server at 2 of 8 cores.
@@ -111,6 +116,8 @@ No migration: no new index was needed (the share filter is evaluated on the rows
 |---|---|---|---|---|
 | base 2940b58b | 5,679 | 2 | 5 | 6 |
 | branch (at `90f013ff`) | 5,687 | 0 | 5 | 6 |
+| after `08f314f1`: `SequencePoolThroughputTest` | 9 | 0 | 0 | 0 |
+| after `08f314f1`: filter Sequence, SendPool, SendQueue, ReplyPool, Pool, Sweep, CustomerReach, GatewayRoute | 325 | 0 | 0 | 1 |
 
 Base failures: SpeedMemoryTest S_198_1 (error), SpeedPrewarmTest S_277_5 missing entry (error), SpeedPrewarmTest S_277_4 and S_277_5 default page (failures), ExampleTest (302), ItemTableFitScriptTest drop order, SharedPagesBasePinTest `/owner/private`.
 
@@ -141,19 +148,17 @@ Branch pushed to `origin/feat/301-sequence-pool-throughput` (see the report).
 2. **Share by `page_id % N`, not by token.** A customer key contains the page ID, so a customer can never be in two shares. Production has one token per page (122 tokens); if two pages ever share a token across shares, the per-token rate still holds (the slot is shared in the cache) but each process applies the lane cap (held tickets) separately.
 3. `sequence_concurrency` stays per process (4 × 250 slots at N=4).
 4. Due → sent uses the Meta time when confirmed, else the pushed time (unconfirmed gateway steps and Botcake).
-5. Base failures (below) are load and environment failures of the base itself; the speed ones (SpeedPrewarm S_277_4/S_277_5, SpeedMemory S_198_1) pass when the machine is quieter, as they did on this branch's filtered runs.
+5. **N comes from `app_settings` `chatbot.sequence_pools`** through `App\Models\AppSetting::get()` (the app's existing site-setting helper), then `BOTCAKE_SEQUENCE_POOLS`, then 1; outside 1..8 → 1; one shared 60 s cache for every reader. A running process restarts itself (clean stop) when the count changes, so the row alone switches the processes; supervisor's numprocs must match it.
+6. Base failures (below) are load and environment failures of the base itself; the speed ones (SpeedPrewarm S_277_4/S_277_5, SpeedMemory S_198_1) pass when the machine is quieter, as they did on this branch's filtered runs.
 
 ## Merge danger
 
-**What ships:** the pool can run as N processes (off by default: N=1 is today), the minute tick and hand-off understand N shares, and the Sequences chart on `/chatbot/speed` shows due → sent. No migration, no new table. Files: `SequenceSendPool`, `TicketPool` (shared base of the reply and AI pools: only the beat key now comes from an overridable method with the same default), `BotcakeSendQueue` (optional `$part` on `claim`, `recoverSequence`, `sequencePending`), `ChatbotSequences::settleInFlight/cancel`, `RunSequenceSendPool`, `config/services.php`, `ResponseSpeed`, three speed views, tests. Cherry-picks as three commits (`d44e717e`, `5fc2d206`, `90f013ff`); none touches 297/298 files.
+**What ships:** the pool can run as N processes (off by default: N=1 is today; N from the `app_settings` row `chatbot.sequence_pools`), the minute tick and hand-off understand N shares, and the Sequences chart on `/chatbot/speed` shows due → sent. No migration, no new table. Files: `SequenceSendPool`, `TicketPool` (shared base of the reply and AI pools: only the beat key now comes from an overridable method with the same default), `BotcakeSendQueue` (optional `$part` on `claim`, `recoverSequence`, `sequencePending`), `ChatbotSequences::settleInFlight/cancel`, `RunSequenceSendPool`, `config/services.php`, `ResponseSpeed`, three speed views, tests. Cherry-picks as four commits (`d44e717e`, `5fc2d206`, `90f013ff`, `08f314f1`); none touches 297/298 files.
 
-**Likha (smaller site):** nothing to set. Leave `BOTCAKE_SEQUENCE_POOLS` unset (1) and the supervisor program as it is. Only the speed chart changes; the first load of today's/yesterday's Sequences after deploy rebuilds once (cache key v3; "building" for a moment, the warm job fills it).
+**Both sites (Incepxion and Likha) run the same setup: 4 processes.** No `.env` edit and no `config:cache` are needed; `BOTCAKE_SEQUENCE_POOLS` stays unset (it is only the fallback when the row is missing).
 
-**Incepxion (busy site):**
-
-1. Deploy the code as usual (with N unset the running single pool behaves as today).
-2. `.env`: `BOTCAKE_SEQUENCE_POOLS=4` (keep `BOTCAKE_SEQUENCE_CONCURRENCY=250`, now per process), then `php artisan config:cache`.
-3. Supervisor, the existing `chatbot:sequence-pool` program:
+1. Deploy the code as usual. With no row, N = 1 and the running single pool behaves as today. The first load of today's/yesterday's Sequences rebuilds once (cache key v3; "building" for a moment, the warm job fills it).
+2. Supervisor, the existing `chatbot:sequence-pool` program:
    ```
    command=php /path/to/artisan chatbot:sequence-pool --shard=%(process_num)s
    process_name=%(program_name)s_%(process_num)02d
@@ -161,10 +166,21 @@ Branch pushed to `origin/feat/301-sequence-pool-throughput` (see the report).
    numprocs_start=0
    stopwaitsecs=70
    ```
-   (keep its user, directory, autorestart and log settings; `stopwaitsecs` ≥ 65 lets a stopping process finish its calls), then `supervisorctl reread && supervisorctl update`.
-4. During the switch (about 1-2 minutes): the old single pool drains (up to 65 s) and the new shares refuse until it has stopped (each retries after its 10 s pause). Until all four run, `capable()` is false and sequence steps send inline (slower jobs, as with a dead pool today); nothing is sent twice and nothing the old pool holds is taken back.
-5. Check: `supervisorctl status` shows 4 processes; `chatbot:sequence-lateness` and the Sequences chart (now due → sent) fall over the next hour; `botcake_send_requests` in `sending` near 4 × 250 in busy hours; watch DB load (≈ 4× the sequence pool's queries).
+   (keep its user, directory, autorestart and log settings; `stopwaitsecs` ≥ 65 lets a stopping process finish its calls), then `supervisorctl reread && supervisorctl update`. While the row is still missing, process 0 runs as today's single pool and processes 1-3 exit after 10 s with "outside the number of sequence pools" (supervisor retries them; harmless).
+3. Set the row to 4, in the app's database (`app_settings`, unique `key`):
+   ```
+   php artisan tinker --execute="App\Models\AppSetting::set('chatbot.sequence_pools', 4);"
+   ```
+   or in SQL:
+   ```
+   INSERT INTO app_settings (`key`, value, created_at, updated_at) VALUES ('chatbot.sequence_pools', '4', NOW(), NOW())
+     ON DUPLICATE KEY UPDATE value = '4', updated_at = NOW();
+   ```
+4. Within a minute (cache 60 s, checked every 5 s): process 0 sees the new count and stops cleanly (drains up to 65 s); supervisor starts it again as share 0 of 4, and processes 1-3 start on their next retry once the old single pool has stopped (a process never starts beside a live pool of another count). Until all four run, `capable()` is false and sequence steps send inline (slower jobs, as with a dead pool today); nothing is sent twice and nothing the old pool holds is taken back. About 1-2 minutes in all.
+5. Check: `supervisorctl status` shows 4 processes running; `chatbot:sequence-lateness` and the Sequences chart (now due → sent) fall over the next hour; `botcake_send_requests` in `sending` near 4 × 250 in busy hours (concurrency stays 250 per process); watch DB load (≈ 4× the sequence pool's queries on Incepxion).
 
-**Roll back:** `BOTCAKE_SEQUENCE_POOLS=1` (or remove it), `config:cache`, supervisor back to one process (`numprocs=1`, `--shard=0` or no option), `update`. The code can stay (N=1 is today). Reverting the code also brings the chart back (cache key v2 again).
+Order matters only for speed: setting the row before the supervisor change also works, but steps send inline until supervisor runs all four processes.
 
-**Reviewer decides:** the N for Incepxion (4 recommended: 3 gave 3.1× in the model, a thin margin since DB contention between processes is not modelled; 5+ only if 4 is not enough), and whether p90 should be shown on the chart at first.
+**Roll back:** set the row back to 1 (`App\Models\AppSetting::set('chatbot.sequence_pools', 1)`, or the SQL above with '1'); within a minute every process stops cleanly and process 0 comes back as the single pool. Then supervisor `numprocs=1` (command with `--shard=0`, or the old command) and `supervisorctl reread && supervisorctl update`. The code can stay (N=1 is today). Reverting the code also brings the chart back (cache key v2 again).
+
+**Settled by the reviewer:** p90 stays one click in the legend; shares by page stay.
