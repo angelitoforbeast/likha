@@ -232,6 +232,8 @@ class ChatbotInboxListFastTest extends ChatblastTestCase
         $this->assertStringContainsString('setInterval(poll, POLL);', $html);
         $this->assertStringNotContainsString('loadList(); }, POLL)', $html);
         $this->assertStringContainsString('inboxListLoop({run: fetchList, every: POLL, limit: REQUEST_LIMIT, hidden: () => document.hidden', $html);
+        // Ang mga timer ay ibinibigay na nakabalot (laging window ang this), hindi ang native na function mismo.
+        $this->assertStringContainsString('setTimeout: (f, ms) => window.setTimeout(f, ms), clearTimeout: id => window.clearTimeout(id), AbortController});', $html);
         $this->assertStringContainsString('REQUEST_LIMIT = 15000', $html);
         $this->assertStringContainsString('ctl.abort(), REQUEST_LIMIT)', $html);
         $this->assertStringContainsString('if (data.slow)', $html);
@@ -241,8 +243,10 @@ class ChatbotInboxListFastTest extends ChatblastTestCase
         $script = $m[1] . <<<'JS'
 
 let now = 0, ids = 0, timers = [];
-const setT = (fn, ms) => { const id = ++ids; timers.push({id, at: now + ms, fn}); return id; };
-const clearT = (id) => { timers = timers.filter(t => t.id !== id); };
+// Gaya ng browser: ang native na timer na tinawag na may ibang this (hal. bilang method ng options object) ay TypeError.
+const browserLike = (f) => function (...a) { if (this !== undefined && this !== globalThis) throw new TypeError("Illegal invocation"); return f(...a); };
+const setT = browserLike((fn, ms) => { const id = ++ids; timers.push({id, at: now + ms, fn}); return id; });
+const clearT = browserLike((id) => { timers = timers.filter(t => t.id !== id); });
 const flush = async () => { for (let i = 0; i < 5; i++) await new Promise(r => setImmediate(r)); };
 async function advanceTo(end) {
   for (;;) {

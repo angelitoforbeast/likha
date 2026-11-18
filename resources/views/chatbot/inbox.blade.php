@@ -209,17 +209,20 @@
     // ang nauna; bawat kuha ay ina-abort pagkalipas ng o.limit ms; ang nakatagong tab ay hindi kumukuha (hinihintay ang
     // susunod na ikot); ang now() (bagong filter, bagong usapan) ay ina-abort ang naghihintay at kumukuha agad.
     // o.run(signal, st): st.timedOut kapag naubos ang o.limit, st.stale() kapag may mas bagong kuha na.
+    // Ang o.setTimeout / o.clearTimeout ay tinatawag nang hiwalay sa o: sa browser, ang native na timer na tinawag bilang
+    // method ng ibang object (this = o) ay "Illegal invocation".
     function inboxListLoop(o) {
+        const setT = o.setTimeout, clearT = o.clearTimeout;
         let ctl = null, wait = null, seq = 0;
-        const later = () => { o.clearTimeout(wait); wait = o.setTimeout(turn, o.every); };
+        const later = () => { clearT(wait); wait = setT(turn, o.every); };
         function turn() { if (o.hidden()) later(); else now(); }
         async function now() {
             if (ctl) ctl.abort();
-            o.clearTimeout(wait);
+            clearT(wait);
             const n = ++seq, mine = ctl = new o.AbortController(), st = {timedOut: false, stale: () => n !== seq};
-            const limit = o.setTimeout(() => { st.timedOut = true; mine.abort(); }, o.limit);
+            const limit = setT(() => { st.timedOut = true; mine.abort(); }, o.limit);
             try { await o.run(mine.signal, st); } catch (e) { /* ang run ang nagpapakita ng sarili nitong error */ }
-            o.clearTimeout(limit);
+            clearT(limit);
             if (n === seq) { ctl = null; later(); }
         }
         return {now, start: later};
@@ -255,7 +258,8 @@
             $('ib-list-note').textContent = st.timedOut ? TOO_SLOW : 'Could not load the list (' + (e.status || 'network') + ').';
         }
     }
-    const list = inboxListLoop({run: fetchList, every: POLL, limit: REQUEST_LIMIT, hidden: () => document.hidden, setTimeout, clearTimeout, AbortController});
+    const list = inboxListLoop({run: fetchList, every: POLL, limit: REQUEST_LIMIT, hidden: () => document.hidden,
+        setTimeout: (f, ms) => window.setTimeout(f, ms), clearTimeout: id => window.clearTimeout(id), AbortController});
     const loadList = () => list.now();
     const reloadList = () => { clearTimeout(listTimer); listTimer = setTimeout(loadList, 250); };
     $('ib-q').addEventListener('input', reloadList);
