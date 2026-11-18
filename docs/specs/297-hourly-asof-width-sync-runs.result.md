@@ -76,6 +76,7 @@ No migration, no new route, no schedule change, nothing new stored by the sync, 
 - `b4443cfb` feat(cpp): Hourly totals columns as of 1AM-12AM, today's column waits for its covering run, full width (297)
 - `bc3dc3c7` feat(payment): Upload History lists the Meta hourly sync runs, with a type filter (297)
 - `6148658d` fix(cpp): the 1AM column reads 00:00 – 0:59 AM (297)
+- `1df55bec` test(cpp): the pre-297 width cap is 1182 px (297)
 - the final commit: this result file
 
 ## Evidence per done-when item
@@ -147,7 +148,21 @@ The 291 golden test (`/hourly` byte for byte), the range, clamp, invalid-date, a
 
 `tests/Feature/PaymentActivity` and `tests/Feature/AdAccount` (which also open this page): OK, 35 tests. `tests/Feature/CPP`: OK, 62 tests, 562 assertions. `php artisan view:cache` compiles both views.
 
-FULL_SUITE_PLACEHOLDER
+**Full suite on `6148658d`** (`vendor/bin/phpunit`, Herd PHP 8.4.16, 23 min 6 s): 5688 tests, 85653 assertions, 12 failures and 2 errors, 6 skipped.
+- **The 3 base failures:**
+  - `ExampleTest::test_the_application_returns_a_successful_response`
+  - `ItemTableFitScriptTest::test_every_catalog_column_id_has_a_minimum_width_and_a_place_in_the_drop_order`
+  - `SharedPagesBasePinTest::test_S_42_4_… with data set "/owner/private"`
+  - With the worktree switched to base `2940b58b`, `--filter='SpeedMemoryTest|SpeedPrewarmTest|ExampleTest|ItemTableFitScriptTest|SharedPagesBasePinTest'` gives 80 tests and 3 failures: the same three. These are also the three that 291 and 292 listed.
+- **11 load-dependent Chatblast speed tests:**
+  - errors: `SpeedMemoryTest::test_S_198_1_…` and `SpeedPrewarmTest::test_S_277_5_a_missing_default_sequences_entry_…`;
+  - failures: `SpeedPrewarmTest` S_201_1, S_201_4, S_201_5 ×3, S_277_1, S_277_4 ×2, S_277_5.
+  - They pass on this branch when run on their own: the same filter on the branch gives 3 failures, the base three. The whole `tests/Feature/Chatblast` folder on the branch passes: 2332 tests, 0 failures, 2 skipped.
+  - They answer "too_large" / "building" when the sequences build runs over its time budget. The full run shared the machine with other workers' suites (worktrees `likha-wt298`, `likha-incx291`).
+  - This spec touches nothing in Chatblast.
+- **No new failures** from this change. 5688 = base + the 9 new tests (4 CPP, 5 Upload History), with one 292 test replaced.
+- The 6 skipped tests are the same environment-gated ones as in 291 and 292.
+- Since that run, `1df55bec` only changed one comment and its assertion in the AS-2 test. `tests/Feature/CPP` passes after it: 62 tests.
 
 ### 2. Rendered header, row, modal, Upload History rows, width
 A throwaway test, not committed, rendered this local data:
@@ -264,9 +279,9 @@ None.
   - Buckets: unchanged.
   - Payment upload page: Upload History has hourly runs, a filter, Type and Finished columns.
 - **Load:** the payment page makes one more small query (`upload_logs` by type, newest 24 or 72; the `type,status` index covers the type filter). The timeline queries are unchanged.
-- **Revert:** `git revert 6148658d bc3dc3c7 b4443cfb`. There is no data to clean up.
+- **Revert:** `git revert 1df55bec 6148658d bc3dc3c7 b4443cfb`. There is no data to clean up.
 - **The other site's cherry-pick:**
-  - Cherry-pick `b4443cfb`, `bc3dc3c7` and `6148658d` (the docs commits are optional).
+  - Cherry-pick `b4443cfb`, `bc3dc3c7`, `6148658d` and `1df55bec` (the docs commits are optional).
   - None of the five code files changed on this line between 292 (`49c19361`) and base `2940b58b`, so on a line with 291 and 292 they should apply as they do here.
   - The layout is not touched. The full-width rule targets `main > div.max-w-7xl`, which is the content box of the layout without 295 too (checked against the pre-295 layout at `dea0c621`).
   - The new test extends `OwnerPrivateTestCase` and uses only migrations older than 293–296.
