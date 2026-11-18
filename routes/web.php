@@ -183,6 +183,7 @@ Route::middleware(['web','auth'])->prefix('checklist')->name('checklist.')->grou
     Route::post('/ai-followups/{followup}/approve', [\App\Http\Controllers\ChecklistAiFollowupController::class, 'approve'])->whereNumber('followup')->name('ai-followups.approve');
     Route::post('/ai-followups/{followup}/edit', [\App\Http\Controllers\ChecklistAiFollowupController::class, 'edit'])->whereNumber('followup')->name('ai-followups.edit');
     Route::post('/ai-followups/{followup}/reject', [\App\Http\Controllers\ChecklistAiFollowupController::class, 'reject'])->whereNumber('followup')->name('ai-followups.reject');
+    Route::post('/ai-followups/{followup}/chat', [\App\Http\Controllers\ChecklistAiFollowupController::class, 'chat'])->whereNumber('followup')->name('ai-followups.chat');
     Route::post('/{task}/submit', [\App\Http\Controllers\ChecklistController::class, 'submit'])->name('submit');
     Route::delete('/submission/{submission}', [\App\Http\Controllers\ChecklistController::class, 'deleteSubmission'])->name('delete-submission');
     Route::delete('/files/{file}', [\App\Http\Controllers\ChecklistController::class, 'deleteFile'])->name('delete-file');

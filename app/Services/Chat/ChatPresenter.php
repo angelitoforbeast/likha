@@ -112,6 +112,15 @@ class ChatPresenter
             return [$title, ['initials' => ChatPeople::initials($title), 'tone' => null, 'group' => true]];
         }
         $others = array_values(array_filter($memberIds, fn ($id) => (int) $id !== $viewer->id));
+        // Conversation ng AI at ng isang tao (spec 299): "Mira" sa tao; "Mira and Joy Ramos" sa CEO na nagbabasa.
+        if ($ai = AiPost::aiOf($c)) {
+            $name = AiPost::name($ai);
+            if ($others) {
+                $name .= ' and ' . implode(' and ', array_map(fn ($id) => ($people->get((int) $id)['name'] ?? 'Unknown'), $others));
+            }
+
+            return [$name, ['initials' => ChatPeople::initials(AiPost::name($ai)), 'tone' => null, 'group' => false, 'ai' => true]];
+        }
         if (count($others) === 1) {
             $p = $people->get((int) $others[0]) ?? ChatPeople::card((int) $others[0], 'Unknown');
 

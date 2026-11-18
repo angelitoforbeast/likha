@@ -12,7 +12,11 @@
           <span class="w-5 h-5 rounded-md bg-violet-600 text-white flex items-center justify-center flex-shrink-0" aria-hidden="true">
             <i class="fa-solid fa-wand-magic-sparkles text-[10px]"></i>
           </span>
-          From Mira · approved by {{ \App\Services\AiFollowups::firstName($f->reviewer) ?: 'the CEO' }}
+          @if($f->isAuto())
+            From Mira · sent automatically
+          @else
+            From Mira · approved by {{ \App\Services\AiFollowups::firstName($f->reviewer) ?: 'the CEO' }}
+          @endif
         </p>
         <p class="mt-2 text-[15px] leading-relaxed text-gray-900" style="text-wrap: pretty">{{ $f->description }}</p>
         <div class="mt-3 flex items-center justify-between gap-3 flex-wrap">
