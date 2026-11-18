@@ -1003,6 +1003,8 @@ class CPPController extends Controller
      * from the same code. Same default range as the bucket grid (the 7 days ending today); at most 31 days, a longer
      * range is clamped to the 31 days ending at `end`. Spend is stored hourly by meta-ads:hourly --scheduled; orders
      * are live, so the view refreshes itself.
+     * Spec 297: the view labels the columns "as of" 1AM … 12AM (total[k − 1] is the day as of k:00); `asof_hours` says
+     * how many are filled, so today's column waits for the run that stored its full hour (HourlyTimeline::asOfHours).
      */
     public function timelineHourlyTotals(Request $request)
     {
@@ -1033,7 +1035,8 @@ class CPPController extends Controller
         $rows = [];
         $storedAt = null;
         foreach ($days as $d => $day) {
-            $rows[] = ['date' => $d, 'label' => Carbon::parse($d)->format('M j D'), 'last_hour' => $day['last_hour'], 'total' => $day['total']];
+            // asof_hours (spec 297): the column "as of k:00" shows total[k − 1] while k ≤ asof_hours.
+            $rows[] = ['date' => $d, 'label' => Carbon::parse($d)->format('M j D'), 'last_hour' => $day['last_hour'], 'asof_hours' => $day['asof_hours'], 'total' => $day['total']];
             if ($day['stored_at'] !== null && ($storedAt === null || $day['stored_at'] > $storedAt)) $storedAt = $day['stored_at'];
         }
 
