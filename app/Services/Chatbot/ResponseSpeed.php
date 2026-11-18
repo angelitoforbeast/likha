@@ -49,7 +49,7 @@ class ResponseSpeed
      */
     public const PAGE_KEY = 'response-speed:v5:';
     /** Ang entry ng Sequences: {built_at, final, sequences}. */
-    public const SEQUENCES_KEY = 'response-speed-seq:v2:';
+    public const SEQUENCES_KEY = 'response-speed-seq:v3:';
     /** Ang listahan ng "Not sent" ng isang araw at filter: isinusulat kasabay ng entry ng page (iisang kuwenta). */
     public const NOT_SENT_KEY = 'response-speed-not-sent:v1:';
     /** Ang pinakamaraming row ng listahan na ipinapakita (ang pinakabago); ang bilang ay ang lahat. */
@@ -327,8 +327,10 @@ class ResponseSpeed
                 'avg' => fn ($r) => $r['avg'], 'p90' => fn ($r) => $r['p90'], 'max' => fn ($r) => $r['max'],
             ], ['measured' => fn ($r) => $r['measured'], 'not confirmed' => fn ($r) => $r['unconfirmed']]],
             'seq' => [fn ($o) => $o['sequences']['hours'], [
-                'avg' => fn ($r) => $r['pushed_to_meta']['avg'], 'p90' => fn ($r) => $r['pushed_to_meta']['p90'],
-            ], ['steps' => fn ($r) => $r['pushed_to_meta']['n']]],
+                // Spec 301: ang pangunahing linya ay due → sent (ang tunay na delay); ang pushed → sent at Meta ay nasa legend.
+                'avg' => fn ($r) => $r['due_to_sent']['avg'] ?? null, 'p90' => fn ($r) => $r['due_to_sent']['p90'] ?? null,
+                'meta_avg' => fn ($r) => $r['pushed_to_meta']['avg'], 'meta_p90' => fn ($r) => $r['pushed_to_meta']['p90'],
+            ], ['steps' => fn ($r) => $r['due_to_sent']['n'] ?? null, 'at Meta' => fn ($r) => $r['pushed_to_meta']['n']]],
         ];
         if ($only !== null) $defs = array_intersect_key($defs, array_flip($only));
         $out = ['date' => $day['filters']['date'], 'prev_date' => $prev['filters']['date']];
@@ -846,7 +848,7 @@ class ResponseSpeed
         $budget = $this->sequenceBudget();
         $secs = $this->sequenceSeconds();
         $this->sequenceDeadline = $secs === null ? null : microtime(true) + $secs;
-        $blank = ['due' => 0, 'sent' => 0, 'failed' => 0, 'skipped' => 0, 'none' => 0, 'botcake' => 0, 'push' => [], 'meta' => []];
+        $blank = ['due' => 0, 'sent' => 0, 'failed' => 0, 'skipped' => 0, 'none' => 0, 'botcake' => 0, 'push' => [], 'meta' => [], 'sent_d' => []];
         $hours = array_fill(0, 24, $blank);
         $total = $blank;
         $late = date('Y-m-d H:i:s', strtotime($end) + self::STEP_LATE_SECONDS);
@@ -933,6 +935,8 @@ class ResponseSpeed
                 if ($due !== null) $b['push'][] = max(0, $row['pushed'] - strtotime($due));
                 if ($row['meta'] !== null) $b['meta'][] = max(0, $row['meta'] - $row['pushed']);
                 if ($row['botcake']) $b['botcake']++;
+                // Spec 301: due → sent, ang delay na nararamdaman ng customer (Meta kapag kumpirmado, kung hindi ay ang pushed; ang Botcake ay sabay).
+                if ($due !== null) $b['sent_d'][] = max(0, ($row['meta'] ?? $row['pushed']) - strtotime($due));
             }
             unset($b, $h);
             if ($op !== 'sent') return;
@@ -962,7 +966,7 @@ class ResponseSpeed
         }, $top);
 
         $out = fn ($b) => ['due' => $b['due'], 'sent' => $b['sent'], 'failed' => $b['failed'], 'skipped' => $b['skipped'], 'no_message' => $b['none'], 'botcake' => $b['botcake'],
-            'scheduled_to_pushed' => self::delayStats($b['push']), 'pushed_to_meta' => self::delayStats($b['meta'])];
+            'scheduled_to_pushed' => self::delayStats($b['push']), 'pushed_to_meta' => self::delayStats($b['meta']), 'due_to_sent' => self::delayStats($b['sent_d'])];
 
         return ['hours' => array_map(fn ($h) => $h > $nowHour ? null : ['hour' => $h] + $out($hours[$h]), range(0, 23)), 'total' => $out($total),
             'slowest' => $slowest];

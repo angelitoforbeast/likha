@@ -914,34 +914,45 @@ class ChatbotSequences
      * - patay ang chatbot:sequence-pool: ang hindi pa natawag ay kinakansela at ang step ay pinapatakbo ulit sa job (wala
      *   nang pool, kaya naghihintay ang padala), o tinatapos kapag may epekto na; ang natawag na ay failed, walang ulit;
      * - ang tali na lampas sa deadline ng ticket + BACKSTOP_MINUTES, anuman ang status: tinatapos, walang ulit kapag natawag.
+     * Kapag ilang proseso ang pool (spec 301): kada bahagi, at ang patay na bahagi ay sa mga page lang nito.
      */
     public function settleInFlight(): void
     {
         if (!BotcakeSendQueue::hasTable()) return;
         BotcakeSendQueue::sweepSequence(); // deadline wala; ang done/failed na hindi naituloy → resume; ang luma → bura
-        $alive = SequenceSendPool::alive(BotcakeSendQueue::DEAD_POOL_SECONDS);
-        // Buhay ang beat pero walang galaw nang 5 minuto habang may naghihintay: itinuturing na patay para sa pagkansela.
-        $stalled = $alive && SequenceSendPool::stalled();
-        // Isang beses kada pagtigil (hindi kada tick): ang bilang ng linya ay ang bilang ng pagtigil.
-        $stall = $stalled ? Cache::get(SequenceSendPool::stalledKey()) : null;
-        if ($stall !== null && Cache::get(SequenceSendPool::stalledKey() . ':logged') !== $stall) {
-            Cache::put(SequenceSendPool::stalledKey() . ':logged', $stall, 3600);
-            Log::warning('sequence send pool: no progress for 5 minutes; waiting sequence sends are cancelled and sent inline');
+        $pools = SequenceSendPool::pools();
+        $live = [];
+        $dead = [];
+        for ($k = 0; $k < $pools; $k++) {
+            $alive = SequenceSendPool::aliveShard($k, BotcakeSendQueue::DEAD_POOL_SECONDS);
+            // Buhay ang beat pero walang galaw nang 5 minuto habang may naghihintay: itinuturing na patay para sa pagkansela.
+            $stalled = $alive && SequenceSendPool::stalled($k);
+            // Isang beses kada pagtigil (hindi kada tick): ang bilang ng linya ay ang bilang ng pagtigil.
+            $stall = $stalled ? Cache::get(SequenceSendPool::stalledKey($k)) : null;
+            if ($stall !== null && Cache::get(SequenceSendPool::stalledKey($k) . ':logged') !== $stall) {
+                Cache::put(SequenceSendPool::stalledKey($k) . ':logged', $stall, 3600);
+                Log::warning('sequence send pool' . ($pools > 1 ? ' ' . $k . '/' . $pools : '') . ': no progress for 5 minutes; waiting sequence sends are cancelled and sent inline');
+            }
+            $owner = $alive && !$stalled ? (Cache::get(SequenceSendPool::beatKey($k))['owner'] ?? null) : null;
+            if ($owner === null) $dead[] = $k;
+            else $live[] = $owner;
         }
-        $live = $alive && !$stalled ? (Cache::get(SequenceSendPool::beatKey())['owner'] ?? null) : null;
         // Patay (walang beat nang DEAD_POOL_SECONDS; ang malinis na paghinto ay nag-iiwan ng beat na "stopped") o hindi umuusad:
         // ang hindi pa natawag ay kinakansela at pinapatakbo ng tick nang naghihintay; ang natawag na ay walang sagot, walang ulit.
-        if ($live === null) {
+        if ($dead) {
             $rows = DB::table(BotcakeSendQueue::TABLE)->whereIn('status', ['pending', 'sending'])->where('priority', BotcakeSendQueue::SEQUENCE_PRIORITY)->whereNull('called_at')
-                ->where('updated_at', '<=', now()->subSeconds(BotcakeSendQueue::DEAD_POOL_SECONDS))->orderBy('id')->limit(self::BATCH)->get();
+                ->where('updated_at', '<=', now()->subSeconds(BotcakeSendQueue::DEAD_POOL_SECONDS))
+                ->when($pools > 1, fn ($q) => $q->whereRaw('page_id % ' . $pools . ' in (' . implode(',', array_map('intval', $dead)) . ')'))
+                ->orderBy('id')->limit(self::BATCH)->get();
             foreach ($rows as $t) $this->cancel($t, 'The sequence send pool was not running; nothing sent');
-            BotcakeSendQueue::recoverSequence(null);
+            // Ang hawak ng buhay na proseso ay hindi binabawi, kahit nasa bahagi ng patay (hal. ang lumang iisang pool habang pinapalitan ang bilang).
+            foreach ($dead as $k) BotcakeSendQueue::recoverSequence($live ?: null, SequenceSendPool::part($k, $pools));
         }
         // Ang tawag na hawak ng hindi buhay na pool, lampas sa oras ng tawag at mga ulit (ayon sa sariling called_at ng ticket, hindi sa
         // tali): walang sagot, saka ang resume. Ang hawak ng buhay na pool ay hindi ginagalaw (ang sagot nito ang itinatala).
         $rows = DB::table(BotcakeSendQueue::TABLE)->where('status', 'sending')->where('priority', BotcakeSendQueue::SEQUENCE_PRIORITY)
             ->whereNotNull('called_at')->where('called_at', '<', now()->subSeconds(self::CALL_SECONDS))
-            ->when($live !== null, fn ($q) => $q->where(fn ($w) => $w->whereNull('claimed_by')->orWhere('claimed_by', '!=', $live)))->orderBy('id')->limit(self::BATCH)->get();
+            ->when($live, fn ($q) => $q->where(fn ($w) => $w->whereNull('claimed_by')->orWhereNotIn('claimed_by', $live)))->orderBy('id')->limit(self::BATCH)->get();
         foreach ($rows as $t) {
             BotcakeSendQueue::finishSequence($t, $t->claimed_by, ['status' => 'failed', 'error' => BotcakeSendQueue::noAnswer(json_decode((string) $t->result, true)['via'] ?? null), 'http' => null]);
         }
@@ -957,11 +968,10 @@ class ChatbotSequences
     /** Kanselahin ang ticket na hindi pa natawag (kondisyonal: ang tawag na nauna ay hindi naaapektuhan), saka ang step nito. */
     private function cancel(object $t, string $why): void
     {
-        // Ang pool na kasisimula lang (bagong beat): ang hawak nito ay hindi kinakansela.
-        $beat = Cache::get(SequenceSendPool::beatKey());
-        $owner = SequenceSendPool::alive(BotcakeSendQueue::DEAD_POOL_SECONDS) && !SequenceSendPool::stalled() ? ($beat['owner'] ?? null) : null;
+        // Ang pool na kasisimula lang (bagong beat): ang hawak nito ay hindi kinakansela (ang bawat buhay na bahagi).
+        $owners = array_values(array_filter(SequenceSendPool::owners(BotcakeSendQueue::DEAD_POOL_SECONDS)));
         if (DB::table(BotcakeSendQueue::TABLE)->where('id', $t->id)->whereIn('status', ['pending', 'sending'])->whereNull('called_at')
-            ->when($owner !== null, fn ($q) => $q->where(fn ($w) => $w->whereNull('claimed_by')->orWhere('claimed_by', '!=', $owner)))
+            ->when($owners, fn ($q) => $q->where(fn ($w) => $w->whereNull('claimed_by')->orWhereNotIn('claimed_by', $owners)))
             ->update(['status' => 'resumed', 'error' => $why, 'done_at' => now(), 'resumed_at' => now(), 'updated_at' => now()]) !== 1) return;
         $ctx = (array) json_decode((string) $t->context, true);
         $sub = DB::table('chatbot_sequence_subscriptions')->where('send_request_id', $t->request_id)->first();

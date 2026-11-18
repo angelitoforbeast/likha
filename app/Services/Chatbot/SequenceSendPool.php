@@ -3,11 +3,13 @@
 namespace App\Services\Chatbot;
 
 use App\Jobs\GatewayAfterSend;
+use App\Models\AppSetting;
 use App\Services\BotcakeClient;
 use App\Services\BotcakeMock;
 use App\Services\PageSettings;
 use App\Support\BotcakeClock;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Schema;
 use Psr\Http\Message\ResponseInterface;
 use Throwable;
 
@@ -21,6 +23,12 @@ use Throwable;
  *   services.chatbot.sequence_gateway_per_page nang sabay kada page.
  * Bago ang tawag: ang pagsusuri ng step (ChatbotSequences::sendCheck), ang daan na hindi nagbago, at walang sagot ng bot sa
  * customer na hindi pa tapos. Itinatala ang tawag bago lumabas (hindi inuulit pagkatapos ng crash).
+ *
+ * Spec 301: ang bawat ticket ay may ~10 query na humaharang sa iisang loop, kaya ang loop ang hangganan. Kapag ang bilang
+ * (pools(): app_settings chatbot.sequence_pools, saka BOTCAKE_SEQUENCE_POOLS) ay N > 1, N na proseso (--shard=0..N-1) ang
+ * tumatakbo, at ang bawat isa ay may sariling bahagi ng mga page (page_id % N): ang page, ang mga customer nito at ang mga
+ * ticket nila ay laging sa iisang proseso, kaya ang lane, ang ayos kada customer at ang pagtala bago ang tawag ay gaya ng
+ * dati sa loob ng bawat proseso. N = 1 ang dati.
  */
 class SequenceSendPool extends TicketPool
 {
@@ -28,6 +36,12 @@ class SequenceSendPool extends TicketPool
     public const CLAIM_EVERY = 0.2;     // segundo sa pagitan ng mga claim (hindi binabasa ang table kada 5 ms)
     public const MAX_RETRY_AFTER = 10;  // gaya ng botcake:send-pool
     public const LATE = 0.02;
+    public const MAX_POOLS = 8;         // ang pinakamaraming proseso (sinusuri ang lahat ng beat sa simula)
+    public const POOLS_SETTING = 'chatbot.sequence_pools'; // app_settings: ang bilang ng proseso (spec 301)
+    public const POOLS_CACHE = 'sequence-send-pool:pools';
+    public const POOLS_CACHE_SECONDS = 60;
+    public const POOLS_CHECK_SECONDS = 5;
+    private float $poolsCheckedAt = 0.0;
 
     private BotcakeClock $clock;
     /** @var array<string, array{row: object, provider: string, req: array, attempt: int, lane: string, secret: string, gateway: ?string, ref: string, notBefore: float}> */
@@ -39,12 +53,17 @@ class SequenceSendPool extends TicketPool
     private float $claimedAt = -INF;
     /** @var array<string, array<int, float>> lane => oras ng bawat request (para sa test at sa sukat) */
     public array $sentAt = [];
+    /** Ang bahagi ng prosesong ito (0..pools-1) at ang bilang ng proseso: hindi nagbabago habang buhay ang proseso. */
+    public readonly int $shard;
+    public readonly int $pools;
 
-    public function __construct(mixed $handler = null, ?BotcakeClock $clock = null)
+    public function __construct(mixed $handler = null, ?BotcakeClock $clock = null, int $shard = 0, ?int $pools = null)
     {
         parent::__construct($handler);
         $this->clock = $clock ?? app(BotcakeClock::class);
         $this->progressAt = now()->getTimestamp();
+        $this->pools = $pools ?? self::pools();
+        $this->shard = $shard;
     }
 
     public function max(): int
@@ -52,22 +71,111 @@ class SequenceSendPool extends TicketPool
         return max(1, (int) config('services.botcake.sequence_concurrency', 100));
     }
 
-    public static function beatKey(): string
+    /**
+     * Ilang proseso ng sequence pool: ang app_settings row na chatbot.sequence_pools (AppSetting::get) muna, saka ang
+     * services.botcake.sequence_pools (BOTCAKE_SEQUENCE_POOLS), saka 1. Iisang value para sa lahat ng bumabasa (ang --shard,
+     * ang simula, ang hand-off at ang tick): nasa cache nang POOLS_CACHE_SECONDS, kaya ang palit ng row ay umaabot sa loob
+     * ng isang minuto nang walang config:cache. Ang value na wala sa 1..MAX_POOLS ay 1 (ang dati).
+     */
+    public static function pools(): int
     {
-        return self::BEAT . ':' . ChatbotSequences::site();
+        return (int) Cache::remember(self::POOLS_CACHE . ':' . ChatbotSequences::site(), self::POOLS_CACHE_SECONDS, fn () => self::resolvePools());
     }
 
-    public static function stalledKey(): string
+    /** Ang bilang mula sa row, sa config o 1, nang walang cache. */
+    public static function resolvePools(): int
     {
-        return self::STALLED . ':' . ChatbotSequences::site();
+        $v = null;
+        try {
+            if (Schema::hasTable('app_settings')) $v = AppSetting::get(self::POOLS_SETTING);
+        } catch (Throwable $e) {
+            report($e); // walang basa ng row: ang config, gaya ng walang row
+        }
+        if ($v === null || trim((string) $v) === '') $v = config('services.botcake.sequence_pools', 1);
+        $n = filter_var(trim((string) $v), FILTER_VALIDATE_INT);
+
+        return $n !== false && $n >= 1 && $n <= self::MAX_POOLS ? $n : 1;
     }
 
-    /** Buhay ang pool at ito ang bersyong nagpapadala ng sequence ticket (ang tanda sa beat). */
+    /** Kalimutan ang bilang sa cache (ang susunod na basa ay mula sa row o config). */
+    public static function forgetPools(): void
+    {
+        Cache::forget(self::POOLS_CACHE . ':' . ChatbotSequences::site());
+    }
+
+    /**
+     * Nagbago na ba ang bilang ng proseso mula nang magsimula ang prosesong ito (binabasa nang hanggang isang beses kada
+     * POOLS_CHECK_SECONDS)? Ang command ay humihinto nang malinis, at sa pagbuhay ng supervisor ay sa bagong bilang na.
+     */
+    public function poolsChanged(): bool
+    {
+        $now = microtime(true);
+        if ($now - $this->poolsCheckedAt < self::POOLS_CHECK_SECONDS) return false;
+        $this->poolsCheckedAt = $now;
+
+        return self::pools() !== $this->pools;
+    }
+
+    /** Ang beat ng bahagi $shard: ang 0 ay ang dating key (kaya ang iisang proseso ay gaya ng dati). */
+    public static function beatKey(int $shard = 0): string
+    {
+        return self::BEAT . ':' . ChatbotSequences::site() . ($shard > 0 ? ':' . $shard : '');
+    }
+
+    protected function ownBeatKey(): string
+    {
+        return self::beatKey($this->shard);
+    }
+
+    public static function stalledKey(int $shard = 0): string
+    {
+        return self::STALLED . ':' . ChatbotSequences::site() . ($shard > 0 ? ':' . $shard : '');
+    }
+
+    /** Ang bahagi ng mga page para sa query ([N, k]: page_id % N = k), o null kapag iisang proseso (lahat ng page). */
+    public static function part(int $shard, int $pools): ?array
+    {
+        return $pools > 1 ? [$pools, $shard] : null;
+    }
+
+    /** Buhay ang beat ng bahagi $shard (sa nakaraang $seconds, BEAT_FRESH_SECONDS kapag wala). */
+    public static function aliveShard(int $shard, ?int $seconds = null): bool
+    {
+        $beat = Cache::get(self::beatKey($shard));
+
+        return is_array($beat) && (int) ($beat['at'] ?? 0) > now()->getTimestamp() - ($seconds ?? static::BEAT_FRESH_SECONDS);
+    }
+
+    /**
+     * Buhay ang pool at ito ang bersyong nagpapadala ng sequence ticket (ang tanda sa beat). Kapag ilang proseso: lahat ng
+     * bahagi ay buhay at may parehong bilang; kapag may kulang, walang hand-off (ang step ay padalang naghihintay, gaya ng
+     * patay na pool).
+     */
     public static function capable(): bool
     {
-        $beat = Cache::get(self::beatKey());
+        $n = self::pools();
+        for ($k = 0; $k < $n; $k++) {
+            $beat = Cache::get(self::beatKey($k));
+            if (!self::aliveShard($k) || (int) ($beat['sequence'] ?? 0) !== 1 || !empty($beat['stopped']) || self::stalled($k)) return false;
+            if ($n > 1 && (int) ($beat['pools'] ?? 1) !== $n) return false;
+        }
 
-        return self::alive() && (int) ($beat['sequence'] ?? 0) === 1 && empty($beat['stopped']) && !self::stalled();
+        return true;
+    }
+
+    /**
+     * Ang may hawak na buhay at umuusad kada bahagi (shard => owner; null = patay o hindi umuusad), para sa tick: ang hawak
+     * ng buhay na proseso ay hindi ginagalaw, ang sa patay ay nililinis sa mga page lang ng bahagi nito.
+     * @return array<int, ?string>
+     */
+    public static function owners(int $seconds): array
+    {
+        $out = [];
+        for ($k = 0, $n = self::pools(); $k < $n; $k++) {
+            $out[$k] = self::aliveShard($k, $seconds) && !self::stalled($k) ? (Cache::get(self::beatKey($k))['owner'] ?? null) : null;
+        }
+
+        return $out;
     }
 
     /** Ang huling galaw (may nakuha, may natapos, o walang naghihintay): sa beat, para makita ng tick ang pool na buhay pero hindi umuusad. */
@@ -78,22 +186,40 @@ class SequenceSendPool extends TicketPool
 
     protected function beatInfo(): array
     {
-        return ['sequence' => 1, 'progress_at' => $this->progressAt];
+        return ['sequence' => 1, 'progress_at' => $this->progressAt] + ($this->pools > 1 ? ['pools' => $this->pools, 'shard' => $this->shard] : []);
     }
 
-    /** Buhay ang beat pero walang galaw nang STALL_SECONDS habang may naghihintay. */
-    public static function stalled(): bool
+    /** Buhay ang beat ng bahagi $shard pero walang galaw nang STALL_SECONDS habang may naghihintay sa mga page nito. */
+    public static function stalled(int $shard = 0): bool
     {
-        $beat = Cache::get(self::beatKey());
+        $beat = Cache::get(self::beatKey($shard));
 
-        if (!self::alive() || !empty($beat['stopped']) || !isset($beat['progress_at'])) return false;
+        if (!self::aliveShard($shard) || !empty($beat['stopped']) || !isset($beat['progress_at'])) return false;
         // Nakita nang hindi umuusad (ng tick): hindi pa rin, hangga't walang bagong galaw, kahit naubos na ang naghihintay.
-        if (Cache::get(self::stalledKey()) === ($beat['owner'] ?? '') . ':' . $beat['progress_at']) return true;
+        if (Cache::get(self::stalledKey($shard)) === ($beat['owner'] ?? '') . ':' . $beat['progress_at']) return true;
         // Ang beat muna (walang query sa karaniwang takbo); saka kung may naghihintay talaga.
-        if ((int) $beat['progress_at'] >= now()->getTimestamp() - self::STALL_SECONDS || !BotcakeSendQueue::sequencePending()) return false;
-        Cache::put(self::stalledKey(), ($beat['owner'] ?? '') . ':' . $beat['progress_at'], 3600);
+        if ((int) $beat['progress_at'] >= now()->getTimestamp() - self::STALL_SECONDS
+            || !BotcakeSendQueue::sequencePending(self::part($shard, (int) ($beat['pools'] ?? 1)))) return false;
+        Cache::put(self::stalledKey($shard), ($beat['owner'] ?? '') . ':' . $beat['progress_at'], 3600);
 
         return true;
+    }
+
+    /**
+     * Simula, gaya ng TicketPool::start, at bukod doon: ang bahagi ay nasa loob ng bilang, at walang buhay na pool na iba ang
+     * bilang ng proseso (hal. ang luma habang pinapalitan ang bilang), para walang dalawang proseso na may hawak ng iisang page.
+     */
+    public function start(): bool
+    {
+        if ($this->shard < 0 || $this->shard >= $this->pools) return false;
+        for ($k = 0; $k < self::MAX_POOLS; $k++) {
+            if ($k === $this->shard) continue;
+            $beat = Cache::get(self::beatKey($k));
+            if (!is_array($beat) || !empty($beat['stopped']) || (int) ($beat['at'] ?? 0) <= now()->getTimestamp() - static::BEAT_FRESH_SECONDS) continue;
+            if ($k >= $this->pools || (int) ($beat['pools'] ?? 1) !== $this->pools) return false;
+        }
+
+        return parent::start();
     }
 
     /**
@@ -102,7 +228,7 @@ class SequenceSendPool extends TicketPool
      */
     public function stop(): void
     {
-        if ((Cache::get(self::beatKey())['owner'] ?? null) === $this->owner) Cache::put(self::beatKey(), ['owner' => $this->owner, 'at' => now()->getTimestamp(), 'stopped' => true], 60);
+        if ((Cache::get($this->ownBeatKey())['owner'] ?? null) === $this->owner) Cache::put($this->ownBeatKey(), ['owner' => $this->owner, 'at' => now()->getTimestamp(), 'stopped' => true], 60);
     }
 
     protected function nowMs(): int
@@ -112,12 +238,13 @@ class SequenceSendPool extends TicketPool
 
     protected function recover(): void
     {
-        BotcakeSendQueue::recoverSequence($this->owner);
+        BotcakeSendQueue::recoverSequence($this->owner, self::part($this->shard, $this->pools));
     }
 
+    /** Ang paglilinis ay para sa buong table: ang bahagi 0 lang (at ang tick kada minuto), hindi N beses. */
     protected function sweep(): void
     {
-        BotcakeSendQueue::sweepSequence();
+        if ($this->shard === 0) BotcakeSendQueue::sweepSequence();
     }
 
     public function tick(bool $claim = true): int
@@ -126,12 +253,13 @@ class SequenceSendPool extends TicketPool
         $now = $this->clock->now();
         if ($claim && count($this->jobs) < $this->max() && $now - $this->claimedAt >= self::CLAIM_EVERY - 0.000001) {
             $this->claimedAt = $now;
+            $part = self::part($this->shard, $this->pools);
             $started = count(BotcakeSendQueue::claim($this->owner, $this->max() - count($this->jobs), fn (object $c) => $this->room($c), fn (object $row) => $this->take($row),
-                $this->fullPages(), [], false, true));
+                $this->fullPages(), [], false, true, false, $part));
             // Galaw: may nakuha, o walang hawak at walang naghihintay.
             // Walang hawak: ang "may naghihintay ba" ay binabasa lang kapag lampas 60 s na ang huling galaw (hindi kada 200 ms).
             if ($started > 0) $this->progressAt = now()->getTimestamp();
-            elseif (!$this->jobs && now()->getTimestamp() - $this->progressAt >= self::IDLE_CHECK_SECONDS && !BotcakeSendQueue::sequencePending()) $this->progressAt = now()->getTimestamp();
+            elseif (!$this->jobs && now()->getTimestamp() - $this->progressAt >= self::IDLE_CHECK_SECONDS && !BotcakeSendQueue::sequencePending($part)) $this->progressAt = now()->getTimestamp();
         }
         $this->lanes();
         $this->pump();

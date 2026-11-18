@@ -62,6 +62,12 @@ abstract class TicketPool
         return static::BEAT;
     }
 
+    /** Ang key ng heartbeat ng pool na ito (ang pool na may ilang proseso ay may key kada bahagi). */
+    protected function ownBeatKey(): string
+    {
+        return static::beatKey();
+    }
+
     /** May buhay na pool (heartbeat sa nakaraang $seconds, BEAT_FRESH_SECONDS kapag wala)? */
     public static function alive(?int $seconds = null): bool
     {
@@ -73,7 +79,7 @@ abstract class TicketPool
     /** Simula: tumatanggi kapag may ibang buhay na pool (heartbeat), saka ibinabalik ang naiwan ng patay na pool. */
     public function start(): bool
     {
-        $beat = Cache::get(static::beatKey());
+        $beat = Cache::get($this->ownBeatKey());
         // Ang beat ng pool na huminto nang malinis ("stopped") ay hindi humaharang sa bagong pool.
         if (is_array($beat) && empty($beat['stopped']) && ($beat['owner'] ?? '') !== $this->owner && (int) ($beat['at'] ?? 0) > now()->getTimestamp() - static::BEAT_FRESH_SECONDS) return false;
         $this->beat();
@@ -84,7 +90,7 @@ abstract class TicketPool
 
     public function beat(): void
     {
-        Cache::put(static::beatKey(), ['owner' => $this->owner, 'at' => now()->getTimestamp()] + $this->beatInfo(), 60);
+        Cache::put($this->ownBeatKey(), ['owner' => $this->owner, 'at' => now()->getTimestamp()] + $this->beatInfo(), 60);
     }
 
     /** Ang dagdag sa heartbeat (hal. ang kaya ng bersyong ito ng pool), para sa ibang proseso na nagpapasya ayon dito. */
@@ -95,7 +101,7 @@ abstract class TicketPool
 
     public function stop(): void
     {
-        if ((Cache::get(static::beatKey())['owner'] ?? null) === $this->owner) Cache::forget(static::beatKey());
+        if ((Cache::get($this->ownBeatKey())['owner'] ?? null) === $this->owner) Cache::forget($this->ownBeatKey());
     }
 
     /** Gawin ang $then pagkalipas ng $ms (ang sagot ng mock, o ang muling subok). */

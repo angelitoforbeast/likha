@@ -126,7 +126,7 @@ class SpeedMemoryTest extends ChatblastTestCase
     private static function numbers($res, array $seq, array $chart): array
     {
         return ['hours' => $res->viewData('hours'), 'total' => $res->viewData('total'), 'by_bot' => $res->viewData('by_bot'), 'push' => $res->viewData('push'),
-            'sequences' => $seq['sequences'], 'charts' => $res->viewData('charts') + ['seq' => $chart['seq']]];
+            'sequences' => $seq['sequences'], 'charts' => $res->viewData('charts') + ['seq' => self::seqChartAsOld($chart['seq'])]];
     }
 
     public function test_S_198_1_a_late_day_volume_renders_under_192_mb_with_the_same_numbers(): void
@@ -153,9 +153,10 @@ class SpeedMemoryTest extends ChatblastTestCase
         $this->assertSame([40000, 36000, 4000, 126], [$n['total']['messages'], $n['total']['answered'], $n['total']['unanswered'], $n['total']['median']]);
         $this->assertSame([382, '2026-10-21 18:46:45'], [$n['sequences']['slowest'][0]['delay'], $n['sequences']['slowest'][0]['pushed']]);
         // Lahat ng iba pang numero (bawat oras, bawat bot, ang push, ang 20 pinakamabagal at ang mga chart): ang fingerprint ng lumang code.
+        // Spec 301: ang due → sent ay bago (ResponseSpeedTest), kaya wala sa fingerprint; ang chart ng Sequences ay sa anyo ng lumang code.
         // Ang Not sent ay bago (walang pumalyang padala ng Main Flow o AI sa fixture: lahat ay 0), kaya wala sa fingerprint.
         $this->assertSame(['never' => 0, 'late' => 0, 'attempts' => 0, 'late_avg' => null], $n['total']['not_sent']);
-        $this->assertSame('2aed0348c883fd4283b20bf8e706a451', md5(json_encode(self::withoutNotSent($n))));
+        $this->assertSame('2aed0348c883fd4283b20bf8e706a451', md5(json_encode(self::withoutDueToSent(self::withoutNotSent($n)))));
         // 192 MB sa kabuuan kapag mag-isa ang test (mga 58 MB ang PHPUnit at Laravel bago ang request): 128 MB ang sa request.
         $this->assertLessThan(128 * 1048576, $peak, 'request peak ' . round($peak / 1048576, 1) . " MB in $secs s");
     }
