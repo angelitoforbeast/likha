@@ -57,6 +57,8 @@ class OwnerOnlyLockTest extends ChatTestCase
         $ceoHtml = $this->actingAs($ceo)->get('/chat')->getContent();
 
         $this->assertNotSame($staffHtml, $ceoHtml);
-        $this->assertSame($strip($ceoHtml), $strip($staffHtml));
+        // Blank lines left by @if do not count.
+        $flat = fn (string $html): string => preg_replace('~\s+~', ' ', $strip($html));
+        $this->assertSame($flat($ceoHtml), $flat($staffHtml));
     }
 }
