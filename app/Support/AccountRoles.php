@@ -14,9 +14,10 @@ class AccountRoles
     public const MARKETING_OIC = 'Marketing - OIC';
     public const DATA_ENCODER_OIC = 'Data Encoder - OIC';
     public const MARKETING = 'Marketing';
+    public const DATA_ENCODER = 'Data Encoder';
 
-    /** Highest first. */
-    public const ALL = [self::CEO, self::MARKETING_OIC, self::DATA_ENCODER_OIC, self::MARKETING];
+    /** Highest first. Data Encoder is last, below Marketing, as every nav seed lists it after Marketing. */
+    public const ALL = [self::CEO, self::MARKETING_OIC, self::DATA_ENCODER_OIC, self::MARKETING, self::DATA_ENCODER];
 
     /** The canonical spelling of a role in the list, or null when it is not one of them. */
     public static function canonical(?string $role): ?string

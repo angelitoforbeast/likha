@@ -71,7 +71,7 @@ class CreateAccountTest extends AccountsTestCase
             'empty password'        => [['password' => '', 'password_confirmation' => ''], 'password'],
             'empty name'            => [['name' => ''], 'name'],
             'blank name'            => [['name' => '   '], 'name'],
-            'role not in the list'  => [['role' => 'Data Encoder'], 'role'],
+            'role not in the list'  => [['role' => 'Data Encoder - Head'], 'role'],
             'made-up role'          => [['role' => 'Super Admin'], 'role'],
             'empty role'            => [['role' => ''], 'role'],
             'role as an array'      => [['role' => ['CEO']], 'role'],
@@ -128,7 +128,7 @@ class CreateAccountTest extends AccountsTestCase
 
     public static function rolesBelowCeo(): array
     {
-        return ['Marketing - OIC' => ['Marketing - OIC'], 'Data Encoder - OIC' => ['Data Encoder - OIC'], 'Marketing' => ['Marketing']];
+        return ['Marketing - OIC' => ['Marketing - OIC'], 'Data Encoder - OIC' => ['Data Encoder - OIC'], 'Marketing' => ['Marketing'], 'Data Encoder' => ['Data Encoder']];
     }
 
     #[DataProvider('rolesBelowCeo')]
@@ -197,8 +197,8 @@ class CreateAccountTest extends AccountsTestCase
         return [
             'CEO, lower case'                  => ['ceo', AccountRoles::ALL],
             'CEO, spaces around'               => ['  CEO  ', AccountRoles::ALL],
-            'Marketing - OIC, lower case'      => ['marketing - oic', ['Marketing - OIC', 'Data Encoder - OIC', 'Marketing']],
-            'Marketing - OIC, doubled spaces'  => [' Marketing  -  OIC ', ['Marketing - OIC', 'Data Encoder - OIC', 'Marketing']],
+            'Marketing - OIC, lower case'      => ['marketing - oic', ['Marketing - OIC', 'Data Encoder - OIC', 'Marketing', 'Data Encoder']],
+            'Marketing - OIC, doubled spaces'  => [' Marketing  -  OIC ', ['Marketing - OIC', 'Data Encoder - OIC', 'Marketing', 'Data Encoder']],
         ];
     }
 
@@ -221,10 +221,10 @@ class CreateAccountTest extends AccountsTestCase
     public function test_AR2_the_page_offers_the_roles_each_creator_may_give_in_order(): void
     {
         $ceoHtml = $this->actingAs($this->user('CEO'))->get('/accounts/create')->assertOk()->getContent();
-        $this->assertSame(['CEO', 'Marketing - OIC', 'Data Encoder - OIC', 'Marketing'], $this->offeredRoles($ceoHtml));
+        $this->assertSame(['CEO', 'Marketing - OIC', 'Data Encoder - OIC', 'Marketing', 'Data Encoder'], $this->offeredRoles($ceoHtml));
 
         $oicHtml = $this->actingAs($this->user('Marketing - OIC'))->get('/accounts/create')->assertOk()->getContent();
-        $this->assertSame(['Marketing - OIC', 'Data Encoder - OIC', 'Marketing'], $this->offeredRoles($oicHtml));
+        $this->assertSame(['Marketing - OIC', 'Data Encoder - OIC', 'Marketing', 'Data Encoder'], $this->offeredRoles($oicHtml));
     }
 
     public function test_AR2_the_form_carries_a_csrf_token(): void
