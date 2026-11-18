@@ -25,6 +25,7 @@ abstract class ChatTestCase extends TestCase
         '2026_11_27_296000_create_chat_conversations_table.php',
         '2026_11_27_296100_create_chat_members_table.php',
         '2026_11_27_296200_create_chat_messages_table.php',
+        '2026_11_28_300000_add_messenger_columns_to_chat_tables.php',
     ];
 
     protected function setUp(): void
