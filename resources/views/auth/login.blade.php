@@ -44,8 +44,7 @@
         </form>
 
         <p class="mt-4 text-center text-sm">
-            Don't have an account?
-            <a href="{{ route('login') }}" class="text-blue-600 hover:underline">Register here</a>
+            Don't have an account? Ask your CEO or Marketing - OIC to create one.
         </p>
     </div>
 </body>
