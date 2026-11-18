@@ -140,6 +140,7 @@ abstract class ChecklistTestCase extends TestCase
         '2026_10_18_510000_add_deadline_time_to_checklist_tasks.php',
         '2026_10_18_510100_add_is_override_to_checklist_analysis_logs.php',
         '2026_11_27_100000_add_ai_followup_columns_to_checklist_tasks.php',
+        '2026_11_29_299000_add_chat_columns_to_checklist_tasks.php',
     ];
 
     protected function user(string $role, ?string $department = null, string $name = 'Tester'): User

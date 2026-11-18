@@ -39,7 +39,10 @@ abstract class AiFollowupTestCase extends ChecklistTestCase
             $t->text('value')->nullable();
             $t->timestamps();
         });
-        foreach (['2026_10_16_100002_create_staff_events_table.php', '2026_10_16_200001_add_source_to_staff_events.php'] as $file) {
+        // Ang chat tables (spec 296): ang approved follow-up ay ipinapadala rin ni Mira sa Likha Chat (spec 299).
+        foreach (['2026_10_16_100002_create_staff_events_table.php', '2026_10_16_200001_add_source_to_staff_events.php',
+                  '2026_11_27_296000_create_chat_conversations_table.php', '2026_11_27_296100_create_chat_members_table.php',
+                  '2026_11_27_296200_create_chat_messages_table.php'] as $file) {
             (require database_path("migrations/$file"))->up();
         }
 
