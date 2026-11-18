@@ -41,7 +41,12 @@ class SequenceSendPool extends TicketPool
     public const POOLS_CACHE = 'sequence-send-pool:pools';
     public const POOLS_CACHE_SECONDS = 60;
     public const POOLS_CHECK_SECONDS = 5;
+    public const LANE_CAP_SETTING = 'chatbot.sequence_lane_cap'; // app_settings: ticket kada Botcake lane ng sequence (spec 303)
+    public const LANE_CAP_CACHE = 'sequence-send-pool:lane-cap';
+    public const MAX_LANE_CAP = 100;
     private float $poolsCheckedAt = 0.0;
+    /** Ang cap ng Botcake lane sa ikot na ito ng claim (isang basa ng cache kada claim, hindi kada kandidato). */
+    private ?int $laneCap = null;
 
     private BotcakeClock $clock;
     /** @var array<string, array{row: object, provider: string, req: array, attempt: int, lane: string, secret: string, gateway: ?string, ref: string, notBefore: float}> */
@@ -95,6 +100,40 @@ class SequenceSendPool extends TicketPool
         $n = filter_var(trim((string) $v), FILTER_VALIDATE_INT);
 
         return $n !== false && $n >= 1 && $n <= self::MAX_POOLS ? $n : 1;
+    }
+
+    /**
+     * Ilang sequence ticket ang hawak ng isang Botcake lane (spec 303): ang app_settings row na chatbot.sequence_lane_cap
+     * kapag 1..MAX_LANE_CAP, kung hindi ay BotcakeSendPool::laneTickets() (ang dati). Ang row lang ang nasa cache (gaya ng
+     * pools(): iisang value para sa lahat, umaabot ang palit sa loob ng isang minuto); ang laneTickets() ay laging mula sa
+     * config. Ang sagot ng bot at ang chatblast ay laneTickets() pa rin, at ang BotcakeClient::slot ay humahati pa rin sa rate
+     * ng page, kaya ang mas mataas na cap ay hindi lumalampas sa rate_per_page: mas maraming tawag lang ang naghihintay ng sagot.
+     */
+    public static function laneCap(): int
+    {
+        $row = (int) Cache::remember(self::LANE_CAP_CACHE . ':' . ChatbotSequences::site(), self::POOLS_CACHE_SECONDS, fn () => self::resolveLaneCap());
+
+        return $row > 0 ? $row : BotcakeSendPool::laneTickets();
+    }
+
+    /** Ang cap mula sa row nang walang cache: 0 kapag walang row o wala sa 1..MAX_LANE_CAP (ang dati ang ginagamit). */
+    public static function resolveLaneCap(): int
+    {
+        $v = null;
+        try {
+            if (Schema::hasTable('app_settings')) $v = AppSetting::get(self::LANE_CAP_SETTING);
+        } catch (Throwable $e) {
+            report($e); // walang basa ng row: ang dati, gaya ng walang row
+        }
+        $n = $v === null ? false : filter_var(trim((string) $v), FILTER_VALIDATE_INT);
+
+        return $n !== false && $n >= 1 && $n <= self::MAX_LANE_CAP ? $n : 0;
+    }
+
+    /** Kalimutan ang cap sa cache (ang susunod na basa ay mula sa row). */
+    public static function forgetLaneCap(): void
+    {
+        Cache::forget(self::LANE_CAP_CACHE . ':' . ChatbotSequences::site());
     }
 
     /** Kalimutan ang bilang sa cache (ang susunod na basa ay mula sa row o config). */
@@ -253,6 +292,7 @@ class SequenceSendPool extends TicketPool
         $now = $this->clock->now();
         if ($claim && count($this->jobs) < $this->max() && $now - $this->claimedAt >= self::CLAIM_EVERY - 0.000001) {
             $this->claimedAt = $now;
+            $this->laneCap = self::laneCap();
             $part = self::part($this->shard, $this->pools);
             $started = count(BotcakeSendQueue::claim($this->owner, $this->max() - count($this->jobs), fn (object $c) => $this->room($c), fn (object $row) => $this->take($row),
                 $this->fullPages(), [], false, true, false, $part));
@@ -268,10 +308,13 @@ class SequenceSendPool extends TicketPool
         return $started;
     }
 
-    /** Ilang ticket ang hawak kada lane: sa Botcake, gaya ng send pool (BotcakeSendPool::laneTickets); sa gateway, ang setting. */
+    /**
+     * Ilang ticket ang hawak kada lane: sa Botcake, ang laneCap() (ang row, o gaya ng send pool: BotcakeSendPool::laneTickets),
+     * binasa sa simula ng bawat claim; sa gateway, ang setting.
+     */
     public function cap(bool $botcake): int
     {
-        return $botcake ? BotcakeSendPool::laneTickets() : max(1, (int) config('services.chatbot.sequence_gateway_per_page', 30));
+        return $botcake ? ($this->laneCap ?? self::laneCap()) : max(1, (int) config('services.chatbot.sequence_gateway_per_page', 30));
     }
 
     /** Ang lane ng page: [key, botcake?]; ang key ng Botcake ay ang sha1 ng token (kahati ng lahat ng padala sa page). */

@@ -4,7 +4,10 @@ namespace Tests\Feature\Chatblast;
 
 use App\Models\AppSetting;
 use App\Models\BotcakeChat;
+use App\Models\BotcakeMessage;
+use App\Services\Chatbot\BotcakeSendPool;
 use App\Services\Chatbot\BotcakeSendQueue;
+use App\Services\ChatblastSender;
 use App\Services\Chatbot\SequenceSendPool;
 use App\Services\PageSettings;
 use Carbon\Carbon;
@@ -258,6 +261,7 @@ class SequencePoolThroughputTest extends SequenceHandoffTestCase
         if (is_numeric(getenv('SEQ_QUERY_MS'))) $this->queryMs = (float) getenv('SEQ_QUERY_MS');
         Artisan::call('migrate', ['--path' => ['database/migrations/2026_04_10_000003_create_app_settings_table.php']]);
         SequenceSendPool::forgetPools();
+        SequenceSendPool::forgetLaneCap();
     }
 
     /** Ang bilang ng proseso sa app_settings row (gaya ng pagse-set sa server), at agad na nababasa. */
@@ -543,5 +547,162 @@ class SequencePoolThroughputTest extends SequenceHandoffTestCase
         app(\App\Services\Chatbot\ChatbotSequences::class)->settleInFlight();
         $this->assertSame($calledB->count(), DB::table(BotcakeSendQueue::TABLE)->whereIn('id', $calledB)->where('status', '!=', 'sending')->count());
         $this->assertSame(0, DB::table(BotcakeSendQueue::TABLE)->whereIn('id', $calledA)->where('status', '!=', 'sending')->count());
+    }
+
+    /** Spec 303: ang cap ng sequence sa Botcake lane sa app_settings row (gaya ng pagse-set sa server), at agad na nababasa. */
+    protected function useLaneCap(int|string|null $n): void
+    {
+        if ($n === null) AppSetting::where('key', SequenceSendPool::LANE_CAP_SETTING)->delete();
+        else AppSetting::set(SequenceSendPool::LANE_CAP_SETTING, $n);
+        SequenceSendPool::forgetLaneCap();
+    }
+
+    /** Ilang ticket ang hawak ng pool (kinuha, natawag man o hindi pa). */
+    private static function held(SequenceSendPool $pool): int
+    {
+        return (fn () => count($this->jobs))->call($pool);
+    }
+
+    /**
+     * Ang pool sa virtual na oras nang $seconds, hakbang na $step: ang fake na Botcake ay sumasagot pagkalipas ng $latency
+     * (null: hindi sumasagot). @return int ang pinakamaraming hawak na ticket
+     */
+    private function runFor(SequenceSendPool $pool, float $seconds, ?float $latency, float $step = 0.02): int
+    {
+        $base = Carbon::now();
+        $t0 = $this->clock->time;
+        $most = 0;
+        for ($i = 0; $i * $step < $seconds; $i++) {
+            $now = $t0 + $i * $step;
+            $this->clock->time = $now;
+            Carbon::setTestNow($base->copy()->addMilliseconds((int) round(($now - $t0) * 1000)));
+            if ($latency !== null) {
+                foreach ($this->loadCalls as &$c) {
+                    if (!isset($c['done']) && $now >= $c['t'] + $latency) {
+                        $c['done'] = true;
+                        $c['p']->resolve(new Response(200, ['Content-Type' => 'application/json'], '{"success":true}'));
+                    }
+                }
+                unset($c);
+                DB::table(BotcakeSendQueue::TABLE)->whereIn('status', ['done', 'failed'])->update(['status' => 'resumed', 'resumed_at' => now()]);
+            }
+            $pool->beat();
+            $pool->tick();
+            $most = max($most, self::held($pool));
+        }
+
+        return $most;
+    }
+
+    /** Ang mga tawag ng iisang page ay hindi lumalapit sa isa't isa nang higit sa 1 / rate_per_page. */
+    private function assertSpacedByTheRate(): void
+    {
+        $interval = 1 / (float) config('services.botcake.rate_per_page');
+        $ts = collect($this->loadCalls)->pluck('t')->sort()->values();
+        $this->assertGreaterThan(1, $ts->count());
+        for ($i = 1; $i < $ts->count(); $i++) $this->assertGreaterThanOrEqual($interval - 1e-6, $ts[$i] - $ts[$i - 1], 'one page stays at its rate');
+    }
+
+    public function test_LC_1_H_with_the_row_at_50_a_botcake_page_lane_holds_up_to_50_sequence_tickets_spaced_by_the_rate(): void
+    {
+        $this->load(1, 80);
+        $this->useLaneCap(50);
+        $pool = $this->shardPool(0, 1);
+        $this->assertTrue($pool->start());
+        $this->assertSame(50, $pool->cap(true));
+        $this->assertSame(30, $pool->cap(false), 'the gateway lane cap is unchanged');
+
+        // Botcake never answers: the lane fills to its cap and stops there.
+        $most = $this->runFor($pool, 10, null);
+        $this->assertSame(50, $most, 'the lane holds up to 50, never more');
+        $this->assertSame(50, self::held($pool));
+        $this->assertCount(50, $this->loadCalls, 'all 50 called (5 s at 10 a second), the other 30 wait');
+        $this->assertSame(50, DB::table(BotcakeSendQueue::TABLE)->where('status', 'sending')->count());
+        $this->assertSame(30, DB::table(BotcakeSendQueue::TABLE)->where('status', 'pending')->count());
+        $this->assertSpacedByTheRate();
+    }
+
+    public function test_LC_1_H_with_a_5_s_botcake_the_row_lifts_a_page_from_6_to_its_rate_and_never_above_it(): void
+    {
+        $rates = [];
+        foreach (['no row' => null, 'row 50' => 50, 'row 100' => 100] as $label => $cap) {
+            $this->load(1, 400);
+            $this->useLaneCap($cap);
+            $pool = $this->shardPool(0, 1);
+            $this->assertTrue($pool->start());
+            $most = $this->runFor($pool, 25, self::LATENCY);
+            $t0 = $this->loadCalls[0]['t'];
+            $window = collect($this->loadCalls)->filter(fn ($c) => $c['t'] >= $t0 + 10 && $c['t'] < $t0 + 20)->count();
+            $rates[$label] = $window / 10;
+            $this->assertLessThanOrEqual($cap ?? 30, $most, $label . ': held within the cap');
+            $this->assertSpacedByTheRate();
+            $pool->stop();
+            $this->reset();
+        }
+        if (getenv('SEQ_PROFILE')) fwrite(STDERR, "\n[303 one page, Botcake 5 s] " . json_encode($rates) . "\n");
+
+        $this->assertEqualsWithDelta(6.0, $rates['no row'], 0.5, 'today: 30 tickets per 5 s answer');
+        $this->assertEqualsWithDelta(10.0, $rates['row 50'], 0.5, 'row 50: the page reaches rate_per_page');
+        $this->assertLessThanOrEqual(10.0 + 1e-9, $rates['row 100'], 'a higher cap never goes above rate_per_page');
+        $this->assertGreaterThan(9.5, $rates['row 100']);
+    }
+
+    public function test_LC_1_H_no_row_or_a_bad_value_keeps_todays_30(): void
+    {
+        $this->useLaneCap(null);
+        $this->assertSame(30, SequenceSendPool::laneCap(), 'no row: BotcakeSendPool::laneTickets()');
+        $this->assertSame(30, $this->shardPool(0, 1)->cap(true));
+        foreach (['', '0', '101', 'x', '2.5', '-5', '50 tickets'] as $bad) {
+            $this->useLaneCap($bad);
+            $this->assertSame(30, SequenceSendPool::laneCap(), "row '$bad' is outside 1..100: today's 30");
+        }
+        $this->useLaneCap('1');
+        $this->assertSame(1, SequenceSendPool::laneCap());
+        $this->useLaneCap(' 100 ');
+        $this->assertSame(100, SequenceSendPool::laneCap());
+
+        // No row: still follows lane_seconds and rate_per_page as today (only the row is cached).
+        $this->useLaneCap(null);
+        $this->assertSame(30, SequenceSendPool::laneCap());
+        config(['services.botcake.rate_per_page' => 2]);
+        $this->assertSame(BotcakeSendPool::laneTickets(), SequenceSendPool::laneCap());
+        $this->assertSame(6, SequenceSendPool::laneCap());
+    }
+
+    public function test_LC_1_a_changed_row_reaches_the_pool_within_a_minute(): void
+    {
+        $this->useLaneCap(null);
+        $pool = $this->shardPool(0, 1);
+        $this->assertTrue($pool->start());
+        $pool->tick();
+        $this->assertSame(30, $pool->cap(true));
+
+        AppSetting::set(SequenceSendPool::LANE_CAP_SETTING, 50);
+        $this->clock->time += 1;
+        $pool->tick();
+        $this->assertSame(30, $pool->cap(true), 'cached for up to a minute (one shared value)');
+        $this->travel(SequenceSendPool::POOLS_CACHE_SECONDS + 1)->seconds();
+        $pool->beat();
+        $this->clock->time += 1;
+        $pool->tick();
+        $this->assertSame(50, $pool->cap(true), 'within a minute, read at the next claim');
+    }
+
+    public function test_LC_1_E_the_reply_pool_lanes_stay_at_lane_tickets(): void
+    {
+        $this->useLaneCap(50);
+        $this->assertSame(50, SequenceSendPool::laneCap());
+        $this->assertSame(30, BotcakeSendPool::laneTickets());
+        $this->assertSame(30, $this->replyPool->perPage());
+
+        // 40 chatblast messages on one page: the reply pool's lane still holds 30, not the sequence row's 50.
+        for ($i = 1; $i <= 40; $i++) {
+            $m = BotcakeMessage::create(['page_name' => 'Page Uno', 'waybill' => 'JT303' . $i, 'kind' => 'in_transit', 'psid' => (string) (7300 + $i),
+                'text' => 'Hello', 'status' => 'queued', 'is_test' => true, 'queued_at' => now()]);
+            app(ChatblastSender::class)->process($m->id);
+        }
+        $this->assertSame(40, DB::table(BotcakeSendQueue::TABLE)->where('kind', 'chatblast')->count());
+        $this->replyPool->tick();
+        $this->assertSame(30, DB::table(BotcakeSendQueue::TABLE)->where('kind', 'chatblast')->where('status', 'sending')->count());
     }
 }
