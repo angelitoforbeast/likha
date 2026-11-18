@@ -5,6 +5,7 @@ namespace Tests\Feature\Chatblast;
 use App\Models\AppSetting;
 use App\Models\BotcakeChat;
 use App\Models\BotcakeMessage;
+use App\Models\ChatbotSequence;
 use App\Services\Chatbot\BotcakeSendPool;
 use App\Services\Chatbot\BotcakeSendQueue;
 use App\Services\ChatblastSender;
@@ -40,6 +41,14 @@ class SequencePoolThroughputTest extends SequenceHandoffTestCase
     private bool $paused = false;
     private bool $untilDone = false;
     private bool $listening = false;
+    /** Ang sagot ng fake na Botcake (segundo): LATENCY, o ang sa test (spec 305: 3 s). */
+    private float $latency = self::LATENCY;
+    /**
+     * Spec 305: tumatakbo ang oras habang nasa query (bawat query ay QUERY_MS sa orasan ng pool sa sandaling iyon, hindi sa
+     * dulo ng ikot), gaya ng totoong proseso: ang tawag na lumabas pagkatapos ng mga pagsusuri ay may tamang oras, at ang
+     * lane na umabot na sa interval nito sa gitna ng ikot ay nakikita iyon.
+     */
+    private bool $timeFlows = false;
 
     /**
      * $pages page (sariling token bawat isa), $total na due na ticket (isang customer bawat isa; ang ilang page ay mas
@@ -126,6 +135,7 @@ class SequencePoolThroughputTest extends SequenceHandoffTestCase
         $s = strtolower($sql);
         $t = BotcakeSendQueue::TABLE;
         return match (true) {
+            str_starts_with($s, 'select (select "id" from "chatbot_sequence_subscriptions"') => 'check: one read (sendCheck, 305)',
             str_contains($s, 'not exists') && str_contains($s, $t) => 'claim: candidates',
             str_starts_with($s, 'update "' . $t . '" set "status" = ?, "claimed_by"') => 'claim: update',
             str_starts_with($s, 'update "' . $t . '"') && str_contains($s, '"claimed_by" = ? where "id" in') => 'claim: update',
@@ -151,6 +161,7 @@ class SequencePoolThroughputTest extends SequenceHandoffTestCase
     {
         if (!$this->listening) DB::listen(function (QueryExecuted $e) {
             if ($this->paused) return;
+            if ($this->timeFlows) $this->clock->time += $this->queryMs / 1000;
             $this->queries++;
             $c = $this->classify($e->sql);
             $this->byClass[$c]['n'] = ($this->byClass[$c]['n'] ?? 0) + 1;
@@ -180,7 +191,7 @@ class SequencePoolThroughputTest extends SequenceHandoffTestCase
             $this->clock->time = $now;
             Carbon::setTestNow($base->copy()->addMilliseconds((int) round(($now - $t0) * 1000)));
             foreach ($this->loadCalls as &$c) {
-                if ($c['shard'] === $pools[$k]->shard && !isset($c['done']) && $now >= $c['t'] + self::LATENCY) {
+                if ($c['shard'] === $pools[$k]->shard && !isset($c['done']) && $now >= $c['t'] + $this->latency) {
                     $c['done'] = true;
                     $c['p']->resolve(new Response(200, ['Content-Type' => 'application/json'], '{"success":true}'));
                 }
@@ -198,7 +209,9 @@ class SequencePoolThroughputTest extends SequenceHandoffTestCase
                 $sweepAt[$k] = $now;
                 (fn () => $this->sweep())->call($pools[$k]);
             }
-            $cost = (hrtime(true) - $start) / 1e9 + ($this->queries - $q) * $this->queryMs / 1000 + ($started || $pools[$k]->inflight() ? $busyMs : 200) / 1000;
+            // Kapag tumatakbo ang oras sa query, nasa orasan na ang mga query (ang naidagdag na sa loob ng ikot).
+            $queried = $this->timeFlows ? $this->clock->time - $now : ($this->queries - $q) * $this->queryMs / 1000;
+            $cost = (hrtime(true) - $start) / 1e9 + $queried + ($started || $pools[$k]->inflight() ? $busyMs : 200) / 1000;
             $vt[$k] += $cost;
             if ($callsAtWarmup !== null) {
                 $slotSum += $pools[$k]->inflight();
@@ -363,7 +376,7 @@ class SequencePoolThroughputTest extends SequenceHandoffTestCase
         foreach ($twins as $psid) {
             $one = $byText[$psid . ':Step 1']->first();
             $two = $byText[$psid . ':Step 2']->first();
-            $this->assertGreaterThanOrEqual($one['t'] + self::LATENCY - 1e-6, $two['t'], 'customer ' . $psid . ': step 2 only after step 1 was answered');
+            $this->assertGreaterThanOrEqual($one['t'] + $this->latency - 1e-6, $two['t'], 'customer ' . $psid . ': step 2 only after step 1 was answered');
         }
         $interval = 1 / (float) config('services.botcake.rate_per_page');
         foreach (collect($this->loadCalls)->groupBy('page') as $page => $calls) {
@@ -392,10 +405,12 @@ class SequencePoolThroughputTest extends SequenceHandoffTestCase
         $this->assertTrue($pool->start());
         $r = $this->simulate([$pool], 60);
         $this->report('one pool, 250 slots', $r);
-        // Ang base: ~10.7 kada segundo sa production; ang loop ay laging may ginagawa (puno ang mga slot, pero mabagal ang ikot).
-        $this->assertEqualsWithDelta(10.7, $r['rate'], 2.0);
+        // Ang base ng spec 301: ~10.7 kada segundo sa production sa ~10 query kada ticket (ang loop ay laging may ginagawa).
+        // Spec 305: ang pagsusuri ay isang basa at ang claim ay ilang query kada ikot, kaya ~4.4 query kada ticket at mas mabilis
+        // ang iisang proseso sa parehong halaga ng query.
+        $this->assertGreaterThan(10.7 * 1.8, $r['rate']);
         $this->assertGreaterThan(200, $r['slots']);
-        $this->assertGreaterThan(9, $r['perTicket'], 'about ten round trips per ticket, each one blocking the loop');
+        $this->assertLessThan(5, $r['perTicket'], 'about four round trips per ticket (was about ten)');
     }
 
     public function test_SQ_2_H_four_processes_send_at_least_2_5x_the_base_rate_with_slots_near_full_and_every_step_once_in_order(): void
@@ -704,5 +719,231 @@ class SequencePoolThroughputTest extends SequenceHandoffTestCase
         $this->assertSame(40, DB::table(BotcakeSendQueue::TABLE)->where('kind', 'chatblast')->count());
         $this->replyPool->tick();
         $this->assertSame(30, DB::table(BotcakeSendQueue::TABLE)->where('kind', 'chatblast')->where('status', 'sending')->count());
+    }
+
+    // ---- Spec 305: ang pinakamalaking page ----
+
+    public const BIG_PAGE_ID = '650001';
+
+    /**
+     * Ang page na may mahabang kasaysayan (Big Page: $backlog na due na ticket, bawat customer ay may $history na chat, ang
+     * pinakabago ay kanina lang) at $pages na karaniwang page na may bagong due na step na dumarating nang $perSecond kada
+     * segundo sa loob ng $seconds (next_at: hindi pa nakikita ng claim bago ang oras nito). $twins na customer ng Big Page ay
+     * may dalawang ticket (ang ikalawa ay naghihintay sa una).
+     * @return array{twins: array<int, string>, due: array<string, float>} ang mga twin, at ang oras ng bawat dumarating (psid => segundo mula ngayon)
+     */
+    protected function loadBigPage(int $backlog, int $history, int $pages, float $perSecond, float $seconds, int $twins = 0): array
+    {
+        $flow = $this->stepFlow(['Hi']);
+        $seq = $this->sequence('Big', [$flow->id]);
+        $seq2 = $this->sequence('Big two', [$flow->id]);
+        $this->page('Big Page', self::BIG_PAGE_ID);
+        app(PageSettings::class)->set('Big Page', 'botcake', 'token', 'tok-big');
+        $normal = [];
+        for ($i = 0; $i < $pages; $i++) {
+            $normal[$i] = ['Normal ' . $i, (string) (41000 + $i * 7)];
+            $this->page($normal[$i][0], $normal[$i][1]);
+            app(PageSettings::class)->set($normal[$i][0], 'botcake', 'token', 'tok-normal-' . $i);
+        }
+        $stamp = now()->format('Y-m-d H:i:s');
+        $chats = $subs = $tickets = [];
+        $ticket = function (string $page, string $pageId, int $psid, ChatbotSequence $in, ?\DateTimeInterface $nextAt, string $text) use (&$subs, &$tickets, $flow, $stamp) {
+            $rid = (string) Str::uuid();
+            $subs[] = ['sequence_id' => $in->id, 'page_id' => (int) $pageId, 'psid' => $psid, 'status' => 'active', 'current_step' => 1, 'next_send_at' => now(),
+                'dispatched_at' => $stamp, 'send_request_id' => $rid, 'enrolled_via' => 'other', 'created_at' => now(), 'updated_at' => now()];
+            $tickets[] = ['request_id' => $rid, 'kind' => BotcakeSendQueue::SEQUENCE, 'priority' => BotcakeSendQueue::SEQUENCE_PRIORITY,
+                'customer' => BotcakeSendQueue::sequenceCustomer($pageId, $psid), 'page_id' => (int) $pageId, 'page_name' => $page, 'psid' => (string) $psid,
+                'chat_id' => null, 'flow_id' => $flow->id, 'node_id' => 'n10', 'run_id' => 'big',
+                'payload' => json_encode(['messages' => [['type' => 'text', 'text' => $text]]]),
+                'context' => json_encode(['sequence' => ['subscription_id' => null, 'current_step' => 1, 'step' => 1, 'due' => $stamp, 'name' => $in->name, 'sequence_id' => $in->id]]),
+                'status' => 'pending', 'next_at' => $nextAt, 'deadline_at' => now()->addHours(25), 'created_at' => now(), 'updated_at' => now()];
+        };
+        $twinPsids = [];
+        for ($k = 0; $k < $backlog; $k++) {
+            $psid = 7000000 + $k;
+            // Ang mahabang usapan: ang mga lumang chat (hanggang 80 araw), ang standby na kopya, at ang pinakabago kanina lang.
+            for ($j = $history - 1; $j >= 1; $j--) {
+                $chats[] = ['page_id' => self::BIG_PAGE_ID, 'page_name' => 'Big Page', 'psid' => (string) $psid, 'name' => 'Ana', 'message' => 'Hi', 'received_at' => now()->subHours($j * 96),
+                    'payload' => $j % 7 === 0 ? json_encode(['_standby' => true]) : '[]'];
+            }
+            $chats[] = ['page_id' => self::BIG_PAGE_ID, 'page_name' => 'Big Page', 'psid' => (string) $psid, 'name' => 'Ana', 'message' => 'Order', 'payload' => '[]', 'received_at' => now()->subMinutes(5)];
+            $ticket('Big Page', self::BIG_PAGE_ID, $psid, $seq, null, 'Step 1');
+            if (count($twinPsids) < $twins && $k % 20 === 0) {
+                $twinPsids[] = (string) $psid;
+                $ticket('Big Page', self::BIG_PAGE_ID, $psid, $seq2, null, 'Step 2');
+            }
+        }
+        $due = [];
+        $n = (int) floor($perSecond * $seconds);
+        for ($i = 0; $i < $n; $i++) {
+            [$page, $pageId] = $normal[$i % $pages];
+            $psid = 8000000 + $i;
+            $at = floor($i / $perSecond); // ang timestamp sa database ay buong segundo: ang nakikita ng claim
+            $due[(string) $psid] = $at;
+            $chats[] = ['page_id' => $pageId, 'page_name' => $page, 'psid' => (string) $psid, 'name' => 'Ben', 'message' => 'Hi', 'payload' => '[]', 'received_at' => now()->subMinutes(2)];
+            $ticket($page, $pageId, $psid, $seq, now()->addSeconds((int) $at), 'Step 1');
+        }
+        foreach (array_chunk($chats, 300) as $c) DB::table('botcake_chats')->insert($c);
+        foreach (array_chunk($subs, 300) as $c) DB::table('chatbot_sequence_subscriptions')->insert($c);
+        $subIds = DB::table('chatbot_sequence_subscriptions')->pluck('id', 'send_request_id');
+        foreach ($tickets as &$t) {
+            $ctx = json_decode($t['context'], true);
+            $ctx['sequence']['subscription_id'] = (int) $subIds[$t['request_id']];
+            $t['context'] = json_encode($ctx);
+        }
+        unset($t);
+        foreach (array_chunk($tickets, 300) as $c) DB::table(BotcakeSendQueue::TABLE)->insert($c);
+        BotcakeChat::forgetPageMap();
+
+        return ['twins' => $twinPsids, 'due' => $due];
+    }
+
+    /**
+     * Ang load test ng spec 305: isang proseso (ang bahagi ng Big Page), Botcake sa 3 s, lane cap 50, rate 10, at ang oras ay
+     * tumatakbo sa bawat query (QUERY_MS). @return array{big: float, normal: int, called: int, avg: float, max: float, run: array}
+     */
+    protected function bigPageRun(float $seconds = 60): array
+    {
+        $this->latency = 3.0;
+        $this->timeFlows = true;
+        Carbon::setTestNow(Carbon::now()->startOfSecond()); // ang next_at ng mga dumarating ay mula sa parehong "ngayon" ng simulate
+        $f = $this->loadBigPage(1200, 20, 14, 4.0, $seconds, 20);
+        $this->useLaneCap(50);
+        $pool = $this->shardPool(0, 1);
+        $this->assertTrue($pool->start());
+        $start = $this->clock->time;
+        $warm = 10.0;
+        $r = $this->simulate([$pool], $seconds, $warm);
+        $big = collect($this->loadCalls)->filter(fn ($c) => $c['page'] === self::BIG_PAGE_ID && $c['t'] >= $start + $warm && $c['t'] < $start + $seconds)->count();
+        // Ang karaniwang page: ang bawat step na due bago ang huling 5 s ay natawag, at gaano katagal mula sa due.
+        $first = collect($this->loadCalls)->filter(fn ($c) => isset($f['due'][$c['psid']]))->groupBy('psid')->map(fn ($g) => $g->min('t'));
+        $wanted = array_filter($f['due'], fn ($at) => $at < $seconds - 5);
+        $delays = [];
+        foreach ($wanted as $psid => $at) if (isset($first[$psid])) $delays[] = $first[$psid] - ($start + $at);
+        $out = ['big' => $big / ($seconds - $warm), 'normal' => count($wanted), 'called' => count($delays),
+            'avg' => $delays ? array_sum($delays) / count($delays) : INF, 'max' => $delays ? max($delays) : INF, 'run' => $r, 'twins' => $f['twins'], 'pool' => $pool];
+        if (getenv('SEQ_PROFILE')) fwrite(STDERR, sprintf("\n[305 big page + 14 normal pages, Botcake 3 s, cap 50, %.0f ms per query] big page %.2f steps/s; normal pages %d of %d due steps called, due → called avg %.2f s, max %.2f s\n",
+            $this->queryMs, $out['big'], $out['called'], $out['normal'], $out['avg'], $out['max']));
+        $this->report('305 big page', $r);
+
+        return $out;
+    }
+
+    public function test_BP_2_H_a_huge_page_sends_at_its_rate_beside_normal_pages_and_every_step_once_in_order(): void
+    {
+        $r = $this->bigPageRun();
+        $this->assertGreaterThanOrEqual(8.0, $r['big'], sprintf('the big page sends %.2f steps/s', $r['big']));
+        $this->assertLessThanOrEqual(10.0 + 1e-9, $r['big'], 'never above rate_per_page');
+        $this->assertSame($r['normal'], $r['called'], 'every normal page step due in the window went out');
+        $this->assertLessThan(1.0, $r['avg'], 'normal pages: due → called under a second on average');
+        $this->assertLessThan(3.0, $r['max']);
+        // Hanggang maubos: bawat step ay isang beses, ayon sa ayos kada customer, sa rate ng bawat page.
+        $this->drain([$r['pool']]);
+        $this->assertOnceInOrderAtRate($r['twins']);
+    }
+
+    public function test_BP_2_the_check_before_a_send_is_one_query_with_the_same_answers(): void
+    {
+        $this->load(1, 1);
+        $row = DB::table(BotcakeSendQueue::TABLE)->first();
+        $seqs = app(\App\Services\Chatbot\ChatbotSequences::class);
+        [$pageId, $psid] = [(int) $row->page_id, (int) $row->psid];
+        $this->assertNull($seqs->sendCheck($row, true), 'warm: page settings and the sequence are cached');
+        $n = 0;
+        DB::listen(function () use (&$n) {
+            $n++;
+        });
+        $this->assertNull($seqs->sendCheck($row, true));
+        $this->assertSame(1, $n, 'one round trip for the reply-open check and every check of the step');
+
+        $code = fn () => $seqs->sendCheck($row, true)['code'] ?? null;
+        $mark = fn (string $key, ?string $value) => $value === null
+            ? DB::table('chatbot_customer_values')->where('page_id', $pageId)->where('psid', $psid)->where('key', $key)->delete()
+            : DB::table('chatbot_customer_values')->upsert([['page_id' => $pageId, 'psid' => $psid, 'key' => $key, 'value' => $value, 'updated_at' => now()]], ['page_id', 'psid', 'key'], ['value']);
+
+        // Ang sagot ng bot na hindi pa tapos ang una sa lahat (gaya ng replyOpen bago ang sendCheck).
+        DB::table(BotcakeSendQueue::TABLE)->insert(['request_id' => (string) Str::uuid(), 'kind' => 'chatbot', 'priority' => 0, 'customer' => BotcakeSendQueue::chatbotCustomer($pageId, $psid),
+            'page_id' => $pageId, 'page_name' => (string) $row->page_name, 'psid' => (string) $psid, 'payload' => '[]', 'status' => 'sending', 'deadline_at' => now()->addMinutes(10),
+            'created_at' => now(), 'updated_at' => now()]);
+        $mark(\App\Services\Chatbot\CustomerFields::BOT_PAUSED, '1');
+        $this->assertSame('reply_open', $code());
+        $this->assertSame('bot_paused', $seqs->sendCheck($row)['code'], 'without $replyOpen: the step checks only, as before');
+        DB::table(BotcakeSendQueue::TABLE)->where('kind', 'chatbot')->delete();
+        $this->assertSame('bot_paused', $code());
+        $mark(\App\Services\Chatbot\CustomerFields::BOT_PAUSED, null);
+
+        $mark(\App\Services\Chatbot\CustomerReach::KEY, json_encode(['code' => 551, 'at' => now()->subDay()->format('Y-m-d H:i:s')]));
+        $this->assertSame('unreachable', $code());
+        $mark(\App\Services\Chatbot\CustomerReach::KEY, json_encode(['code' => 551, 'at' => now()->subDays(40)->format('Y-m-d H:i:s')]));
+        $this->assertNull($code(), 'an expired mark does not stop the send');
+        $mark(\App\Services\Chatbot\CustomerReach::KEY, null);
+
+        // The 24 hours: the newest real chat counts (a newer standby copy does not); the moved page's time counts when newer.
+        DB::table('botcake_chats')->where('psid', (string) $psid)->update(['received_at' => now()->subHours(25)]);
+        $this->chat((string) $psid, (string) $pageId)->forceFill(['payload' => ['_standby' => true]])->save();
+        $this->assertSame('outside_24h', $code());
+        $mark(\App\Services\Chatbot\CustomerFields::LAST_MESSAGE_AT, now()->subHour()->format('Y-m-d H:i:s'));
+        $this->assertNull($code());
+        $mark(\App\Services\Chatbot\CustomerFields::LAST_MESSAGE_AT, null);
+
+        DB::table('chatbot_sequence_subscriptions')->update(['send_request_id' => 'another-ticket']);
+        $this->assertSame('not_holder', $code());
+        DB::table('chatbot_sequence_subscriptions')->update(['send_request_id' => $row->request_id, 'status' => \App\Services\Chatbot\PageTransfers::HELD]);
+        $this->assertSame('held', $code());
+    }
+
+    public function test_BP_2_the_last_chat_is_read_newest_first_on_the_page_psid_id_index(): void
+    {
+        $page = self::BIG_PAGE_ID;
+        $last = fn () => (fn () => self::lastChat($page, '7000001'))->call(app(\App\Services\Chatbot\ChatbotSequences::class));
+        // Without the index (this harness migrates only some tables): no hint, the query runs as before instead of failing.
+        $this->assertFalse(\Illuminate\Support\Facades\Schema::hasIndex('botcake_chats', \App\Services\Chatbot\ChatbotSequences::LAST_CHAT_INDEX));
+        $this->assertNull($last()->getQuery()->indexHint);
+        // With it (the 2026_10_24 migration, on both sites): USE INDEX on MySQL (sqlite ignores the hint), checked once per process.
+        Artisan::call('migrate', ['--path' => ['database/migrations/2026_10_24_100000_add_inbox_indexes.php']]);
+        app()->forgetInstance('sweep-limit.index.botcake_chats.' . \App\Services\Chatbot\ChatbotSequences::LAST_CHAT_INDEX);
+        $q = $last();
+        $hint = $q->getQuery()->indexHint;
+        $this->assertSame('hint', $hint?->type);
+        $this->assertSame(\App\Services\Chatbot\ChatbotSequences::LAST_CHAT_INDEX, $hint->index);
+        $this->assertStringContainsString('order by "id" desc', strtolower($q->toSql()));
+        $mysql = new \Illuminate\Database\Query\Grammars\MySqlGrammar(DB::connection());
+        $this->assertStringContainsString('from `botcake_chats` use index (botcake_chats_page_psid_id_index)', $mysql->compileSelect($q->toBase()));
+
+        // A customer with a long history: the newest real chat is the one the check uses.
+        $this->loadBigPage(1, 300, 0, 1, 0);
+        $row = DB::table(BotcakeSendQueue::TABLE)->first();
+        $this->assertNull(app(\App\Services\Chatbot\ChatbotSequences::class)->sendCheck($row, true), 'the chat 5 minutes ago, not the 299 older ones');
+        DB::table('botcake_chats')->where('message', 'Order')->delete();
+        $this->assertSame('outside_24h', app(\App\Services\Chatbot\ChatbotSequences::class)->sendCheck($row, true)['code'], 'next newest is 4 days old');
+    }
+
+    public function test_BP_2_one_claim_round_is_a_few_queries_and_a_long_backlog_does_not_hide_other_pages(): void
+    {
+        $this->loadBigPage(300, 1, 2, 100, 0.03);
+        DB::table(BotcakeSendQueue::TABLE)->update(['next_at' => null]);
+        $this->assertSame(303, DB::table(BotcakeSendQueue::TABLE)->where('status', 'pending')->count());
+        $n = 0;
+        DB::listen(function () use (&$n) {
+            $n++;
+        });
+        // The big page's lane has room for one; the three newer steps of the other pages sit behind its 300.
+        $big = 0;
+        $accept = function (object $c) use (&$big) {
+            if ($c->page_name !== 'Big Page') return true;
+            return $big++ < 1;
+        };
+        $rows = BotcakeSendQueue::claimSequence('pool-305', 10, $accept);
+        $this->assertSame(['Big Page', 'Normal 0', 'Normal 1', 'Normal 0'], array_map(fn ($r) => $r->page_name, $rows), 'one of the big page, and every other page in the same round');
+        $this->assertLessThanOrEqual(5, $n, 'two candidate reads, two updates and one read of the claimed rows');
+        $this->assertSame(4, DB::table(BotcakeSendQueue::TABLE)->where('status', 'sending')->where('claimed_by', 'pool-305')->count());
+        foreach ($rows as $r) $this->assertSame(1, (int) $r->attempts);
+
+        // Nothing claimed twice: a second round sees only what is left, and a row another process took is not returned.
+        DB::table(BotcakeSendQueue::TABLE)->where('status', 'pending')->where('page_name', 'Big Page')->orderBy('id')->limit(1)->update(['status' => 'sending', 'claimed_by' => 'other']);
+        $again = BotcakeSendQueue::claimSequence('pool-305', 5, fn () => true);
+        $this->assertCount(5, $again);
+        $this->assertSame([], array_intersect(array_map(fn ($r) => $r->id, $again), array_map(fn ($r) => $r->id, $rows)));
+        $this->assertSame(0, collect($again)->where('claimed_by', '!=', 'pool-305')->count());
     }
 }

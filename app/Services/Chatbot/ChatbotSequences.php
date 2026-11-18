@@ -39,6 +39,7 @@ class ChatbotSequences
     public const PAGE_CHANGED_HOURS = 24; // ang step na naka-hold dahil nagbago ang page ID: lampas dito, itinatala at humihinto
     public const HOLD_MINUTES = 60;       // naka-pause ang bot para sa customer: subukan ulit pagkalipas nito
     public const LOCKED_RETRY_MINUTES = 1;
+    public const LAST_CHAT_INDEX = 'botcake_chats_page_psid_id_index'; // (page_id, psid, id): ang huling chat ng customer (spec 305)
     public const WINDOW_HOURS = 24;       // Messenger: send_content sa loob ng 24 oras mula sa huling mensahe ng customer
     public const RAN_WINDOW_SECONDS = 590; // ang ran ng step ay hindi lalayo rito sa unang padala (ResponseSpeed::STEP_PUSH_SECONDS)
     public const RUNNING = 'chatbot-seq-running:';
@@ -443,8 +444,8 @@ class ChatbotSequences
                 $this->event($sub->page_id, $sub->psid, ['op' => 'held', 'reason' => 'bot paused'] + $detail);
                 return 'held';
             }
-            $last = BotcakeChat::active()->where('page_id', (string) $sub->page_id)->where('psid', (string) $sub->psid)->orderByDesc('id')->first();
-            $at = $this->lastMessageAt($last, $fields);
+            $last = self::lastChat($sub->page_id, $sub->psid)->first();
+            $at = $this->lastMessageAt($last?->received_at, $fields->get(CustomerFields::LAST_MESSAGE_AT));
             // Lampas 24 oras mula sa huling mensahe ng customer: walang ipapadala at tapos na ang subscription.
             if (!$at || $at->lte(now()->subHours(self::WINDOW_HOURS))) {
                 $release(['status' => 'unsubscribed', 'exit_reason' => 'outside 24h', 'next_send_at' => null]);
@@ -508,11 +509,22 @@ class ChatbotSequences
         }
     }
 
-    /** Ang huling mensahe: ang chat dito, o ang dala ng paglipat ng page mula sa kabilang site, alin ang mas bago. */
-    private function lastMessageAt(?BotcakeChat $last, CustomerFields $fields): ?Carbon
+    /**
+     * Ang huling totoong chat ng customer, sa index na (page_id, psid, id) pabalik mula sa pinakabago (spec 305): isang row
+     * lang ang binabasa kahit mahaba ang usapan ng customer. Kapag walang hint, pinipili ng MySQL ang (page_id, psid,
+     * received_at), kaya binabasa at inaayos nito ang lahat ng chat ng customer sa page bago kunin ang isa.
+     */
+    private static function lastChat(int|string $pageId, int|string $psid): \Illuminate\Database\Eloquent\Builder
     {
-        $at = $last?->received_at;
-        $moved = $fields->get(CustomerFields::LAST_MESSAGE_AT);
+        $q = BotcakeChat::active()->where('page_id', (string) $pageId)->where('psid', (string) $psid)->orderByDesc('id');
+        SweepLimit::useIndex($q->getQuery(), 'botcake_chats', self::LAST_CHAT_INDEX);
+
+        return $q;
+    }
+
+    /** Ang huling mensahe: ang chat dito ($at), o ang dala ng paglipat ng page mula sa kabilang site ($moved), alin ang mas bago. */
+    private function lastMessageAt(?CarbonInterface $at, ?string $moved): ?Carbon
+    {
         $moved = $moved !== null && preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $moved) ? Carbon::parse($moved) : null;
         if ($moved && (!$at || $moved->gt($at))) $at = $moved;
 
@@ -716,29 +728,53 @@ class ChatbotSequences
      * Ang pagsusuri bago ang tawag (sa pool, sa oras ng padala): hawak pa ng subscription ang ticket (active, parehong step;
      * ang sumagot na customer ay inalis na), active ang sequence, On ang page, naka-on ang mga sagot, hindi naka-pause ang bot,
      * naaabot ang customer (CustomerReach), at bukas pa ang 24 oras. null = ipadala.
+     * $replyOpen (ang pool): una sa lahat, may sagot ba ng bot sa customer na hindi pa tapos (BotcakeSendQueue::replyOpen):
+     * code reply_open, at ang sequence ang naghihintay.
+     * Spec 305: lahat ng ito ay isang basa sa database (sendFacts), hindi lima: ang bawat basa ay humaharang sa loop ng pool,
+     * at ang huling chat ay sa index na hindi lumalaki sa haba ng usapan ng customer.
      * @return array{code: string, reason: string}|null
      */
-    public function sendCheck(object $row): ?array
+    public function sendCheck(object $row, bool $replyOpen = false): ?array
     {
         $s = (array) (json_decode((string) $row->context, true)['sequence'] ?? []);
-        $sub = $s ? DB::table('chatbot_sequence_subscriptions')->where('id', (int) $s['subscription_id'])->first() : null;
         $no = fn (string $code, string $reason) => ['code' => $code, 'reason' => $reason];
-        if (!$sub || $sub->send_request_id !== $row->request_id || (int) $sub->current_step !== (int) $s['current_step']) return $no('not_holder', 'The customer left the sequence before the send went out');
-        if ($sub->status === PageTransfers::HELD) return $no('held', 'The page is moving to another site; the step goes with it');
-        if ($sub->status !== 'active') return $no('not_holder', 'The customer left the sequence before the send went out');
-        $seq = BotConfigCache::sequence((int) $sub->sequence_id);
+        $f = self::sendFacts($row, $s ? (int) $s['subscription_id'] : null, $replyOpen);
+        if ($replyOpen && $f->reply_open !== null) return $no('reply_open', 'A bot reply to the customer is not finished yet');
+        if (!$s || $f->sub_id === null || (string) $f->sub_ticket !== (string) $row->request_id || (int) $f->sub_step !== (int) $s['current_step']) return $no('not_holder', 'The customer left the sequence before the send went out');
+        if ($f->sub_status === PageTransfers::HELD) return $no('held', 'The page is moving to another site; the step goes with it');
+        if ($f->sub_status !== 'active') return $no('not_holder', 'The customer left the sequence before the send went out');
+        $seq = BotConfigCache::sequence((int) $f->sub_sequence);
         if (!$seq) return $no('seq_deleted', 'The sequence was deleted before the send went out');
         if (!$seq->active) return $no('seq_paused', 'The sequence was paused before the send went out');
         if (!$this->pageOn((string) $row->page_name)) return $no('page_off', 'The page was turned off before the send went out');
         if (!BotcakeOutbox::enabled()) return $no('switched_off', BotcakeOutbox::SWITCHED_OFF);
-        $fields = new CustomerFields((int) $row->page_id, (int) $row->psid);
-        if ($fields->get(CustomerFields::BOT_PAUSED) === '1') return $no('bot_paused', 'The bot was paused before the send went out');
-        if (($why = CustomerReach::skipReason($row->page_id, $row->psid)) !== null) return $no('unreachable', $why);
-        $last = BotcakeChat::active()->where('page_id', (string) $row->page_id)->where('psid', (string) $row->psid)->orderByDesc('id')->first();
-        $at = $this->lastMessageAt($last, $fields);
+        if ((string) $f->bot_paused === '1') return $no('bot_paused', 'The bot was paused before the send went out');
+        if (($why = CustomerReach::reason($row->page_id, $row->psid, $f->unreachable)) !== null) return $no('unreachable', $why);
+        $at = $this->lastMessageAt($f->last_chat_at === null ? null : Carbon::parse((string) $f->last_chat_at), $f->moved_at === null ? null : (string) $f->moved_at);
         if (!$at || $at->lte(now()->subHours(self::WINDOW_HOURS))) return $no('outside_24h', 'The 24-hour window closed before the send went out');
 
         return null;
+    }
+
+    /**
+     * Ang kailangan ng sendCheck, sa iisang SELECT na puro subquery (walang FROM): ang subscription ($subscription, sa
+     * PRIMARY), ang tatlong marka ng customer (sa unique na (page_id, psid, key)), ang huling chat (lastChat) at, kapag
+     * $replyOpen, ang sagot ng bot na hindi pa tapos (sa (customer, status, id)). Bawat isa ay iisang row sa index nito.
+     */
+    private static function sendFacts(object $row, ?int $subscription, bool $replyOpen): object
+    {
+        $sub = fn (string $column) => DB::table('chatbot_sequence_subscriptions')->select($column)->where('id', (int) $subscription)->limit(1);
+        $mark = fn (string $key) => DB::table('chatbot_customer_values')->select('value')->where('page_id', (int) $row->page_id)->where('psid', (int) $row->psid)->where('key', $key)->limit(1);
+        $q = DB::query()
+            ->selectSub($sub('id'), 'sub_id')->selectSub($sub('status'), 'sub_status')->selectSub($sub('current_step'), 'sub_step')
+            ->selectSub($sub('send_request_id'), 'sub_ticket')->selectSub($sub('sequence_id'), 'sub_sequence')
+            ->selectSub($mark(CustomerFields::BOT_PAUSED), 'bot_paused')->selectSub($mark(CustomerFields::LAST_MESSAGE_AT), 'moved_at')
+            ->selectSub($mark(CustomerReach::KEY), 'unreachable')
+            ->selectSub(self::lastChat($row->page_id, $row->psid)->select('received_at')->limit(1), 'last_chat_at')
+            ->when($replyOpen, fn ($q) => $q->selectSub(DB::table(BotcakeSendQueue::TABLE)->selectRaw('1')
+                ->where('customer', BotcakeSendQueue::chatbotCustomer($row->page_id, $row->psid))->whereIn('status', ['pending', 'sending'])->limit(1), 'reply_open'));
+
+        return $q->first();
     }
 
     /**

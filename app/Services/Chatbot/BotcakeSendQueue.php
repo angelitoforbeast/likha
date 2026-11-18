@@ -130,20 +130,7 @@ class BotcakeSendQueue
     {
         if ($n <= 0) return [];
         $t = self::TABLE;
-        $rows = DB::table("$t as t")->where('t.status', 'pending')->where(fn ($q) => $q->whereNull('t.next_at')->orWhere('t.next_at', '<=', now()))
-            // Ang sequence ticket ay walang deadline na nagpapabigo: naghihintay hanggang sa pool (huli, hindi nawawala).
-            ->where(fn ($q) => $sequence ? $q : $q->where('t.deadline_at', '>', now()))
-            // Ang page na puno na ang lane ay hindi na isinasama sa SQL: hindi nito mapupuno ang listahan ng kandidato (ang ibang page ay nakikita pa rin).
-            ->when($fullPages, fn ($q) => $q->where(fn ($w) => $w->where('t.priority', 0)->orWhereNotIn('t.page_name', $fullPages)))
-            ->when($fullForReplies, fn ($q) => $q->where(fn ($w) => $w->where('t.priority', '>', 0)->orWhereNotIn('t.page_name', $fullForReplies)))
-            ->when($repliesOnly, fn ($q) => $q->where('t.priority', 0))
-            ->when($blastsOnly, fn ($q) => $q->where('t.priority', '>', 0)) // the replies are botcake:reply-pool's
-            // Ang sequence ticket ay sa chatbot:sequence-pool lang; ang botcake:send-pool ay hindi kailanman kumukuha nito.
-            ->where('t.priority', $sequence ? '=' : '<', self::SEQUENCE_PRIORITY)
-            ->tap(fn ($q) => self::inPart($q, $part, 't.page_id'))
-            ->whereNotExists(fn ($q) => $q->select(DB::raw(1))->from("$t as o")->whereColumn('o.customer', 't.customer')->whereColumn('o.id', '<', 't.id')
-                ->whereIn('o.status', ['pending', 'sending']))
-            ->orderBy('t.priority')->orderBy('t.id')->limit($n * 5)->get(['t.id', 't.request_id', 't.page_name', 't.kind', 't.priority']);
+        $rows = self::candidates($n * 5, $fullPages, $fullForReplies, $repliesOnly, $sequence, $blastsOnly, $part);
         $out = [];
         foreach ($rows as $candidate) {
             if (count($out) >= $n) break;
@@ -158,6 +145,73 @@ class BotcakeSendQueue
         }
 
         return $out;
+    }
+
+    /** Ilang basa ng kandidato ang claimSequence sa isang ikot (ang una, at kapag may page na napuno sa ikot na ito). */
+    public const SEQUENCE_CLAIM_READS = 3;
+
+    /**
+     * Ang claim ng chatbot:sequence-pool (spec 305): ang parehong mga kandidato at ang parehong ayos kada customer gaya ng
+     * claim(), pero ang mga tinanggap ay kinukuha sa iisang kondisyonal na UPDATE kada basa at binabasa sa iisang SELECT sa
+     * dulo: ilang query kada ikot, hindi dalawa kada ticket (ang bawat query ay humaharang sa loop ng pool). $accept ang
+     * nagpapasya sa bawat kandidato at ito rin ang nagbibilang ng mga tinanggap na nito sa ikot na ito (wala pang row). Ang
+     * page ng kandidatong tinanggihan (puno na ang lane) ay hindi na isinasama sa susunod na basa ng ikot: kapag puno ang
+     * listahan ng mahabang pila ng isang page na may isang puwang lang, ang ibang page ay nakikita pa rin sa parehong ikot.
+     * @return array<int, object> ang mga nakuha, ayon sa id
+     */
+    public static function claimSequence(string $owner, int $n, callable $accept, array $fullPages = [], ?array $part = null): array
+    {
+        if ($n <= 0) return [];
+        $ids = [];
+        $skip = $fullPages;
+        for ($read = 0; $read < self::SEQUENCE_CLAIM_READS && count($ids) < $n; $read++) {
+            $limit = ($n - count($ids)) * 5;
+            $rows = self::candidates($limit, $skip, [], false, true, false, $part);
+            $take = [];
+            $full = [];
+            foreach ($rows as $candidate) {
+                if (count($ids) + count($take) >= $n) break;
+                if ($accept($candidate)) $take[] = $candidate->id;
+                else $full[(string) $candidate->page_name] = true;
+            }
+            if ($take) {
+                DB::table(self::TABLE)->whereIn('id', $take)->where('status', 'pending')
+                    ->update(['status' => 'sending', 'claimed_by' => $owner, 'claimed_at' => now(), 'attempts' => DB::raw('attempts + 1'), 'updated_at' => now()]);
+                $ids = array_merge($ids, $take);
+            }
+            // Isa pang basa lang kapag puno ang listahan (may iba pa sa likod) at may page na napuno sa basang ito.
+            $full = array_diff(array_keys($full), $skip);
+            if (count($rows) < $limit || !$full) break;
+            $skip = array_merge($skip, $full);
+        }
+        if (!$ids) return [];
+
+        // Ang nakuha talaga ng UPDATE (sending, ang may hawak ay ito): ang kandidatong naunahan ng iba ay wala rito.
+        return DB::table(self::TABLE)->where('claimed_by', $owner)->where('status', 'sending')->whereIn('id', $ids)->orderBy('id')->get()->all();
+    }
+
+    /**
+     * Ang mga kandidato ng claim: ang pinakaunang hindi pa tapos ng bawat customer lang, ayon sa priority at id, hanggang
+     * $limit (ang paliwanag ng bawat filter ay sa claim()).
+     */
+    private static function candidates(int $limit, array $fullPages, array $fullForReplies, bool $repliesOnly, bool $sequence, bool $blastsOnly, ?array $part): \Illuminate\Support\Collection
+    {
+        $t = self::TABLE;
+
+        return DB::table("$t as t")->where('t.status', 'pending')->where(fn ($q) => $q->whereNull('t.next_at')->orWhere('t.next_at', '<=', now()))
+            // Ang sequence ticket ay walang deadline na nagpapabigo: naghihintay hanggang sa pool (huli, hindi nawawala).
+            ->where(fn ($q) => $sequence ? $q : $q->where('t.deadline_at', '>', now()))
+            // Ang page na puno na ang lane ay hindi na isinasama sa SQL: hindi nito mapupuno ang listahan ng kandidato (ang ibang page ay nakikita pa rin).
+            ->when($fullPages, fn ($q) => $q->where(fn ($w) => $w->where('t.priority', 0)->orWhereNotIn('t.page_name', $fullPages)))
+            ->when($fullForReplies, fn ($q) => $q->where(fn ($w) => $w->where('t.priority', '>', 0)->orWhereNotIn('t.page_name', $fullForReplies)))
+            ->when($repliesOnly, fn ($q) => $q->where('t.priority', 0))
+            ->when($blastsOnly, fn ($q) => $q->where('t.priority', '>', 0)) // the replies are botcake:reply-pool's
+            // Ang sequence ticket ay sa chatbot:sequence-pool lang; ang botcake:send-pool ay hindi kailanman kumukuha nito.
+            ->where('t.priority', $sequence ? '=' : '<', self::SEQUENCE_PRIORITY)
+            ->tap(fn ($q) => self::inPart($q, $part, 't.page_id'))
+            ->whereNotExists(fn ($q) => $q->select(DB::raw(1))->from("$t as o")->whereColumn('o.customer', 't.customer')->whereColumn('o.id', '<', 't.id')
+                ->whereIn('o.status', ['pending', 'sending']))
+            ->orderBy('t.priority')->orderBy('t.id')->limit($limit)->get(['t.id', 't.request_id', 't.page_name', 't.kind', 't.priority']);
     }
 
     /** May hawak pa ba ang $owner sa ticket (sending)? Sinusuri bago ang bawat tawag sa Botcake. */

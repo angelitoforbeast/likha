@@ -70,7 +70,17 @@ class CustomerReach
     public static function skipReason(int|string $pageId, int|string $psid): ?string
     {
         if (!self::enabled() || !self::valid($pageId, $psid)) return null;
-        $v = DB::table('chatbot_customer_values')->where('page_id', (int) $pageId)->where('psid', (int) $psid)->where('key', self::KEY)->value('value');
+
+        return self::reason($pageId, $psid, DB::table('chatbot_customer_values')->where('page_id', (int) $pageId)->where('psid', (int) $psid)->where('key', self::KEY)->value('value'));
+    }
+
+    /**
+     * Gaya ng skipReason, mula sa value ng marka na nabasa na ($v, ang __unreachable ng customer; null = walang marka): para sa
+     * pagsusuri na binabasa ito kasama ng iba sa iisang query (ChatbotSequences::sendCheck, spec 305).
+     */
+    public static function reason(int|string $pageId, int|string $psid, mixed $v): ?string
+    {
+        if (!self::enabled() || !self::valid($pageId, $psid)) return null;
         $mark = is_string($v) ? json_decode($v, true) : null;
         if (!is_array($mark) || !is_int($mark['code'] ?? null) || !is_string($mark['at'] ?? null)) return null;
         try {
