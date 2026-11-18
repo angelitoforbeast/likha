@@ -46,7 +46,7 @@
 
     {{-- Spec 306: ang mga numero ay binubuo ng warm, hindi rito; kapag wala pa ang araw (o mabagal ang basa), maikling tala lang at ang page ay nagre-reload pagkalipas ng isang minuto. --}}
     @if(!empty($computing) || !empty($slow))
-    <p class="text-sm text-slate-600" role="status" data-sp-state="{{ !empty($slow) ? 'slow' : 'computing' }}">@if(!empty($slow))The numbers are taking too long to load. This page tries again in a minute.@else Computing the numbers for {{ $f['date'] }}. This page refreshes in a minute.@endif</p>
+    <p class="text-sm text-slate-600" role="status" data-sp-state="{{ !empty($slow) ? 'slow' : 'computing' }}">{{ !empty($slow) ? 'The numbers are taking too long to load. This page tries again in a minute.' : 'Computing the numbers for ' . $f['date'] . '. This page refreshes in a minute.' }}</p>
     @else
     <section aria-labelledby="h-meta">
         <h2 id="h-meta" class="mb-1 text-base font-semibold">Reply time at Meta (customer sent → our reply sent, Meta's clock)</h2>
