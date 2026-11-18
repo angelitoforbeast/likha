@@ -30,3 +30,101 @@ Read first: `AiFollowups`, `ChecklistAiFollowupController`, `ChecklistAiFollowup
 **Design**: impeccable brief at `docs/design/299-mira-in-chat/brief.md` before the views; screenshots at 390 / 1280 from `artisan serve` on 127.0.0.1 with a local seeded sqlite file; critique and audit; fixes.
 
 **Files touched**: new `AiPost.php`, 2 migrations, 4 test files, design folder; changed `AiFollowups.php`, `ChecklistAiFollowupController.php`, `ChatPresenter.php`, `routes/web.php` (one line in the checklist group), `checklist/ai-followups.blade.php`, `checklist/partials/ai-followup-card.blade.php`, `AiFollowupTestCase.php`, `ChecklistTestCase.php`. Not touched: `resources/views/chat/*`, chat JS, `ChatController`, the sidebar.
+
+## What shipped
+
+The plan held. Two changes against the plan:
+- `app/Models/ChecklistAiFollowup.php` also changed (one cast, `isAuto()`, and an auto row is never `wasEdited()`);
+- `ChatAccess` needed no change.
+
+### MC-1: Chat first in the sidebar
+- **Migration.** `database/migrations/2026_11_29_299100_move_chat_link_to_top.php`.
+- **What it does.** It finds the Chat link (`key = chat`, or url `/chat`), then sets `section = 'Home'` and `sort_order = (lowest sort_order of the other Home links) - 1`. No other row changes, and visibility rows are untouched.
+- **Rollback data.** The old section and order are kept in `app_settings` under `nav.299_chat_before`, as JSON keyed by link id. `down()` restores them exactly and deletes the key. Without that row, `down()` falls back to section Chat, last in the menu.
+- **Safe to run anywhere.** It is idempotent, and it does nothing when `nav_links.section` does not exist.
+
+### MC-2: Auto-approve
+- **Setting.** `ai_followups.auto_approve` in `app_settings` (default `'0'`). It is read and saved through `AiFollowups::settings()` / `saveSettings()` (`DEFAULTS` gained the key).
+- **Settings action.** It accepts `auto_approve` (`sometimes|boolean`, CEO-only check unchanged) and flashes "Auto-approve is on. New drafts go to staff at once." / "Auto-approve is off. New drafts wait for your review."
+- **When it is on.** `AiFollowups::draft()` saves the draft, then `autoApprove()` sets:
+  - `review_status = approved`;
+  - `reviewed_by = null`;
+  - `reviewed_at = now`;
+  - `is_active = true`.
+
+  It then sends the follow-up to chat.
+- **What still applies first.** The main switch, the 9 AM to 9 PM window, the monthly budget and the 3-a-day cap are all checked before a draft is made, exactly as before. With the main switch Off, `run()` returns before drafting.
+- **What auto-approval does not do.** It writes no `ai_followup.approved` staff event, because no person approved. Auto rows are left out of `ceo_reviews` in the prompt, because they are not the CEO's decisions.
+- **Staff card.** "From Mira · sent automatically".
+- **Sent tab.**
+  - an "Auto" chip (violet);
+  - "Auto-approved <time>";
+  - the header line says new follow-ups go out without review;
+  - Drafts shows "Made before auto-approve was on. These still wait for you."
+- **Settings tile.** The Auto-approve switch sits in the On/Off tile and asks for confirmation before switching on.
+
+### MC-3: Follow-ups in Likha Chat
+- **Posting.** New `app/Services/Chat/AiPost.php`:
+  - `conversation($ai, $userId)` finds or makes the conversation. It is race-safe on the unique key.
+  - `post($ai, $userId, $body)` refuses empty text, trims to `chat.max_body`, and sets `last_message_at`.
+  - `isAiConversation()`, `aiOf()` and `name()` are small helpers.
+- **How the Mira conversation is keyed.** It is an existing `chat_conversations` row:
+  - `kind = 'direct'`;
+  - `direct_key = 'ai:mira:<user_id>'`;
+  - `title = 'Mira'`;
+  - `created_by = null`;
+  - exactly one `chat_members` row: the staff member.
+
+  Mira is `sender_ai = 'mira'`, never a member. No new table, and no change to the chat tables. The `ai:` prefix can never collide with a person-to-person key `<low>:<high>`.
+- **Access.** It comes unchanged from 296's `ChatAccess`:
+  - the member reads and posts;
+  - the CEO reads without being a member;
+  - the CEO cannot post or join (direct chats have no Join);
+  - anyone else gets 403.
+- **`ChatPresenter::titleAndAvatar`.** An AI conversation is titled with the AI's name and gets the AI avatar (`ai: true`). For the member it reads "Mira"; for the CEO reading it, "Mira and Joy Ramos".
+- **Sending: `AiFollowups::sendToChat()`.**
+  - It is called from `approve()` (approve, and edit and approve) and from `autoApprove()`.
+  - It runs in a transaction with the follow-up row locked (`lockForUpdate`), and returns at once if `chat_message_id` is already set.
+  - It posts, then stores `chat_message_id` and clears `chat_failed_at`.
+  - On any error it logs one warning ("AI follow-up: not sent to chat", with `followup_id` and the error), sets `chat_failed_at`, and leaves the approval in place.
+  - Rejected and expired follow-ups never send anything: the function returns false unless the row is approved.
+- **Message text** (`AiFollowups::chatText()`). The final text (the CEO's edit when edited), a blank line, then:
+
+  ```
+  Due by 5:00 PM · <task title, up to 120 chars>
+  Open the task: <APP_URL>/checklist#task-<follows_task_id>
+  ```
+
+  ChatText escapes everything and makes the link clickable.
+- **Migration.** `database/migrations/2026_11_29_299000_add_chat_columns_to_checklist_tasks.php` adds `chat_message_id` (unsigned bigint, nullable) and `chat_failed_at` (timestamp, nullable). Each column is guarded, it is sqlite-safe, and `down()` drops them.
+- **Retry.** `POST /checklist/ai-followups/{followup}/chat` (`checklist.ai-followups.chat`), CEO only. It answers:
+  - 409 unless the follow-up is approved and still Waiting today;
+  - 502 when the send fails again;
+  - 200 with "Sent to Joy in Likha Chat."
+
+  The inbox shows "Not sent to chat" (amber) and "Still on their checklist". The Retry button appears on Waiting rows only.
+
+### MC-4: Open chat
+- Sent rows that reached chat link to `/chat?c=<conversation id>`, looked up from `chat_message_id`. The CEO reads the conversation there.
+
+### Files
+- **New:**
+  - `app/Services/Chat/AiPost.php`;
+  - the two migrations above;
+  - `tests/Feature/Chat/MiraConversationTest.php` and `ChatFirstMigrationTest.php`;
+  - `tests/Feature/Checklist/AiFollowupAutoApproveTest.php` and `AiFollowupChatTest.php`;
+  - `docs/design/299-mira-in-chat/` (brief, review and 12 screenshots).
+- **Changed:**
+  - `app/Services/AiFollowups.php`;
+  - `app/Http/Controllers/ChecklistAiFollowupController.php`;
+  - `app/Models/ChecklistAiFollowup.php`;
+  - `app/Services/Chat/ChatPresenter.php` (one block in `titleAndAvatar`);
+  - `routes/web.php` (one line in the checklist group);
+  - `resources/views/checklist/ai-followups.blade.php`;
+  - `resources/views/checklist/partials/ai-followup-card.blade.php`;
+  - `tests/Feature/Checklist/AiFollowupTestCase.php` (chat tables);
+  - `tests/Feature/Checklist/ChecklistTestCase.php` (the new column migration).
+- **Not touched:**
+  - `resources/views/chat/*` and the chat JS;
+  - `ChatController`, `ChatAccess` and the chat models;
+  - the sidebar, the layout, `NavLink` and `NavSections`.
