@@ -34,6 +34,19 @@ class SearchTest extends ChatTestCase
         $this->assertSame([$d->id], array_column($byPerson, 'id'));
     }
 
+    public function test_a_match_far_into_a_long_message_is_shown_in_the_snippet(): void
+    {
+        $ana = $this->person();
+        $ben = $this->person();
+        $c = $this->direct($ana, $ben);
+        $this->message($c, $ben, str_repeat('Long update about the day. ', 12) . 'The rider is Juan.');
+
+        $text = $this->actingAs($ana)->getJson('/chat/search?q=rider')->json('messages.0.text');
+        $this->assertStringContainsString('The rider is Juan.', $text);
+        $this->assertStringStartsWith('…', $text);
+        $this->assertLessThanOrEqual(140, mb_strlen($text));
+    }
+
     public function test_the_ceo_searches_only_conversations_she_is_in(): void
     {
         $oic = $this->person('Marketing - OIC');

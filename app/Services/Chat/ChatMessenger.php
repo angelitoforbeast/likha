@@ -248,11 +248,23 @@ class ChatMessenger
                 'conversation_id' => (int) $m->conversation_id,
                 'title' => (string) ($titles[$m->conversation_id] ?? ''),
                 'sender' => $s['me'] ? 'You' : (string) $s['name'],
-                'text' => self::preview($m, 140),
+                'text' => self::snippet((string) $m->body, $needle),
                 'at' => ChatPresenter::iso($m->created_at),
             ];
         })->values()->all();
 
         return ['chats' => $chats, 'messages' => $messages];
+    }
+
+    /** Isang linya sa paligid ng nahanap: mga 40 character bago nito, hanggang 140 lahat. */
+    private static function snippet(string $body, string $needle): string
+    {
+        $text = trim((string) preg_replace('/\s+/u', ' ', $body));
+        $at = mb_stripos($text, $needle);
+        if ($at !== false && $at > 40) {
+            $text = '…' . ltrim(mb_substr($text, $at - 30));
+        }
+
+        return Str::limit($text, 139, '…');
     }
 }

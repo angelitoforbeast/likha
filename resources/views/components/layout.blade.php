@@ -237,6 +237,8 @@
 <div class="min-h-full">
   <x-sidebar :sections="$navSections" :entries="$navEntries" :pins="$navPins" :can-pin="!$viewAsRole && (bool) $navUser" :checklist-badge="$checklistBadge" />
   <x-nav-palette :entries="$navEntries" />
+  {{-- Chat unread badge, tab count and alerts (spec 300); signed-in only. --}}
+  @if($navUser)<x-chat-unread :user="$navUser" />@endif
 
   {{-- Top bar: page title, search, avatar menu. 64 px high: pages under it offset themselves by mt-16 / top-16. --}}
   <header class="lk-topbar">

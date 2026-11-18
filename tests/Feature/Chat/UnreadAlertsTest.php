@@ -143,7 +143,8 @@ class UnreadAlertsTest extends ChatTestCase
         $this->assertStringContainsString('/chat/unread', $html);
         $this->assertStringContainsString('visibilitychange', $html);
         // The badge goes on the sidebar's Chat link, and the count into the tab title.
-        $this->assertStringContainsString('data-nav-link="/chat"', $html);
+        $this->assertStringContainsString("querySelectorAll('a[data-nav-link]", $html);
+        $this->assertStringContainsString("CHAT_URLS = ['/chat', 'chat']", $html);
         $this->assertStringContainsString('document.title', $html);
         // Never asks for notifications on load: only on the chat page's button.
         $this->assertStringNotContainsString('requestPermission()', $this->between($html, 'data-chat-unread', '</script>'));
