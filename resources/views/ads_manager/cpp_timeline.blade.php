@@ -326,7 +326,7 @@
               <th class="tl-hour-name">Date</th>
               <th class="tl-tot-lbls" title="Per cell, top to bottom: Adspent (₱), Orders, CPP (₱)"></th>
               {{-- Spec 297: column h is the day as of (h + 1):00, 1AM … 12AM (the end of the day). --}}
-              @for ($h = 0; $h < 24; $h++)<th class="tl-tot-h" title="{{ sprintf('As of %s: 00:00 – %d:59 %s%s', \Carbon\Carbon::createFromTime(($h + 1) % 24)->format('gA'), $h % 12 === 0 ? 12 : $h % 12, $h < 12 ? 'AM' : 'PM', $h === 23 ? ' (end of day)' : '') }}">{{ \Carbon\Carbon::createFromTime(($h + 1) % 24)->format('gA') }}</th>@endfor
+              @for ($h = 0; $h < 24; $h++)<th class="tl-tot-h" title="{{ sprintf('As of %s: 00:00 – %d:59 %s%s', \Carbon\Carbon::createFromTime(($h + 1) % 24)->format('gA'), $h === 0 ? 0 : ($h % 12 === 0 ? 12 : $h % 12), $h < 12 ? 'AM' : 'PM', $h === 23 ? ' (end of day)' : '') }}">{{ \Carbon\Carbon::createFromTime(($h + 1) % 24)->format('gA') }}</th>@endfor
             </tr>
           </thead>
           <tbody>
@@ -916,8 +916,8 @@
         hourLabel(h) { return `${h % 12 === 0 ? 12 : h % 12}${h < 12 ? 'AM' : 'PM'}`; },
         // Spec 297: column h (0–23) is "as of" (h + 1):00: 0 → 1AM, 7 → 8AM, 11 → 12PM, 23 → 12AM (the end of the day).
         asofLabel(h) { return this.hourLabel((h + 1) % 24); },
-        // What the column covers: 7 → "00:00 – 7:59 AM", 23 → "00:00 – 11:59 PM".
-        asofRange(h) { return `00:00 – ${h % 12 === 0 ? 12 : h % 12}:59 ${h < 12 ? 'AM' : 'PM'}`; },
+        // What the column covers: 0 → "00:00 – 0:59 AM", 7 → "00:00 – 7:59 AM", 23 → "00:00 – 11:59 PM".
+        asofRange(h) { return `00:00 – ${h === 0 ? 0 : (h % 12 === 0 ? 12 : h % 12)}:59 ${h < 12 ? 'AM' : 'PM'}`; },
         // The hour before the as-of time, what its "+" figures added: 7 → "7:00 – 7:59 AM".
         hourSpan(h) {
           const n = h % 12 === 0 ? 12 : h % 12;

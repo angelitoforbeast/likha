@@ -629,7 +629,7 @@ class CppHourlyTotalsTest extends ChatblastTestCase
         preg_match_all('#<th class="tl-tot-h" title="([^"]*)">([^<]*)</th>#', $html, $th);
         $this->assertSame(['8AM', 'As of 8AM: 00:00 – 7:59 AM'], [$th[2][7], $th[1][7]]);
         $this->assertSame(['12AM', 'As of 12AM: 00:00 – 11:59 PM (end of day)'], [$th[2][23], $th[1][23]]);
-        $this->assertSame(['1AM', 'As of 1AM: 00:00 – 12:59 AM'], [$th[2][0], $th[1][0]]);
+        $this->assertSame(['1AM', 'As of 1AM: 00:00 – 0:59 AM'], [$th[2][0], $th[1][0]]);
         $this->assertSame('12PM', $th[2][11]);
 
         $out = $this->js(json_encode($hourly), <<<'JS'
@@ -638,6 +638,7 @@ class CppHourlyTotalsTest extends ChatblastTestCase
             out.c7 = cells[7]; out.c23 = cells[23];
             out.fig7 = [c.figSpend(cells[7]), c.figOrders(cells[7]), c.figCpp(cells[7])];
             out.labels = [c.asofLabel(0), c.asofLabel(7), c.asofLabel(11), c.asofLabel(12), c.asofLabel(23)];
+            out.ranges = [0, 7, 11, 12, 23].map(h => c.asofRange(h));
             out.tip7 = c.totTip(row.label, cells[7], 7).split('\n').slice(0, 5);
             await c.openHour(row, 7);
             out.m7 = { title: c.hmTitle(), range: c.hmRange(), total: c.hm.total, line: c.hmTotalsLine(), rows: c.hmRows(), foot: c.hmFoot(), last: c.hmLastHour() };
@@ -655,6 +656,7 @@ class CppHourlyTotalsTest extends ChatblastTestCase
         $this->assertEquals(['spend' => 3600, 'orders' => 6], array_intersect_key($out['c23'], array_flip(['spend', 'orders'])), 'end of day: H23 written by the 00:10 run');
         $this->assertSame(['1,200', '3', '400.00'], $out['fig7']);
         $this->assertSame(['1AM', '8AM', '12PM', '1PM', '12AM'], $out['labels']);
+        $this->assertSame(['00:00 – 0:59 AM', '00:00 – 7:59 AM', '00:00 – 11:59 AM', '00:00 – 12:59 PM', '00:00 – 11:59 PM'], $out['ranges']);
         $this->assertSame(['Nov 17 Tue · all pages · as of 8AM', '00:00 – 7:59 AM (cumulative)', 'CPP: ₱400.00', 'Spend: ₱1,200.00', 'Orders: 3'], $out['tip7']);
 
         // AS-1 E: the modal speaks "as of" and its rows and TOTAL are the same bucket and order cut as the cell.
