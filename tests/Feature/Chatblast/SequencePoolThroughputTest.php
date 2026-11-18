@@ -807,7 +807,7 @@ class SequencePoolThroughputTest extends SequenceHandoffTestCase
         $this->latency = 3.0;
         $this->timeFlows = true;
         Carbon::setTestNow(Carbon::now()->startOfSecond()); // ang next_at ng mga dumarating ay mula sa parehong "ngayon" ng simulate
-        $f = $this->loadBigPage(900, 20, 14, 4.0, $seconds, 20);
+        $f = $this->loadBigPage(1200, 20, 14, 4.0, $seconds, 20);
         $this->useLaneCap(50);
         $pool = $this->shardPool(0, 1);
         $this->assertTrue($pool->start());
