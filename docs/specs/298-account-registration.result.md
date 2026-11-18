@@ -152,7 +152,7 @@ After a Marketing - OIC creates a Data Encoder - OIC:
 
 ### 4. Branch pushed
 
-PUSH_PLACEHOLDER
+`git push -u origin feat/298-account-registration`: new branch on origin; code head `14b986ad`, result commits on top. No PR opened, nothing deployed, no migration run on any server.
 
 ## Story changes
 
