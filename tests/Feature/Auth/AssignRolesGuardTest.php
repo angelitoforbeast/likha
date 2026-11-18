@@ -10,7 +10,7 @@ use PHPUnit\Framework\Attributes\DataProvider;
 
 /**
  * Ang /assign-roles ay nagtatakda ng role ng kahit sinong user (pati CEO), kaya CEO lang na naka-login
- * ang puwedeng magbukas at gumamit nito. Ang sign-up page ay nananatiling bukas.
+ * ang puwedeng magbukas at gumamit nito. Wala nang public sign-up page (spec 298): papunta na sa /login.
  */
 class AssignRolesGuardTest extends AuthTestCase
 {
@@ -96,8 +96,8 @@ class AssignRolesGuardTest extends AuthTestCase
         $this->assertSame('Data Encoder', $this->roleOf($target));
     }
 
-    public function test_sign_up_page_stays_open_signed_out(): void
+    public function test_old_sign_up_page_sends_to_login_signed_out(): void
     {
-        $this->get('/registerlogin')->assertOk();
+        $this->get('/registerlogin')->assertRedirect('/login');
     }
 }

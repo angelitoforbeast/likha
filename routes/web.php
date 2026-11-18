@@ -13,7 +13,6 @@ use App\Http\Controllers\CPPReportController;
 use App\Http\Controllers\FacebookAdsController;
 use App\Http\Controllers\AdsViewController;
 use App\Http\Controllers\Auth\LoginController;
-use App\Http\Controllers\Auth\RegisterController;
 use App\Http\Controllers\OfflineAdController;
 use App\Http\Controllers\AdsManagerController;
 use App\Http\Controllers\RoleAssignmentController;
@@ -104,8 +103,9 @@ Route::middleware(['web','auth'])->get('/debug/ip', function () {
 
 Route::get('/login', [LoginController::class, 'showLoginForm'])->name('login');
 Route::post('/login', [LoginController::class, 'login']);
-Route::get('/registerlogin', [RegisterController::class, 'showRegistrationForm'])->name('register');
-Route::post('/registerlogin', [RegisterController::class, 'register']);
+// No public sign-up (spec 298): accounts are made at /accounts/create by a CEO or Marketing - OIC.
+// The old /registerlogin (GET and POST) only sends to /login: no form, no account.
+Route::redirect('/registerlogin', '/login');
 
 // ✅ Logout
 Route::post('/logout', [LoginController::class, 'logout'])->name('logout')->middleware('auth');
@@ -837,6 +837,11 @@ Route::get('/owner/users', [\App\Http\Controllers\OwnerUsersController::class, '
     ->name('owner.users');
 Route::post('/owner/users/{id}/password', [\App\Http\Controllers\OwnerUsersController::class, 'updatePassword'])
     ->whereNumber('id')->name('owner.users.password');
+
+// New staff accounts (spec 298) — CEO and Marketing - OIC only (403 for others, in the controller); role set here
+Route::get('/accounts/create', [\App\Http\Controllers\AccountController::class, 'create'])->name('accounts.create');
+Route::post('/accounts', [\App\Http\Controllers\AccountController::class, 'store'])
+    ->middleware('throttle:30,1')->name('accounts.store');
 
 Route::get('/summary/overall', [SummaryOverallController::class, 'index'])->name('summary.overall');
 Route::get('/summary/overall/data', [SummaryOverallController::class, 'data'])->name('summary.overall.data');
