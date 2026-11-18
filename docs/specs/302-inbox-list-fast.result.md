@@ -72,6 +72,123 @@ New: `tests/Feature/Chatblast/ChatbotInboxListFastTest.php` (sqlite in memory, l
 | `test_IL_1_the_same_list_is_built_once_per_15_seconds_and_a_pause_shows_at_once` | IL-1 cache | Second identical poll reads no chat table; another window is its own list; an unpause shows at once (Human badge gone); after 16 s the list is built again. |
 | `test_IL_3_the_page_sends_the_next_list_request_only_after_the_last_one_answered` | IL-3 H | Runs the page's own `inboxListLoop` (cut from the rendered `/chatbot/inbox` HTML) in Node with a fake clock. Answers of 1 s, then 8 s, then a hung one, then a filter change, then a hidden tab: requests start at 5,000 / 11,000 / 17,000 / 30,000 / 43,000 / 63,000 / 64,000 / 70,000 / 91,000 ms, **never two at once**; the hung one is aborted at 58,000 (15 s, `timedOut`), the 63,000 one is aborted by the filter change, the hidden tab sends nothing from 70,500 to 90,000. The page uses the loop, `setInterval(poll, POLL)` only, `poll()` aborts after 15 s, and handles `data.slow`. |
 
+Existing Inbox tests, unchanged and passing on the branch: `ChatbotInboxTest`, `ChatbotInboxActionsTest`, `ChatbotInboxBotPauseTest`, `ChatbotInboxFilterBuilderTest`, `Botcake\BotcakePsidPageIdTest` (uses `listWithCounts`): with the new file, 58 tests, 812 assertions, OK. No assertion was changed.
+
+FULL_SUITE_PLACEHOLDER
+
+### 2. Query cost before and after (seeded MySQL 8.0.42)
+
+**Data** (invented, in a local MySQL on port 3407, 1 GB buffer pool, Windows laptop SSD): big page `652850684584967` with 3.6M replies in the last 30 days (5,000 an hour, 95% `send`, 4% `sheet`, 1% `manual`, 10% failed) plus 1.2M replies 31 to 60 days old, 150k customers, 600k incoming chats in 30 days (2% standby copies), 30k orders and 1M run events, 450k customer fields (chat status, phone, 1 in 40 paused); two other pages with 400k replies and 100k chats each, and a tiny page (100 + 100). `chatbot_replies`: 5.4M rows, 1.6 GB data + 2.2 GB indexes. Indexes exactly as the migrations make them (`SHOW INDEX` matched the list below).
+
+Indexes used: `chatbot_replies`: `(page_id, sent_at)`, `(page_id, psid, sent_at)`, `(page_id, psid, id)`, `(psid)`, `(sent_at)`, `(flow_id, sent_at)`, `(sequence_id, sent_at)`, `(chat_id, kind, status, sent_at)`, `(client_ref)`, `(via, confirmed_status, sent_at)`. `botcake_chats`: `(page_id, received_at)`, `(page_id, psid, received_at)`, `(page_id, psid, id)`, `(received_at)`, `(message_id)`.
+
+**Timings** of `Inbox::listWithCounts` on the big page (PHP 8.4 + Laravel against that MySQL; "before" = base 94aed869, "after" = this branch, two runs each after; same answer = same md5 of rows + counts + total):
+
+| Case | Before | After (run 1 / run 2) | Same answer |
+|---|---|---|---|
+| 24h | 0.7 s | 0.9 / 0.3 s | rows, counts, total same; 3 same-second pairs swap (Ruling 2) |
+| 7d | **385 s** | 0.3 / 0.4 s | same, ties as above |
+| 30d | **371 s** | 1.6 / 1.6 s | same, ties as above |
+| 30d + Ordered | **380 s** | 0.2 / 0.2 s | identical |
+| 30d + Reply failed | (same query as 30d) | 0.3 / 0.3 s | |
+| 30d + Human tab | (same) | 0.1 / 0.1 s | |
+| 30d + Bot tab + Phone | (same) | 0.2 / 0.2 s | |
+| 7d + search "Customer 12" | **387 s** | 0.1 / 0.4 s | identical |
+| 30d + search matching 1 customer | | 1.8 / 1.8 s | |
+| 30d + search matching nobody (whole window read) | | 1.6 / 1.6 s | |
+| 30d, medium page (400k replies) | | 0.4 / 0.4 s | |
+| 30d, tiny page | | 0.02 / 0.03 s | |
+| 24h + condition Ordered = yes | | 5.9 / 5.6 s | |
+| 7d + condition Ordered = yes | | 7.5 / 7.6 s | |
+| 30d + condition Ordered = yes | | **8.2 s → "too slow"** | |
+| 30d + condition Human | | 5.2 / 5.4 s | |
+| 24h + condition matching nobody | | 6.3 / 6.3 s | |
+
+Before, every 7d/30d case ran the same plan (below), 6 minutes here; production stopped it at 60 s. After, everything without filter-builder conditions is under 2 s; of the 1.6 s for 30d, 1.6 s is the unchanged "Reply failed" status query (`MAX(id)` of sends for the 500 listed customers, 12,000 row lookups on a table larger than this buffer pool). Conditions: see Ruling 7 (the scan must check many customers when few match; worst case ends at 8 s with the slow answer, never 60 s).
+
+**Plans.**
+
+Before (7d and 30d; 24h used `(page_id, sent_at)` range with temporary + filesort):
+```
+EXPLAIN select psid, MAX(id) AS last_id, MAX(sent_at) AS last_at from chatbot_replies
+ where page_id = 652850684584967 and sent_at >= '2026-10-19 18:00:00' and kind in ('send', 'manual')
+ group by psid order by last_at desc limit 500
+-> Limit: 500 row(s)
+  -> Sort: last_at DESC, limit input to 500 row(s) per chunk
+    -> Group aggregate: max(id), max(sent_at)
+      -> Filter: (sent_at >= ... and kind in ('send','manual'))
+        -> Index lookup on chatbot_replies using chatbot_replies_page_psid_id_index (page_id=652850684584967)  (rows=2.71e+6)
+```
+That reads every row of the page in the table (4.8M here), not only the window. The `botcake_chats` query had the same shape (`ref` on `botcake_chats_page_id_psid_received_at_index`, rows 402,037, temporary + filesort).
+
+After, the new list queries (exact SQL as Laravel sends it, from the query log; `?` values shown inline):
+
+```sql
+-- 1. Incoming, newest first (first read 1,000 rows; next reads 2,000, 4,000 ... 16,000 add the cursor line)
+select `id`, `psid`, `received_at` from `botcake_chats` force index (botcake_chats_page_id_received_at_index)
+ where (json_extract(`payload`, '$."_standby"') is null OR json_type(json_extract(`payload`, '$."_standby"')) = 'NULL')
+   and `page_id` = '652850684584967' and `received_at` >= '2026-10-19 18:00:00'
+   -- with a search: and (LOWER(name) LIKE '%ana%' ESCAPE '!' or `psid` like 'ana%')
+   -- next reads:    and `received_at` <= '<last received_at>' and NOT (`received_at` = '<last received_at>' AND `id` >= <last id>)
+ order by `received_at` desc, `id` desc limit 1000;
+-- EXPLAIN: range on botcake_chats_page_id_received_at_index, Using index condition; Using where; Backward index scan (no filesort)
+
+-- 2. Incoming, exact MAX for the (at most 500) customers found
+select psid, MAX(`id`) AS last_id, MAX(`received_at`) AS last_at from `botcake_chats`
+ where (json_extract(`payload`, '$."_standby"') is null OR json_type(json_extract(`payload`, '$."_standby"')) = 'NULL')
+   and `page_id` = '652850684584967' and `received_at` >= '2026-10-19 18:00:00' and `psid` in ('<psid 1>', ..., '<psid 500>')
+ group by `psid` limit 500;
+-- EXPLAIN: range on botcake_chats_page_id_psid_received_at_index (rows 2,000)
+
+-- 3. Outgoing, newest first (not run when there is a search)
+select `id`, `psid`, `sent_at` from `chatbot_replies` force index (chatbot_replies_page_id_sent_at_index)
+ where `page_id` = 652850684584967 and `sent_at` >= '2026-10-19 18:00:00' and `kind` in ('send', 'manual')
+   -- next reads: and `sent_at` <= '<last sent_at>' and NOT (`sent_at` = '<last sent_at>' AND `id` >= <last id>)
+ order by `sent_at` desc, `id` desc limit 1000;
+-- EXPLAIN: range on chatbot_replies_page_id_sent_at_index, Using index condition; Using where; Backward index scan
+
+-- 4. Outgoing, exact MAX for the customers found
+select psid, MAX(`id`) AS last_id, MAX(`sent_at`) AS last_at from `chatbot_replies`
+ where `page_id` = 652850684584967 and `sent_at` >= '2026-10-19 18:00:00' and `kind` in ('send', 'manual')
+   and `psid` in (<psid 1>, ..., <psid 500>)
+ group by `psid` limit 500;
+-- EXPLAIN: range on chatbot_replies_page_id_psid_sent_at_index (rows 12,000)
+
+-- 5. Only with filter-builder conditions: which of the new customers match (one row id each), e.g. Ordered = yes
+select `psid` from `chatbot_replies` where `page_id` = 652850684584967 and `id` in (<ids>)
+   and EXISTS (SELECT 1 FROM chatbot_events e WHERE e.page_id = 652850684584967 AND e.psid = chatbot_replies.psid
+               AND e.type = 'order' AND e.created_at >= '2026-10-19 18:00:00');
+-- EXPLAIN: PRIMARY range, then nested loop semijoin with an index lookup on chatbot_events_page_id_psid_created_at_index
+```
+Rows read per call, big page 30d: before ~4.8M row lookups (all of the page); after 1,000 index entries + row lookups for query 1 and 3 each, and up to ~12,000 index entries for query 4 (the 500 customers' rows in the window); everything after that is the unchanged status sets.
+
+Without `FORCE INDEX`, MySQL chose `botcake_chats_received_at_index` / `chatbot_replies_sent_at_index` (time only, backward) for the big and the medium page (Ruling 4); with it, all three pages use `(page_id, time)`.
+
+**For the reviewer to EXPLAIN on the server** (read-only, no data needed; replace the date with now minus 30 days):
+```sql
+EXPLAIN select `id`, `psid`, `sent_at` from `chatbot_replies` force index (chatbot_replies_page_id_sent_at_index) where `page_id` = 652850684584967 and `sent_at` >= NOW() - INTERVAL 30 DAY and `kind` in ('send', 'manual') order by `sent_at` desc, `id` desc limit 1000;
+EXPLAIN select `id`, `psid`, `received_at` from `botcake_chats` force index (botcake_chats_page_id_received_at_index) where (json_extract(`payload`, '$."_standby"') is null OR json_type(json_extract(`payload`, '$."_standby"')) = 'NULL') and `page_id` = '652850684584967' and `received_at` >= NOW() - INTERVAL 30 DAY order by `received_at` desc, `id` desc limit 1000;
+EXPLAIN select psid, MAX(`id`) AS last_id, MAX(`sent_at`) AS last_at from `chatbot_replies` where `page_id` = 652850684584967 and `sent_at` >= NOW() - INTERVAL 30 DAY and `kind` in ('send', 'manual') and `psid` in (<a few psids from the first statement's rows>) group by `psid` limit 500;
+```
+Expected (as here): the first two `range` with `Backward index scan` and no `Using filesort`; the third a `range` on `chatbot_replies_page_id_psid_sent_at_index` (or `..._page_psid_id_index`), rows in the thousands, not millions.
+
+**Index:** none added. The existing `(page_id, sent_at)` and `(page_id, received_at)` serve the newest-first read and `(page_id, psid, sent_at)` / `(page_id, psid, received_at)` the exact MAX; the EXPLAINs above show no full-window read. So there is no build cost and nothing to run on the busy tables.
+
+**IL-2 on MySQL** (same seeded server, a subclass with a 0.2 s and a 0.05 s budget, 30d + condition Ordered):
+```
+session before: 0
+budget 0.2: InboxTooSlow after 212 ms; cause: MySQL error 3024 Query execution was interrupted, maximum statement execution time exceeded
+session after: 0
+budget 0.05: InboxTooSlow after 63 ms; cause: MySQL error 3024 Query execution was interrupted, maximum statement execution time exceeded
+session after: 0
+later SELECT SLEEP(2): 2015 ms, not stopped
+```
+MySQL itself stops the running list SELECT at the budget, the session limit is back to its default afterwards, and a later query of the same connection is not limited.
+
+### 3. Branch pushed
+
+PUSH_PLACEHOLDER
+
 ## Story changes
 
 None. IL-1..IL-3 are as written; the cache (offered in IL-1 as an example) is in.
