@@ -129,7 +129,8 @@ class AiFollowupAutoApproveTest extends AiFollowupTestCase
         $auto = ChecklistAiFollowup::whereNull('reviewed_by')->sole();
         $auto->forceFill(['description' => 'Changed elsewhere'])->save();
         $this->assertFalse($auto->fresh()->wasEdited());
-        $this->actingAs($ceo)->get('/checklist/ai-followups?tab=sent')->assertOk()->assertDontSee('Edited by you');
+        // isa lang: ang kay Ben, na binago talaga ng CEO
+        $this->assertSame(1, substr_count($this->actingAs($ceo)->get('/checklist/ai-followups?tab=sent')->assertOk()->getContent(), 'Edited by you'));
         // ang paliwanag sa itaas ay sumusunod sa switch
         $this->actingAs($ceo)->get('/checklist/ai-followups')->assertSee('Auto-approve is on: new ones go to staff at once, without your review.')
             ->assertDontSee('Staff see one only after you approve it.');
