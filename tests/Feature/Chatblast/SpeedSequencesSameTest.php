@@ -25,6 +25,8 @@ use PHPUnit\Framework\Attributes\DataProvider;
  */
 class SpeedSequencesSameTest extends ChatblastTestCase
 {
+    use LoadsSpeedSequences;
+
     private const DAY = '2026-10-21';
 
     /** Ang mga filter na inihahambing: lahat, isang page, at bawat bot. */
@@ -155,7 +157,8 @@ class SpeedSequencesSameTest extends ChatblastTestCase
                 $new = $speed->sequencesOutput($f)['sequences'];
                 $old = $this->oldBuild($f);
                 $this->assertArrayNotHasKey('too_large', $new, "seed $seed $date " . json_encode($q));
-                $this->assertSame($old, $new, "seed $seed $date " . json_encode($q));
+                // Spec 301: due → sent is new (ResponseSpeedTest covers it); the rest is the old code's, number for number.
+                $this->assertSame($old, self::withoutDueToSent($new), "seed $seed $date " . json_encode($q));
                 $checked += $old['total']['due'];
             }
         }

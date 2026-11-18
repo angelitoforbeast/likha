@@ -273,7 +273,9 @@ window.spRemember(document);
         ai: [['with_ai_avg', 'With AI avg', '#7c3aed', false, 2.5], ['no_ai_avg', 'No AI avg', '#0891b2', false, 2.5],
             ['with_ai_median', 'With AI median', '#7c3aed', true, 1.5], ['no_ai_median', 'No AI median', '#0891b2', true, 1.5], ['ai_time_avg', 'AI time avg', '#db2777', false, 1]],
         push: [['avg', 'Average', '#2563eb', false, 2.5], ['p90', 'p90', '#d97706', false, 2], ['max', 'Max (right axis)', '#dc2626', false, 1.5, 'y2']],
-        seq: [['avg', 'Average', '#2563eb', false, 2.5], ['p90', 'p90', '#d97706', false, 2]],
+        // Spec 301: due → sent (ang tunay na delay) ang pangunahin; ang pushed → sent at Meta ay putol-putol, nasa legend.
+        seq: [['avg', 'Due → sent avg', '#2563eb', false, 2.5], ['p90', 'Due → sent p90', '#d97706', false, 2],
+            ['meta_avg', 'Pushed → sent at Meta avg', '#0f766e', true, 1.5], ['meta_p90', 'Pushed → sent at Meta p90', '#7c3aed', true, 1.5]],
     };
     // Isang chart (id) mula sa data nito (c) at sa mga petsa ng data (date, prev_date). Walang Chart.js: walang chart.
     const draw = (id, c, data) => {

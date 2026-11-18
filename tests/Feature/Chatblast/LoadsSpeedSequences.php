@@ -43,6 +43,31 @@ trait LoadsSpeedSequences
         return $v;
     }
 
+    /** Ang Sequences nang walang "due_to_sent" (bago sa spec 301, wala sa lumang code): para sa paghahambing sa lumang code. */
+    protected static function withoutDueToSent(array $v): array
+    {
+        foreach ($v as $k => $x) {
+            if ($k === 'due_to_sent') unset($v[$k]);
+            elseif (is_array($x)) $v[$k] = self::withoutDueToSent($x);
+        }
+
+        return $v;
+    }
+
+    /**
+     * Ang chart ng Sequences sa anyo ng lumang code (spec 301: ang lumang avg/p90 ay ang pushed → sent at Meta, na ngayon ay
+     * meta_avg/meta_p90 at "at Meta"; ang avg/p90 ay due → sent na). Ang shown at ang taas ng axis ay kinukuwenta gaya ng
+     * lumang code (mula sa lumang average).
+     */
+    protected static function seqChartAsOld(array $seq): array
+    {
+        $out = [];
+        foreach (['series', 'prev'] as $part) $out[$part] = ['avg' => $seq[$part]['meta_avg'], 'p90' => $seq[$part]['meta_p90']];
+        foreach (['counts', 'prev_counts'] as $part) $out[$part] = ['steps' => $seq[$part]['at Meta']];
+
+        return $out + ['shown' => ['avg'], 'top' => \App\Services\Chatbot\ResponseSpeed::axisTop($out['series']['avg'], $out['prev']['avg'])];
+    }
+
     /** Ang JSON ng endpoint: ang section ({filters, sequences, html}) o ang chart ({date, prev_date, seq}). */
     protected function speedSequences(string $query = '', bool $chart = false): array
     {

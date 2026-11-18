@@ -9,21 +9,21 @@
 @php($st = $sequences['total'])
 @if($asOf)<p class="text-xs text-slate-500" data-sp-asof="sequences">As of {{ $asOf }}</p>@endif
 <p class="text-sm tabular-nums text-slate-600" data-sp-summary="sequences">Day: {{ number_format($st['due']) }} due · {{ number_format($st['sent']) }} sent · {{ number_format($st['failed']) }} failed · {{ number_format($st['skipped']) }} skipped; scheduled → pushed avg {{ $sec($st['scheduled_to_pushed']['avg']) }} · p90 {{ $sec($st['scheduled_to_pushed']['p90']) }} · max {{ $sec($st['scheduled_to_pushed']['max']) }}; pushed → sent at Meta: {{ number_format($st['pushed_to_meta']['n']) }} steps · avg {{ $sec($st['pushed_to_meta']['avg']) }} · p90 {{ $sec($st['pushed_to_meta']['p90']) }} · max {{ $sec($st['pushed_to_meta']['max']) }}</p>
-@include('chatbot.partials.speed-chart', ['id' => 'seq', 'title' => 'Sequences by hour due: pushed → sent at Meta, average and p90', 'label' => 'Average and p90 of sequence steps from pushed to sent at Meta per hour, with the previous day as reference'])
+@include('chatbot.partials.speed-chart', ['id' => 'seq', 'title' => 'Sequences by hour due: due → sent, average and p90 (sent at Meta when confirmed, else pushed)', 'label' => 'Average and p90 of sequence steps from due to sent per hour (sent at Meta when Meta confirmed, otherwise pushed; Botcake sends at once), with pushed to sent at Meta as dashed lines in the legend and the previous day as reference'])
 <details class="sp-table mt-3" data-sp-table="sequences">
     <summary class="cursor-pointer select-none py-1 text-sm font-medium text-blue-700"><span class="sp-show">Show table</span><span class="sp-hide">Hide table</span></summary>
 <div class="cb-card overflow-x-auto">
-    <table class="cb-table min-w-[56rem]" data-table="sequences">
+    <table class="cb-table min-w-[68rem]" data-table="sequences">
         <thead>
-            <tr><th></th><th colspan="5"></th><th colspan="4" class="!text-center">Scheduled → pushed</th><th colspan="4" class="!text-center">Pushed → sent at Meta</th></tr>
-            <tr><th>Hour</th>@foreach(['Due', 'Sent', 'Failed', 'Skipped', 'No message', 'Steps', 'Average', 'p90', 'Max', 'Steps', 'Average', 'p90', 'Max'] as $c)<th class="!text-right">{{ $c }}</th>@endforeach</tr>
+            <tr><th></th><th colspan="5"></th><th colspan="4" class="!text-center">Due → sent</th><th colspan="4" class="!text-center">Scheduled → pushed</th><th colspan="4" class="!text-center">Pushed → sent at Meta</th></tr>
+            <tr><th>Hour</th>@foreach(['Due', 'Sent', 'Failed', 'Skipped', 'No message', 'Steps', 'Average', 'p90', 'Max', 'Steps', 'Average', 'p90', 'Max', 'Steps', 'Average', 'p90', 'Max'] as $c)<th class="!text-right">{{ $c }}</th>@endforeach</tr>
         </thead>
         <tbody>
         @foreach($sequences['hours'] as $h => $r)
             <tr data-hour="{{ $h }}">
                 <td class="tabular-nums">{{ str_pad($h, 2, '0', STR_PAD_LEFT) }}:00</td>
                 @if($r === null)
-                    @for($i = 0; $i < 13; $i++)<td></td>@endfor
+                    @for($i = 0; $i < 17; $i++)<td></td>@endfor
                 @else
                     @include('chatbot.partials.speed-seq-cells', ['r' => $r])
                 @endif
@@ -34,7 +34,7 @@
     </table>
 </div>
 <p class="mt-2 text-xs text-slate-500">
-    Scheduled = when the step was due. Pushed = when Likha handed the step's first message to Forbeast or Botcake. Sent at Meta = the sent time Forbeast reports (send_status). Botcake sends at once, so its sent time is the pushed time: those steps ({{ number_format($sequences['total']['botcake']) }} in this view) are not in "Pushed → sent at Meta". Scheduled is the step's own delay from the customer's previous step (or from joining the sequence), so waiting for the AI, a busy lock or a paused bot shows as delay. No message = the step ran but its flow sent nothing. Steps with no earlier history and no recorded due time have no scheduled time.
+    Scheduled = when the step was due. Due → sent = from due to sent at Meta when Meta confirmed it, otherwise to pushed (Botcake sends at once): the delay the customer feels, charted above. Pushed = when Likha handed the step's first message to Forbeast or Botcake. Sent at Meta = the sent time Forbeast reports (send_status). Botcake sends at once, so its sent time is the pushed time: those steps ({{ number_format($sequences['total']['botcake']) }} in this view) are not in "Pushed → sent at Meta". Scheduled is the step's own delay from the customer's previous step (or from joining the sequence), so waiting for the AI, a busy lock or a paused bot shows as delay. No message = the step ran but its flow sent nothing. Steps with no earlier history and no recorded due time have no scheduled time.
 </p>
 </details>
 <details class="sp-table mt-3" data-sp-table="sequence-slowest">

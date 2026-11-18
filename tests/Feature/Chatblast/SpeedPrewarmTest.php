@@ -450,10 +450,12 @@ class SpeedPrewarmTest extends ChatblastTestCase
 
             // Ang default na view ng ngayon at kahapon ay galing sa warm: ang speedSequences ay nagpapatakbo nito kapag "building".
             $section = $this->speedSequences(http_build_query($q));
-            $this->assertSame($old['sequences'], $section['sequences'], "$name: sequences");
+            // Spec 301: due → sent is new (ResponseSpeedTest covers it); every other number is the old screen's.
+            $this->assertSame($old['sequences'], self::withoutDueToSent($section['sequences']), "$name: sequences");
             $this->assertSame($old['filters'], $section['filters'], "$name: filters");
             $chart = $this->speedSequences(http_build_query($q), true);
-            $this->assertSame(['date' => $old['charts']['date'], 'prev_date' => $old['charts']['prev_date'], 'seq' => $old['charts']['seq']], $chart, "$name: chart");
+            $this->assertSame([$old['charts']['date'], $old['charts']['prev_date']], [$chart['date'], $chart['prev_date']], "$name: chart dates");
+            $this->assertSame($old['charts']['seq'], self::seqChartAsOld($chart['seq']), "$name: chart");
         }
     }
 
