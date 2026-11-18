@@ -37,7 +37,7 @@ class VoiceTest extends ChatTestCase
         $msg = $this->actingAs($ana)->post("/chat/{$c->id}/voice", ['voice' => $this->voice($head, "clip.$ext"), 'duration' => 42], ['Accept' => 'application/json'])
             ->assertCreated()->json('message');
 
-        $this->assertNull($msg['text']);
+        $this->assertSame('', $msg['text'], 'no text, as a photo-only message');
         $this->assertCount(1, $msg['files']);
         $this->assertSame('audio', $msg['files'][0]['kind']);
         $this->assertSame(42, $msg['files'][0]['duration']);

@@ -7,6 +7,8 @@ use App\Models\ChatMember;
 use App\Models\ChatMessage;
 use App\Models\User;
 use App\Services\Chat\ChatAccess;
+use App\Services\Chat\ChatLive;
+use App\Services\Chat\ChatMessenger;
 use App\Services\Chat\ChatPeople;
 use App\Services\Chat\ChatPresenter;
 use Illuminate\Database\QueryException;
@@ -40,6 +42,7 @@ class ChatController extends Controller
         $me = $request->user();
         $card = ChatPeople::lookup([$me->id])->get($me->id) ?? ChatPeople::card($me->id, (string) $me->name);
         $open = filter_var($request->query('c'), FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]) ?: null;
+        ChatLive::touch($me->id);
 
         return view('chat.index', [
             'boot' => [
@@ -50,6 +53,10 @@ class ChatController extends Controller
                 'max_files' => (int) config('chat.max_files'),
                 'max_file_kb' => (int) config('chat.max_file_kb'),
                 'accept' => implode(',', array_map(fn ($e) => ".$e", array_merge(config('chat.image_types'), config('chat.file_types')))),
+                // Spec 300.
+                'reactions' => config('chat.reactions'),
+                'voice_max_seconds' => (int) config('chat.voice_max_seconds'),
+                'voice_max_kb' => (int) config('chat.voice_max_kb'),
             ],
         ]);
     }
@@ -59,7 +66,7 @@ class ChatController extends Controller
         $me = $request->user();
 
         return response()->json([
-            'conversations' => ChatPresenter::rows($me, $this->wantsAll($request, $me)),
+            'conversations' => ChatMessenger::rows(ChatPresenter::rows($me, $this->wantsAll($request, $me)), $me),
             'unread' => ChatPresenter::unreadTotal($me->id),
             'now' => now()->toIso8601String(),
         ]);
@@ -130,7 +137,7 @@ class ChatController extends Controller
         }
 
         return response()->json([
-            'conversation' => $this->conversationInfo($c, $me, $member),
+            'conversation' => ChatMessenger::conversation($this->conversationInfo($c, $me, $member), $me, $member),
             'messages' => ChatPresenter::messages($rows, $me),
             'has_more' => $hasMore,
             'reads' => $this->departed($me, $member) ? [] : ChatPresenter::reads($c, $me),
@@ -166,15 +173,22 @@ class ChatController extends Controller
             if ($new->isNotEmpty()) {
                 $this->markRead($c, $member);
             }
+            // Spec 300: ang mga lumang message na may bagong reaction o edit mula `since`, at sino ang nagta-type.
+            $changed = $since === null ? collect() : $this->visibleMessages($c, $me, $member)
+                ->whereNull('deleted_at')->where('id', '<=', (int) ($data['after'] ?? 0))->where('updated_at', '>=', $since)
+                ->orderBy('id')->limit(200)->get();
             $thread = [
                 'messages' => ChatPresenter::messages($new, $me),
                 'removed' => $removed,
                 'reads' => $this->departed($me, $member) ? [] : ChatPresenter::reads($c, $me),
+                'changed' => ChatPresenter::messages($changed, $me),
+                'typing' => $this->departed($me, $member) ? [] : ChatMessenger::typing($c, $me),
             ];
         }
+        ChatLive::touch($me->id);
 
         return response()->json([
-            'conversations' => $since === null ? [] : ChatPresenter::rows($me, $this->wantsAll($request, $me), $since),
+            'conversations' => $since === null ? [] : ChatMessenger::rows(ChatPresenter::rows($me, $this->wantsAll($request, $me), $since), $me),
             'thread' => $thread,
             'unread' => ChatPresenter::unreadTotal($me->id),
             'now' => now()->toIso8601String(),
@@ -260,10 +274,20 @@ class ChatController extends Controller
         return response()->json(['ok' => true]);
     }
 
-    /** Kabuuang hindi pa nababasa (para sa nav badge sa susunod na spec). */
+    /**
+     * Kabuuang hindi pa nababasa. Spec 300: binabasa ito ng bawat Likha page bawat 15 s (badge, title), kaya dito rin
+     * ang "active"; sa `alerts=1` kasama ang pinakabagong id at ang mga bagong message para sa alert (`after`).
+     */
     public function unread(Request $request): JsonResponse
     {
-        return response()->json(['unread' => ChatPresenter::unreadTotal($request->user()->id)]);
+        $me = $request->user();
+        ChatLive::touch($me->id);
+        if (! $request->has('alerts')) {
+            return response()->json(['unread' => ChatPresenter::unreadTotal($me->id)]);
+        }
+        $after = $request->validate(['after' => 'nullable|integer|min:0'])['after'] ?? null;
+
+        return response()->json(ChatMessenger::alerts($me, $after === null ? null : (int) $after));
     }
 
     public function file(Request $request, int $conversation, int $message, int $index): Response

@@ -18,7 +18,8 @@ class ChatMessage extends Model
 
     protected function casts(): array
     {
-        return ['attachments' => 'array'];
+        // Spec 300: reactions (user id → emoji), edited_at, edit_history (the earlier bodies; nothing is deleted).
+        return ['attachments' => 'array', 'reactions' => 'array', 'edit_history' => 'array', 'edited_at' => 'datetime'];
     }
 
     public function conversation(): BelongsTo

@@ -100,7 +100,8 @@ class ChatPresenter
 
     public static function unreadTotal(int $userId): int
     {
-        return (int) self::unreadQuery($userId)->count();
+        // Spec 300: ang naka-mute ay hindi kasama sa kabuuan (badge, title); ang row niya ay may sariling bilang pa rin.
+        return (int) ChatMessenger::notMuted(self::unreadQuery($userId))->count();
     }
 
     /** @param  int[]  $memberIds */
@@ -128,9 +129,8 @@ class ChatPresenter
         if ($m->trashed()) {
             $text = 'Message removed';
         } elseif (trim((string) $m->body) === '' && $m->attachments) {
-            $n = count($m->attachments);
-            $images = count(array_filter($m->attachments, fn ($a) => ($a['kind'] ?? '') === 'image'));
-            $text = $images === $n ? ($n === 1 ? 'Sent a photo' : "Sent $n photos") : ($n === 1 ? 'Sent a file' : "Sent $n files");
+            // Spec 300: pati "Voice message".
+            $text = ChatMessenger::preview($m);
         } else {
             $text = ChatText::oneLine($m->body);
         }
@@ -169,7 +169,10 @@ class ChatPresenter
         $replies = $replyIds ? ChatMessage::withTrashed()->whereIn('id', $replyIds)->get()->keyBy('id') : collect();
         $people = ChatPeople::lookup(array_merge($messages->pluck('sender_user_id')->all(), $replies->pluck('sender_user_id')->all()));
 
-        return $messages->map(fn (ChatMessage $m) => self::message($m, $viewer, $people, $replies))->values()->all();
+        $out = $messages->map(fn (ChatMessage $m) => self::message($m, $viewer, $people, $replies))->values()->all();
+
+        // Spec 300: reactions, "Edited", history (CEO), voice.
+        return ChatMessenger::decorate($out, $messages->values(), $viewer);
     }
 
     public static function one(ChatMessage $m, User $viewer): array
