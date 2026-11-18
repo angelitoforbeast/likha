@@ -134,8 +134,12 @@ class Inbox
             throw $e;
         } finally {
             $this->deadline = INF;
-            // Ang ibang query ng request ay walang limit gaya ng dati.
-            if (DB::getDriverName() === 'mysql') DB::statement('SET SESSION max_execution_time = DEFAULT');
+            // Ang ibang query ng request ay walang limit gaya ng dati. Kapag patay na ang koneksyon, wala nang ibabalik (at
+            // hindi dapat matakpan ng error na ito ang orihinal na error).
+            try {
+                if (DB::getDriverName() === 'mysql') DB::statement('SET SESSION max_execution_time = DEFAULT');
+            } catch (QueryException) {
+            }
         }
     }
 
