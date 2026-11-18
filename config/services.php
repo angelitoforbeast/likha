@@ -169,6 +169,7 @@ return [
         'sequence_concurrency' => (int) env('BOTCAKE_SEQUENCE_CONCURRENCY', 100),
         // Ilang proseso ng chatbot:sequence-pool (spec 301), bawat isa sa sariling bahagi ng mga page (page_id % N), bawat isa
         // hanggang sequence_concurrency. 1 = iisang proseso (ang dati). Kapag N > 1: supervisor numprocs=N at --shard=%(process_num)s.
+        // Ang app_settings row na chatbot.sequence_pools ang nauuna rito (SequenceSendPool::pools()); ito ang default kapag walang row.
         'sequence_pools' => (int) env('BOTCAKE_SEQUENCE_POOLS', 1),
         // Ilang segundo hinihintay ang Botcake sa sagot ng chatbot (send_content); ang unang mensahe na may larawan ay inaabot nang 8-15 s.
         'send_timeout' => (int) env('BOTCAKE_SEND_TIMEOUT', 30),

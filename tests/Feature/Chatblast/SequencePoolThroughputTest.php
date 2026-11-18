@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Chatblast;
 
+use App\Models\AppSetting;
 use App\Models\BotcakeChat;
 use App\Services\Chatbot\BotcakeSendQueue;
 use App\Services\Chatbot\SequenceSendPool;
@@ -10,6 +11,7 @@ use Carbon\Carbon;
 use GuzzleHttp\Promise\Promise;
 use GuzzleHttp\Psr7\Response;
 use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Psr\Http\Message\RequestInterface;
@@ -254,12 +256,80 @@ class SequencePoolThroughputTest extends SequenceHandoffTestCase
         $this->pool->stop();
         $this->replyPool->beat();
         if (is_numeric(getenv('SEQ_QUERY_MS'))) $this->queryMs = (float) getenv('SEQ_QUERY_MS');
+        Artisan::call('migrate', ['--path' => ['database/migrations/2026_04_10_000003_create_app_settings_table.php']]);
+        SequenceSendPool::forgetPools();
+    }
+
+    /** Ang bilang ng proseso sa app_settings row (gaya ng pagse-set sa server), at agad na nababasa. */
+    protected function usePools(int|string|null $n): void
+    {
+        if ($n === null) AppSetting::where('key', SequenceSendPool::POOLS_SETTING)->delete();
+        else AppSetting::set(SequenceSendPool::POOLS_SETTING, $n);
+        SequenceSendPool::forgetPools();
+    }
+
+    public function test_SQ_2_the_pool_count_comes_from_the_app_setting_then_the_config_then_1(): void
+    {
+        config(['services.botcake.sequence_pools' => 3]);
+        $this->usePools(null);
+        $this->assertSame(3, SequenceSendPool::pools(), 'no row: the config (BOTCAKE_SEQUENCE_POOLS)');
+        $this->usePools('');
+        $this->assertSame(3, SequenceSendPool::pools(), 'an empty row is no row');
+
+        $this->usePools(4);
+        $this->assertSame(4, SequenceSendPool::pools(), 'the row first');
+        $this->assertSame(4, (new SequenceSendPool())->pools, 'what the command and its --shard check use');
+
+        foreach (['0', '9', '-2', 'abc', '2.5', '100'] as $bad) {
+            $this->usePools($bad);
+            $this->assertSame(1, SequenceSendPool::pools(), "row '$bad' is outside 1..8: one process");
+        }
+        $this->usePools(8);
+        $this->assertSame(8, SequenceSendPool::pools());
+        $this->usePools(null);
+        config(['services.botcake.sequence_pools' => 12]);
+        SequenceSendPool::forgetPools();
+        $this->assertSame(1, SequenceSendPool::pools(), 'a config outside 1..8: one process');
+        config(['services.botcake.sequence_pools' => 1]);
+    }
+
+    public function test_SQ_2_a_changed_row_reaches_every_reader_within_a_minute_and_a_running_process_notices(): void
+    {
+        $this->usePools(2);
+        [$a, $b] = [$this->shardPool(0, SequenceSendPool::pools()), $this->shardPool(1, SequenceSendPool::pools())];
+        $this->assertTrue($a->start());
+        $this->assertFalse(SequenceSendPool::capable(), 'two shares configured, one running');
+        $this->assertTrue($b->start());
+        $this->assertTrue(SequenceSendPool::capable());
+        $this->assertFalse($a->poolsChanged());
+
+        // The row changes on the server (no config:cache): the same cached value for everyone until it expires.
+        AppSetting::set(SequenceSendPool::POOLS_SETTING, 3);
+        $this->assertSame(2, SequenceSendPool::pools(), 'cached for up to a minute');
+        $this->travel(SequenceSendPool::POOLS_CACHE_SECONDS + 1)->seconds();
+        $a->beat();
+        $b->beat();
+        $this->assertSame(3, SequenceSendPool::pools(), 'within a minute');
+        $this->assertFalse(SequenceSendPool::capable(), 'the hand-off waits for three shares');
+        // The command checks poolsChanged() in its loop at most every POOLS_CHECK_SECONDS; a process of the old count sees it.
+        $this->assertTrue($this->shardPool(0, 2)->poolsChanged(), 'a running process of the old count sees the new one (and stops cleanly)');
+
+        // A process started with the old count refuses beside live processes of the new count, and the other way round.
+        $c = $this->shardPool(2, 3);
+        $this->assertFalse($c->start(), 'the new share waits while the old count still runs');
+        $a->stop();
+        $b->stop();
+        foreach ([0, 1, 2] as $k) $this->assertTrue($this->shardPool($k, SequenceSendPool::pools())->start(), 'share ' . $k . ' of 3');
+        $this->assertTrue(SequenceSendPool::capable());
+        $this->assertFalse($this->shardPool(1, 2)->start(), 'a process with the old count refuses beside the new one');
+        $this->assertFalse($this->shardPool(0, 1)->start(), 'the old single pool too');
+        $this->assertFalse((new SequenceSendPool(null, $this->clock, 3))->start(), 'a share outside the count');
     }
 
     /** Ang mga pool ng $n na proseso (shard 0..n-1), sinimulan. @return array<int, SequenceSendPool> */
     protected function startShards(int $n): array
     {
-        config(['services.botcake.sequence_pools' => $n]);
+        $this->usePools($n);
         $pools = [];
         for ($k = 0; $k < $n; $k++) {
             $pools[$k] = $this->shardPool($k, $n);
@@ -407,12 +477,12 @@ class SequencePoolThroughputTest extends SequenceHandoffTestCase
 
     public function test_SQ_2_a_process_refuses_to_start_beside_a_live_pool_of_another_count_or_outside_the_count(): void
     {
-        config(['services.botcake.sequence_pools' => 1]);
+        $this->usePools(1);
         $old = $this->shardPool(0, 1);
         $this->assertTrue($old->start());
         $this->assertSame(SequenceSendPool::BEAT . ':' . \App\Services\Chatbot\ChatbotSequences::site(), SequenceSendPool::beatKey(), 'one process: the same beat as today');
 
-        config(['services.botcake.sequence_pools' => 3]);
+        $this->usePools(3);
         $this->assertFalse($this->shardPool(1, 3)->start(), 'the old single pool is still live');
         $this->assertFalse(SequenceSendPool::capable(), 'three configured, one running: steps are not handed off');
         $old->stop(); // clean stop (beat "stopped"): no longer in the way
@@ -432,7 +502,7 @@ class SequencePoolThroughputTest extends SequenceHandoffTestCase
     public function test_SQ_2_while_the_count_changes_the_tick_never_takes_back_what_the_old_single_pool_still_holds(): void
     {
         $this->load(10, 40);
-        config(['services.botcake.sequence_pools' => 1]);
+        $this->usePools(1);
         $old = $this->shardPool(0, 1);
         $this->assertTrue($old->start());
         $this->simulate([$old], 2, 0.0);
@@ -440,7 +510,7 @@ class SequencePoolThroughputTest extends SequenceHandoffTestCase
         $this->assertNotEmpty($held->whereNotNull('called_at'));
 
         // The setting is now 2 (deploy) while the old single pool still runs: share 1 has no process yet.
-        config(['services.botcake.sequence_pools' => 2]);
+        $this->usePools(2);
         $this->assertFalse(SequenceSendPool::capable(), 'steps are not handed off until every share runs');
         $this->assertFalse($this->shardPool(1, 2)->start(), 'share 1 waits for the old pool to stop');
         $this->travel(70)->seconds();

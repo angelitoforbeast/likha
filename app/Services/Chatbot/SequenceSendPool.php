@@ -3,11 +3,13 @@
 namespace App\Services\Chatbot;
 
 use App\Jobs\GatewayAfterSend;
+use App\Models\AppSetting;
 use App\Services\BotcakeClient;
 use App\Services\BotcakeMock;
 use App\Services\PageSettings;
 use App\Support\BotcakeClock;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Schema;
 use Psr\Http\Message\ResponseInterface;
 use Throwable;
 
@@ -22,10 +24,11 @@ use Throwable;
  * Bago ang tawag: ang pagsusuri ng step (ChatbotSequences::sendCheck), ang daan na hindi nagbago, at walang sagot ng bot sa
  * customer na hindi pa tapos. Itinatala ang tawag bago lumabas (hindi inuulit pagkatapos ng crash).
  *
- * Spec 301: ang bawat ticket ay may ~10 query na humaharang sa iisang loop, kaya ang loop ang hangganan. Kapag
- * services.botcake.sequence_pools = N > 1, N na proseso (--shard=0..N-1) ang tumatakbo, at ang bawat isa ay may sariling
- * bahagi ng mga page (page_id % N): ang page, ang mga customer nito at ang mga ticket nila ay laging sa iisang proseso, kaya
- * ang lane, ang ayos kada customer at ang pagtala bago ang tawag ay gaya ng dati sa loob ng bawat proseso. N = 1 ang dati.
+ * Spec 301: ang bawat ticket ay may ~10 query na humaharang sa iisang loop, kaya ang loop ang hangganan. Kapag ang bilang
+ * (pools(): app_settings chatbot.sequence_pools, saka BOTCAKE_SEQUENCE_POOLS) ay N > 1, N na proseso (--shard=0..N-1) ang
+ * tumatakbo, at ang bawat isa ay may sariling bahagi ng mga page (page_id % N): ang page, ang mga customer nito at ang mga
+ * ticket nila ay laging sa iisang proseso, kaya ang lane, ang ayos kada customer at ang pagtala bago ang tawag ay gaya ng
+ * dati sa loob ng bawat proseso. N = 1 ang dati.
  */
 class SequenceSendPool extends TicketPool
 {
@@ -33,7 +36,12 @@ class SequenceSendPool extends TicketPool
     public const CLAIM_EVERY = 0.2;     // segundo sa pagitan ng mga claim (hindi binabasa ang table kada 5 ms)
     public const MAX_RETRY_AFTER = 10;  // gaya ng botcake:send-pool
     public const LATE = 0.02;
-    public const MAX_POOLS = 16;        // ang pinakamaraming proseso (sinusuri ang lahat ng beat sa simula)
+    public const MAX_POOLS = 8;         // ang pinakamaraming proseso (sinusuri ang lahat ng beat sa simula)
+    public const POOLS_SETTING = 'chatbot.sequence_pools'; // app_settings: ang bilang ng proseso (spec 301)
+    public const POOLS_CACHE = 'sequence-send-pool:pools';
+    public const POOLS_CACHE_SECONDS = 60;
+    public const POOLS_CHECK_SECONDS = 5;
+    private float $poolsCheckedAt = 0.0;
 
     private BotcakeClock $clock;
     /** @var array<string, array{row: object, provider: string, req: array, attempt: int, lane: string, secret: string, gateway: ?string, ref: string, notBefore: float}> */
@@ -63,10 +71,49 @@ class SequenceSendPool extends TicketPool
         return max(1, (int) config('services.botcake.sequence_concurrency', 100));
     }
 
-    /** Ilang proseso ng sequence pool (services.botcake.sequence_pools): 1 = ang dati. */
+    /**
+     * Ilang proseso ng sequence pool: ang app_settings row na chatbot.sequence_pools (AppSetting::get) muna, saka ang
+     * services.botcake.sequence_pools (BOTCAKE_SEQUENCE_POOLS), saka 1. Iisang value para sa lahat ng bumabasa (ang --shard,
+     * ang simula, ang hand-off at ang tick): nasa cache nang POOLS_CACHE_SECONDS, kaya ang palit ng row ay umaabot sa loob
+     * ng isang minuto nang walang config:cache. Ang value na wala sa 1..MAX_POOLS ay 1 (ang dati).
+     */
     public static function pools(): int
     {
-        return max(1, min(self::MAX_POOLS, (int) config('services.botcake.sequence_pools', 1)));
+        return (int) Cache::remember(self::POOLS_CACHE . ':' . ChatbotSequences::site(), self::POOLS_CACHE_SECONDS, fn () => self::resolvePools());
+    }
+
+    /** Ang bilang mula sa row, sa config o 1, nang walang cache. */
+    public static function resolvePools(): int
+    {
+        $v = null;
+        try {
+            if (Schema::hasTable('app_settings')) $v = AppSetting::get(self::POOLS_SETTING);
+        } catch (Throwable $e) {
+            report($e); // walang basa ng row: ang config, gaya ng walang row
+        }
+        if ($v === null || trim((string) $v) === '') $v = config('services.botcake.sequence_pools', 1);
+        $n = filter_var(trim((string) $v), FILTER_VALIDATE_INT);
+
+        return $n !== false && $n >= 1 && $n <= self::MAX_POOLS ? $n : 1;
+    }
+
+    /** Kalimutan ang bilang sa cache (ang susunod na basa ay mula sa row o config). */
+    public static function forgetPools(): void
+    {
+        Cache::forget(self::POOLS_CACHE . ':' . ChatbotSequences::site());
+    }
+
+    /**
+     * Nagbago na ba ang bilang ng proseso mula nang magsimula ang prosesong ito (binabasa nang hanggang isang beses kada
+     * POOLS_CHECK_SECONDS)? Ang command ay humihinto nang malinis, at sa pagbuhay ng supervisor ay sa bagong bilang na.
+     */
+    public function poolsChanged(): bool
+    {
+        $now = microtime(true);
+        if ($now - $this->poolsCheckedAt < self::POOLS_CHECK_SECONDS) return false;
+        $this->poolsCheckedAt = $now;
+
+        return self::pools() !== $this->pools;
     }
 
     /** Ang beat ng bahagi $shard: ang 0 ay ang dating key (kaya ang iisang proseso ay gaya ng dati). */
