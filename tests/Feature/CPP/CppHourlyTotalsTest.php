@@ -821,8 +821,8 @@ class CppHourlyTotalsTest extends ChatblastTestCase
         $this->assertLessThan(1122, $boxAt(1280, 248), 'with the full sidebar open only .tl-tot-wrap scrolls');
         $this->assertEqualsWithDelta(62.5, ($boxAt(1920, 248) - 90) / 24, 0.05);
         $this->assertEqualsWithDelta(72.8, ($boxAt(1920, 0) - 90) / 24, 0.05);
-        // Before 297 (the 1280 px box with 2×32 page padding) a 1920 px window gave the same 1165 px as 1280.
-        $this->assertSame(1165, 1280 - 17 - 64 - 32 - 2);
+        // Before 297 the box never grew past the 1280 px max-w-7xl less its 2×32 padding and the card (1182 px) at any width.
+        $this->assertSame(1182, 1280 - 64 - 32 - 2);
     }
 
     /** Runs the page's cppTimeline() in Node (Manila time zone); fetch answers $json and records each URL. */
