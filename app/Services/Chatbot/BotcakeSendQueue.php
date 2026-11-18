@@ -122,10 +122,11 @@ class BotcakeSendQueue
      * chatbot, saka ang Delivering, saka ang ibang chatblast. $accept (ng pool) ang nagpapasya kung may puwang pa ang page ng
      * row; ang tinanggihan ay naiiwang pending. $fullPages: puno na ang page para sa chatblast; $fullForReplies: puno na ang
      * page para sa sagot ng bot (priority 0), na may sariling puwesto kahit puno ng chatblast ang page. $repliesOnly: puno na
-     * ng chatblast ang pool, kaya ang mga sagot lang ang hinahanap (hindi binabasa ang daan-daang chatblast kada ikot).
+     * ng chatblast ang pool, kaya ang mga sagot lang ang hinahanap (hindi binabasa ang daan-daang chatblast kada ikot). $part:
+     * ang bahagi ng mga page ng prosesong ito ng sequence pool ([N, k]: page_id % N = k; spec 301), null = lahat.
      * @return array<int, object>
      */
-    public static function claim(string $owner, int $n, ?callable $accept = null, ?callable $then = null, array $fullPages = [], array $fullForReplies = [], bool $repliesOnly = false, bool $sequence = false, bool $blastsOnly = false): array
+    public static function claim(string $owner, int $n, ?callable $accept = null, ?callable $then = null, array $fullPages = [], array $fullForReplies = [], bool $repliesOnly = false, bool $sequence = false, bool $blastsOnly = false, ?array $part = null): array
     {
         if ($n <= 0) return [];
         $t = self::TABLE;
@@ -139,6 +140,7 @@ class BotcakeSendQueue
             ->when($blastsOnly, fn ($q) => $q->where('t.priority', '>', 0)) // the replies are botcake:reply-pool's
             // Ang sequence ticket ay sa chatbot:sequence-pool lang; ang botcake:send-pool ay hindi kailanman kumukuha nito.
             ->where('t.priority', $sequence ? '=' : '<', self::SEQUENCE_PRIORITY)
+            ->tap(fn ($q) => self::inPart($q, $part, 't.page_id'))
             ->whereNotExists(fn ($q) => $q->select(DB::raw(1))->from("$t as o")->whereColumn('o.customer', 't.customer')->whereColumn('o.id', '<', 't.id')
                 ->whereIn('o.status', ['pending', 'sending']))
             ->orderBy('t.priority')->orderBy('t.id')->limit($n * 5)->get(['t.id', 't.request_id', 't.page_name', 't.kind', 't.priority']);
@@ -454,11 +456,22 @@ class BotcakeSendQueue
         }, 3);
     }
 
-    /** May sequence ticket bang naghihintay na makuha ngayon (para sa galaw ng pool)? */
-    public static function sequencePending(): bool
+    /** May sequence ticket bang naghihintay na makuha ngayon (para sa galaw ng pool; $part: sa bahagi lang ng prosesong iyon)? */
+    public static function sequencePending(?array $part = null): bool
     {
         return DB::table(self::TABLE)->where('status', 'pending')->where('priority', self::SEQUENCE_PRIORITY)
-            ->where(fn ($q) => $q->whereNull('next_at')->orWhere('next_at', '<=', now()))->exists();
+            ->where(fn ($q) => $q->whereNull('next_at')->orWhere('next_at', '<=', now()))->tap(fn ($q) => self::inPart($q, $part))->exists();
+    }
+
+    /**
+     * Ang mga row ng mga page ng isang bahagi ng sequence pool ($part = [N, k]: page_id % N = k; spec 301). Mga integer
+     * lang ang N at k (mula sa setting at sa --shard), kaya nakasulat sa SQL. null = walang hati (lahat ng page).
+     */
+    public static function inPart($q, ?array $part, string $column = 'page_id'): void
+    {
+        if ($part === null) return;
+        [$n, $k] = [max(1, (int) $part[0]), (int) $part[1]];
+        $q->whereRaw($q->getGrammar()->wrap($column) . ' % ' . $n . ' = ' . $k);
     }
 
     /** May sagot ba ng bot sa customer na hindi pa tapos (pending o sending) sa botcake:send-pool? Ang sequence ay naghihintay dito. */
@@ -521,14 +534,15 @@ class BotcakeSendQueue
 
     /**
      * Ang naiwang "sending" ng sequence pool na namatay (hindi $owner): hindi pa natawag → pending (isang beses ng bagong
-     * pool); natawag na → failed na walang sagot, saka ang resume. Hindi kailanman inuulit.
+     * pool); natawag na → failed na walang sagot, saka ang resume. Hindi kailanman inuulit. $part: ang mga page lang ng bahaging
+     * iyon ng pool (ang hawak ng ibang buhay na proseso ay hindi ginagalaw).
      */
-    public static function recoverSequence(?string $owner): int
+    public static function recoverSequence(?string $owner, ?array $part = null): int
     {
         if (!Schema::hasTable(self::TABLE)) return 0;
         $n = 0;
         $rows = DB::table(self::TABLE)->where('status', 'sending')->where('kind', self::SEQUENCE)
-            ->when($owner, fn ($q) => $q->where(fn ($w) => $w->whereNull('claimed_by')->orWhere('claimed_by', '!=', $owner)))->get();
+            ->when($owner, fn ($q) => $q->where(fn ($w) => $w->whereNull('claimed_by')->orWhere('claimed_by', '!=', $owner)))->tap(fn ($q) => self::inPart($q, $part))->get();
         foreach ($rows as $row) {
             if ($row->called_at === null) {
                 DB::table(self::TABLE)->where('id', $row->id)->where('status', 'sending')->where('claimed_by', $row->claimed_by)->whereNull('called_at')
