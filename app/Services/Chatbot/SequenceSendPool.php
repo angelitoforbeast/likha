@@ -44,9 +44,13 @@ class SequenceSendPool extends TicketPool
     public const LANE_CAP_SETTING = 'chatbot.sequence_lane_cap'; // app_settings: ticket kada Botcake lane ng sequence (spec 303)
     public const LANE_CAP_CACHE = 'sequence-send-pool:lane-cap';
     public const MAX_LANE_CAP = 100;
+    public const CHECK_AHEAD = 0.05;    // segundo bago ang oras ng lane: ang pagsusuri ng susunod na tawag (spec 305)
+    public const CHECK_FRESH = 0.5;     // ang pagsusuring mas luma rito ay inuulit bago ang tawag (hal. nag-429 ang page)
     private float $poolsCheckedAt = 0.0;
     /** Ang cap ng Botcake lane sa ikot na ito ng claim (isang basa ng cache kada claim, hindi kada kandidato). */
     private ?int $laneCap = null;
+    /** @var array<string, int> lane => ilang kandidato ang tinanggap na sa ikot na ito ng claim (spec 305) */
+    private array $picked = [];
 
     private BotcakeClock $clock;
     /** @var array<string, array{row: object, provider: string, req: array, attempt: int, lane: string, secret: string, gateway: ?string, ref: string, notBefore: float}> */
@@ -294,8 +298,12 @@ class SequenceSendPool extends TicketPool
             $this->claimedAt = $now;
             $this->laneCap = self::laneCap();
             $part = self::part($this->shard, $this->pools);
-            $started = count(BotcakeSendQueue::claim($this->owner, $this->max() - count($this->jobs), fn (object $c) => $this->room($c), fn (object $row) => $this->take($row),
-                $this->fullPages(), [], false, true, false, $part));
+            // Spec 305: ang claim ay ilang query kada ikot (claimSequence), hindi dalawa kada ticket; ang take ay pagkatapos.
+            $this->picked = [];
+            $rows = BotcakeSendQueue::claimSequence($this->owner, $this->max() - count($this->jobs), fn (object $c) => $this->room($c), $this->fullPages(), $part);
+            $this->picked = [];
+            foreach ($rows as $row) $this->take($row);
+            $started = count($rows);
             // Galaw: may nakuha, o walang hawak at walang naghihintay.
             // Walang hawak: ang "may naghihintay ba" ay binabasa lang kapag lampas 60 s na ang huling galaw (hindi kada 200 ms).
             if ($started > 0) $this->progressAt = now()->getTimestamp();
@@ -326,14 +334,17 @@ class SequenceSendPool extends TicketPool
         return [$token === '' ? '' : sha1($token), true];
     }
 
+    /** May puwang pa ba sa lane ng kandidato: ang hawak, kasama ang mga tinanggap na sa ikot na ito ($picked, wala pang row). */
     private function room(object $c): bool
     {
         if (isset($this->jobs[(string) $c->request_id])) return false;
         [$lane, $botcake] = $this->laneOf((string) $c->page_name);
-        $held = 0;
+        $held = $this->picked[$lane] ?? 0;
         foreach ($this->jobs as $job) if ($job['lane'] === $lane) $held++;
+        if (count($this->jobs) + array_sum($this->picked) >= $this->max() || $held >= $this->cap($botcake)) return false;
+        $this->picked[$lane] = ($this->picked[$lane] ?? 0) + 1;
 
-        return count($this->jobs) < $this->max() && $held < $this->cap($botcake);
+        return true;
     }
 
     /** @return array<int, string> ang mga page na puno na ang lane */
@@ -422,6 +433,17 @@ class SequenceSendPool extends TicketPool
      */
     private function lanes(): void
     {
+        // Spec 305: ang isang daan sa lahat ng lane ay tumatagal (ang pagsusuri at ang "called" ng bawat tawag ay humaharang),
+        // kaya habang may lumabas na tawag sa daan, isa pang daan: ang abalang page ay hindi lang isang tawag kada daan
+        // anuman ang dami ng ibang lane, at ang rate ng page ay nasa interval pa rin. Hanggang CLAIM_EVERY lang, para sa pump.
+        $until = $this->clock->now() + self::CLAIM_EVERY;
+        while ($this->lanesOnce() && $this->clock->now() < $until);
+    }
+
+    /** Isang daan sa lahat ng lane. @return bool may lumabas bang tawag */
+    private function lanesOnce(): bool
+    {
+        $issued = false;
         $interval = BotcakeClient::interval();
         foreach ($this->lanes as $key => $lane) {
             $now = $this->clock->now();
@@ -430,11 +452,14 @@ class SequenceSendPool extends TicketPool
                 foreach ($lane['queue'] as $id) {
                     if (($this->jobs[$id]['notBefore'] ?? 0.0) > $now) continue;
                     $this->lanes[$key]['queue'] = array_values(array_diff($this->lanes[$key]['queue'], [$id]));
-                    $this->issue($id);
+                    if ($this->issue($id) !== null) $issued = true;
                 }
                 continue;
             }
-            if ($now < $lane['next'] - 0.000001) continue;
+            if ($now < $lane['next'] - 0.000001) {
+                if ($lane['next'] - $now <= min(self::CHECK_AHEAD, $interval / 2)) $this->checkAhead($key);
+                continue;
+            }
             $pick = null;
             foreach ($lane['queue'] as $i => $id) {
                 if ($this->jobs[$id]['notBefore'] <= $now) {
@@ -458,10 +483,75 @@ class SequenceSendPool extends TicketPool
             array_splice($this->lanes[$key]['queue'], $pick, 1);
             $at = $this->issue($id);
             if ($at === null) continue;
+            $issued = true;
             $this->lanes[$key]['next'] = $at + $interval;
             if ($at > $free + 0.000001) BotcakeClient::sentAt($key, $at);
             $this->sentAt[$key][] = $at;
             if (count($this->sentAt[$key]) > 1000) array_shift($this->sentAt[$key]);
+        }
+
+        return $issued;
+    }
+
+    /**
+     * Ang pagsusuri bago ang unang tawag ng ticket: ang daan ng page na hindi nagbago, ang sagot ng bot na hindi pa tapos at
+     * ang pagsusuri ng step (sendCheck, iisang basa sa database; spec 305). true = tuloy (may oras ng pagsusuri ang job);
+     * false = walang tawag (ibinalik sa pila o tapos na bilang skipped).
+     */
+    private function firstChecks(string $id): bool
+    {
+        $job = $this->jobs[$id];
+        $row = $job['row'];
+        // Lumipat ang daan ng page habang naghihintay: balik sa pila, kukunin ulit sa bagong daan (isang beses lang).
+        if (ChatbotProvider::name((string) $row->page_name) !== $job['provider']) {
+            $this->forget($id);
+            BotcakeSendQueue::later($row, $this->owner, 0);
+            return false;
+        }
+        $check = app(ChatbotSequences::class)->sendCheck($row, true);
+        // Ang sagot ng bot sa customer ang nauuna: ang sequence ay naghihintay, hindi kailanman ang sagot.
+        if (($check['code'] ?? null) === 'reply_open') {
+            $this->forget($id);
+            BotcakeSendQueue::later($row, $this->owner, 1);
+            return false;
+        }
+        if ($check !== null) {
+            $this->forget($id);
+            $via = $job['provider'] === ChatbotProvider::GATEWAY ? (string) $job['gateway'] : ChatbotProvider::BOTCAKE;
+            $route = $job['provider'] === ChatbotProvider::GATEWAY ? ($job['req']['route'] ?? null) : null;
+            // Naka-off ang mga sagot, o hindi maabot ang customer: itinatala bilang skipped gaya ng padalang naghintay, at tuloy ang step.
+            $o = in_array($check['code'], ['switched_off', 'unreachable'], true) ? ['status' => 'skipped', 'error' => $check['reason'], 'http' => null]
+                : ['status' => 'skipped', 'error' => $check['reason'], 'http' => null, 'check' => $check['code']];
+            BotcakeSendQueue::finishSequence($row, $this->owner, $o + ['via' => $via, 'ref' => $job['ref']] + ($route !== null ? ['route' => $route] : []));
+            return false;
+        }
+        $this->jobs[$id]['checked'] = $this->clock->now();
+
+        return true;
+    }
+
+    /** Sariwa pa ba ang pagsusuri ng job (ginawa ng checkAhead sa loob ng CHECK_FRESH)? Kung hindi, uulitin bago ang tawag. */
+    private function checkedFresh(array $job): bool
+    {
+        return isset($job['checked']) && $this->clock->now() - $job['checked'] <= self::CHECK_FRESH;
+    }
+
+    /**
+     * Spec 305: ang susunod na tawag ng Botcake lane ay malapit na (sa loob ng CHECK_AHEAD): ang pagsusuri nito (isang basa)
+     * ay ngayon na, kaya sa oras ng lane ang "called" at ang tawag na lang. Ang pagitan ng mga tawag ay ang interval pa rin
+     * (ang oras ng tawag ang binibilang), pero hindi na nadadagdagan ng oras ng pagsusuri. Ang "called" (ang kondisyonal na
+     * pagtala na may hawak pa ng subscription) ay laging sa mismong oras ng tawag. Hindi kasama ang ulit (429) at ang ImageFlow.
+     */
+    private function checkAhead(string $key): void
+    {
+        $lane = $this->lanes[$key];
+        foreach ($lane['queue'] as $id) {
+            $job = $this->jobs[$id] ?? null;
+            if ($job === null || $job['notBefore'] > $lane['next']) continue;
+            if ($job['attempt'] === 0 && empty($job['steps']) && !$this->checkedFresh($job) && ($job['req']['step'] ?? '') !== 'image_write') {
+                if (!$this->firstChecks($id)) $this->lanes[$key]['queue'] = array_values(array_diff($this->lanes[$key]['queue'], [$id]));
+            }
+            return; // ang una lang na handa: iyon ang susunod na tawag ng lane
         }
     }
 
@@ -496,29 +586,10 @@ class SequenceSendPool extends TicketPool
                 $this->jobs[$id]['lock'] = $lock->owner();
             }
             if ($job['attempt'] === 0 && empty($job['steps'])) {
-                $page = (string) $row->page_name;
-                // Lumipat ang daan ng page habang naghihintay: balik sa pila, kukunin ulit sa bagong daan (isang beses lang).
-                if (ChatbotProvider::name($page) !== $job['provider']) {
-                    $this->forget($id);
-                    BotcakeSendQueue::later($row, $this->owner, 0);
-                    return null;
-                }
-                // Ang sagot ng bot sa customer ang nauuna: ang sequence ay naghihintay, hindi kailanman ang sagot.
-                if (BotcakeSendQueue::replyOpen($row->page_id, $row->psid)) {
-                    $this->forget($id);
-                    BotcakeSendQueue::later($row, $this->owner, 1);
-                    return null;
-                }
+                // Ang pagsusuri na ginawa na ng checkAhead (sariwa pa) ay hindi inuulit; kung hindi, ngayon.
+                if (!$this->checkedFresh($job) && !$this->firstChecks($id)) return null;
                 $via = $job['provider'] === ChatbotProvider::GATEWAY ? (string) $job['gateway'] : ChatbotProvider::BOTCAKE;
                 $route = $job['provider'] === ChatbotProvider::GATEWAY ? ($job['req']['route'] ?? null) : null;
-                if (($check = app(ChatbotSequences::class)->sendCheck($row)) !== null) {
-                    $this->forget($id);
-                    // Naka-off ang mga sagot, o hindi maabot ang customer: itinatala bilang skipped gaya ng padalang naghintay, at tuloy ang step.
-                    $o = in_array($check['code'], ['switched_off', 'unreachable'], true) ? ['status' => 'skipped', 'error' => $check['reason'], 'http' => null]
-                        : ['status' => 'skipped', 'error' => $check['reason'], 'http' => null, 'check' => $check['code']];
-                    BotcakeSendQueue::finishSequence($row, $this->owner, $o + ['via' => $via, 'ref' => $job['ref']] + ($route !== null ? ['route' => $route] : []));
-                    return null;
-                }
                 // Itinatala bago tumawag: hindi na inuulit pagkatapos ng crash.
                 if (!BotcakeSendQueue::calledSequence($row, $this->owner, $via, $job['ref'], $route)) {
                     $this->forget($id);
