@@ -39,12 +39,15 @@ class PancakeChatLookupTest extends PancakePsidTestCase
         $svc = app(PancakeChat::class);
 
         $psid = $svc->forOrder('Page Uno', 'Ana Cruz', '12345678901234567');
-        $pageName = $svc->forOrder('Page Uno', 'Ana Cruz', '99999999999999999');
+        // Spec 307 FU-2: ang order na may PSID na walang conversation ay hindi na humihiram ayon sa pangalan; ang
+        // page + pangalan at pangalan lang ay para sa order na walang PSID.
+        $pageName = $svc->forOrder('Page Uno', 'Ana Cruz', null);
         $nameOnly = $svc->forOrder('Page Tres', 'Ana Cruz', null);
 
         $this->assertSame(['psid chat', 'psid'], [$psid['chat'], $psid['match']]);
         $this->assertSame(['page at pangalan', 'page_name'], [$pageName['chat'], $pageName['match']]);
         $this->assertSame(['page at pangalan', 'name_only'], [$nameOnly['chat'], $nameOnly['match']]);
+        $this->assertNull($svc->forOrder('Page Uno', 'Ana Cruz', '99999999999999999'));
         $this->assertNull($svc->forOrder('Page Uno', 'Walang Ganito', '99999999999999999'));
     }
 

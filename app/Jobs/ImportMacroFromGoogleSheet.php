@@ -8,6 +8,7 @@ use App\Models\MacroOutput;
 use App\Models\MacroImportRun;
 use App\Models\MacroImportRunItem;
 use App\Services\OrderIdentity;
+use App\Services\PlaceholderName;
 use App\Services\OrderPhone;
 use Google_Client;
 use Google\Service\Sheets;
@@ -248,11 +249,12 @@ class ImportMacroFromGoogleSheet implements ShouldQueue
 
                         // Walang fb_name: TIMESTAMP + PAGE + phone; walang phone din: kapareho lang ang all_user_input.
                         // Kapag walang tugma, bagong row ang papasok at walang umiiral na order na ginagalaw.
-                        $namePhone = trim($fbName) === ''
+                        // Ang placeholder na pangalan ("Facebook User") ay parang walang pangalan (spec 307).
+                        $namePhone = PlaceholderName::is($fbName)
                             ? OrderPhone::forOrder($data['PHONE NUMBER'] ?? null, $data['all_user_input'] ?? null, null)
                             : '';
                         $existing = OrderIdentity::find($timestamp, $data['PAGE'], $fbName, $namePhone, (string)($data['all_user_input'] ?? ''));
-                        if (!$existing && trim($fbName) === '' && $namePhone === '') {
+                        if (!$existing && PlaceholderName::is($fbName) && $namePhone === '') {
                             $noKey++;
                         }
 

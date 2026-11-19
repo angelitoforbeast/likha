@@ -6,6 +6,7 @@ use App\Models\MacroOutput;
 use App\Models\OrderEncode;
 use App\Services\BotcakeCustomerMatcher;
 use App\Services\OrderIdentity;
+use App\Services\PlaceholderName;
 use App\Services\OrderPhone;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -68,7 +69,9 @@ class LiveOrder
         $at = self::time($timestamp);
         $day = self::day($timestamp);
         $page = $in->get('page');
-        $fbName = $in->get('name');
+        // Ang "Facebook User" (placeholder) ay parang walang fb_name: daan-daang customer ng page ang may ganitong pangalan,
+        // kaya hindi ito nagkakabit sa row ng import ng iba (spec 307).
+        $fbName = PlaceholderName::is($in->get('name')) ? '' : $in->get('name');
         $psid = $o->psid ? (string) $o->psid : '';
         // Walang PSID at walang fb_name: walang makikilalang customer (ang blangkong kondisyon ay tutugma sa lahat ng row ng page).
         if ($psid === '' && trim($fbName) === '') return [];
@@ -291,8 +294,8 @@ class LiveOrder
 
         $timestamp = self::timestamp($in->get('date'));
         $fbName = $in->get('name');
-        // Gaya ng Likha import: walang fb name, ang phone ng order; kung hindi, ang 09 sa phone column.
-        $namePhone = trim($fbName) === '' ? OrderPhone::forOrder($in->get('phone'), $in->get('input'), $in->get('cxd')) : '';
+        // Gaya ng Likha import: walang fb name (o placeholder, spec 307), ang phone ng order; kung hindi, ang 09 sa phone column.
+        $namePhone = PlaceholderName::is($fbName) ? OrderPhone::forOrder($in->get('phone'), $in->get('input'), $in->get('cxd')) : '';
         $likhaPhone = $namePhone !== '' ? $namePhone : (preg_match('/09\d{9}/', $in->get('phone'), $m) ? $m[0] : null);
 
         $ip = Parse::itemPrice($in->get('shop'));
@@ -323,7 +326,7 @@ class LiveOrder
             'extracted_details' => $in->get('cxd'),
             'CXD' => $in->get('cxd'),
             // Ang AI ANALYZE ay ang remark ng encode; kapag blangko, ang flag ng Likha import (walang pangalan at phone).
-            'AI ANALYZE' => $remark !== '' ? $remark : (trim($fbName) === '' && $namePhone === '' ? OrderIdentity::NO_NAME_NO_PHONE : null),
+            'AI ANALYZE' => $remark !== '' ? $remark : (PlaceholderName::is($fbName) && $namePhone === '' ? OrderIdentity::NO_NAME_NO_PHONE : null),
             'APP SCRIPT CHECKER' => $final,
         ];
     }

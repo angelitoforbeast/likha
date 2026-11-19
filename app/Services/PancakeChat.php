@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Schema;
 /**
  * Ang iisang paraan para hanapin ang Pancake chat ng isang order. Pinakamalakas na tugma muna:
  * PSID (ang mismong customer) -> page + pangalan -> pangalan lang. Pinakabagong row ang kinukuha sa bawat hakbang.
+ * Ang pangalan ay ginagamit lang kapag walang PSID ang order at hindi placeholder ang pangalan (spec 307).
  */
 class PancakeChat
 {
@@ -36,7 +37,12 @@ class PancakeChat
             if ($chat) return $this->hit($chat, self::MATCH_PSID);
         }
 
-        if ($fbName === '') return null;
+        // May PSID ang order pero wala pa ang conversation nito: walang chat. Ang chat ng kapangalan ay maaaring ibang
+        // customer, at mas mabuti ang walang history kaysa sa history ng iba (spec 307).
+        if ($psid !== '') return null;
+
+        // Ang "Facebook User" at ibang placeholder (o blangko) ay hindi pangalan ng isang tao: hindi ito kailanman susi.
+        if (PlaceholderName::is($fbName)) return null;
 
         // 2) Page + pangalan
         if ($pageId !== null) {

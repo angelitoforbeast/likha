@@ -15,6 +15,7 @@ use Illuminate\Support\Facades\Schema;
  * na iisang customer lang ang may-ari; (3) kung hindi: ambiguous o no_match, walang isusulat. Hindi kailanman pumapalit
  * ang phone ng ibang tao sa ambiguous na pangalan: mas masama ang waybill / COD sa maling tao kaysa walang mensahe.
  * Order na walang pangalan at walang tugma: ang phone nito ang hinahanap sa customer values ng page, saka sa chat text (psidsByOrderPhone).
+ * Ang placeholder na pangalan ("Facebook User", PlaceholderName) ay walang pangalan sa magkabilang panig (spec 307).
  * Kasabay ng PSID, isinusulat ang ad_id ng customer sa macro_output.botcake_ad_id, isang beses lang: ang ad na
  * nagdala ng customer bago umorder ang may kredito, kahit magbago pa ang ads niya.
  */
@@ -66,7 +67,8 @@ class BotcakeCustomerMatcher
             ->chunkById(2000, function ($rows) use (&$byName, &$byPhone, &$adOf) {
                 foreach ($rows as $r) {
                     $adOf[$r->psid] = $r->ad_id;
-                    $n = $this->normName($r->fb_name);
+                    // Ang "Facebook User" (placeholder) ay hindi pangalang makakakilala ng customer (spec 307).
+                    $n = PlaceholderName::is($r->fb_name) ? '' : $this->normName($r->fb_name);
                     if ($n !== '') $byName[$n][$r->psid] = true;
                     foreach ((array) $r->phone_numbers as $ph) {
                         $p = $this->normPhone(is_scalar($ph) ? (string) $ph : '');
@@ -88,14 +90,16 @@ class BotcakeCustomerMatcher
             ->orderBy('id')
             ->chunkById(1000, function ($orders) use (&$out, &$noName, $byName, $byPhone, $adOf, $hasAdCol) {
                 foreach ($orders as $o) {
+                    // Ang order na "Facebook User" ay parang walang pangalan: phone lang ang nagpapasya.
+                    $unnamed = PlaceholderName::is($o->fb_name);
                     [$psid, $how] = $this->decide(
-                        array_keys($byName[$this->normName($o->fb_name)] ?? []),
+                        $unnamed ? [] : array_keys($byName[$this->normName($o->fb_name)] ?? []),
                         ($phone = $this->normPhone($o->phone)) !== '' ? array_keys($byPhone[$phone] ?? []) : []
                     );
 
                     if ($psid === null) {
                         // Walang pangalan at walang tugma sa mga Botcake customer: susubukan sa phone (customer values, chat text).
-                        if ($how === 'no_match' && trim((string) $o->fb_name) === '' && $phone !== '') {
+                        if ($how === 'no_match' && $unnamed && $phone !== '') {
                             $noName[$o->id] = [$phone, (string) $o->ts_date];
                             continue;
                         }

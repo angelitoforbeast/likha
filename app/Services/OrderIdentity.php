@@ -8,6 +8,7 @@ use App\Models\MacroOutput;
  * Paano hinahanap ang umiiral na order ng isang row ng Likha o Macro import. May fb_name: TIMESTAMP + PAGE + fb_name
  * (dati pa). Walang fb_name: TIMESTAMP + PAGE + phone. Walang fb_name at walang phone: Macro lang ang may $allUserInput,
  * at ang tugma ay ang kapareho ring TIMESTAMP + PAGE + all_user_input; kung wala, walang ginagalaw na order.
+ * Ang placeholder na fb_name ("Facebook User", PlaceholderName) ay parang walang fb_name (spec 307).
  */
 class OrderIdentity
 {
@@ -18,7 +19,8 @@ class OrderIdentity
     {
         $base = MacroOutput::where([['TIMESTAMP', '=', $timestamp], ['PAGE', '=', $page]]);
 
-        if (trim($fbName) !== '') {
+        // Ang "Facebook User" (placeholder) ay parang walang pangalan: phone ang susi, hindi ang pangalang kapareho ng iba.
+        if (!PlaceholderName::is($fbName)) {
             return $base->where('fb_name', '=', $fbName)->first();
         }
 

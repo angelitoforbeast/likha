@@ -14,7 +14,8 @@ use Illuminate\Support\Facades\Log;
  * at kinokopya sa reorder ng parehong customer. Ang macro_output.botcake_psid pa rin ang sinusulatan, gaya dati.
  *
  * Conflict: kapag dalawa o higit pang magkaibang PSID ang iisang PAGE + fb_name, walang ikinakabit:
- * mas mabuti nang walang message kaysa maipadala ang waybill at COD sa maling tao.
+ * mas mabuti nang walang message kaysa maipadala ang waybill at COD sa maling tao. Ang placeholder na pangalan
+ * ("Facebook User", PlaceholderName) ay hindi kailanman ginagamit sa pagkabit o pagkopya (spec 307).
  */
 class BotcakePsidMatcher
 {
@@ -62,6 +63,9 @@ class BotcakePsidMatcher
      */
     public function orderQuery(string $page, string $name, ?string $since = null): ?Builder
     {
+        // Ang "Facebook User" (placeholder) ay hindi pangalan ng iisang customer: walang order na makikilala rito (spec 307).
+        if (PlaceholderName::is($name)) return null;
+
         $exact = MacroOutput::where('PAGE', $page)->where('fb_name', $name);
         if ((clone $exact)->exists()) return $exact;
 
@@ -202,6 +206,13 @@ class BotcakePsidMatcher
      */
     protected function evaluate(BotcakePsid $rec, ?string $since): void
     {
+        // Placeholder na pangalan: hindi kailanman ikakabit ayon sa pangalan (maraming customer ang "Facebook User"), kaya
+        // conflict agad, gaya ng pangalang may dalawang PSID; hindi na ito sinusubukan ulit kada run (spec 307).
+        if (PlaceholderName::is($rec->fb_name)) {
+            $rec->update(['status' => self::CONFLICT, 'last_checked_at' => now()]);
+            return;
+        }
+
         $orders = $this->orderQuery($rec->page, $rec->fb_name, $since);
 
         $known = $this->tableQuery($rec->page, $rec->fb_name, $rec->page_id)->distinct()->pluck('psid')->all();
@@ -285,6 +296,8 @@ class BotcakePsidMatcher
         foreach ($customers as $c) {
             $page = (string) $c->PAGE;
             $name = (string) $c->fb_name;
+            // Ang PSID ng isang "Facebook User" ay hindi kinokopya sa ibang "Facebook User" (spec 307).
+            if (PlaceholderName::is($name)) continue;
 
             $psids = MacroOutput::where('PAGE', $page)->where('fb_name', $name)
                 ->whereNotNull('botcake_psid')->where('botcake_psid', '<>', '')

@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Models\MacroOutput;
 use App\Services\OrderIdentity;
+use App\Services\PlaceholderName;
 use App\Services\OrderPhone;
 use App\Models\LikhaOrderSetting;
 use App\Models\LikhaImportRun;
@@ -404,7 +405,8 @@ class ImportLikhaFromGoogleSheet implements ShouldQueue
 
         // Match existing by TIMESTAMP + PAGE + fb_name. Walang fb_name: TIMESTAMP + PAGE + phone (D, o iisang numero
         // sa E / G). Walang pangalan at walang phone: laging bagong row, hindi kailanman nagsasama.
-        $namePhone = trim($fbName) === '' ? OrderPhone::forOrder($row[3] ?? null, $row[4] ?? null, $row[6] ?? null) : '';
+        // Ang placeholder na pangalan ("Facebook User") ay parang walang pangalan (spec 307).
+        $namePhone = PlaceholderName::is($fbName) ? OrderPhone::forOrder($row[3] ?? null, $row[4] ?? null, $row[6] ?? null) : '';
         $existing = OrderIdentity::find($timestamp, $page, $fbName, $namePhone);
 
         if ($existing) {
@@ -453,7 +455,7 @@ class ImportLikhaFromGoogleSheet implements ShouldQueue
         ]
             // Nakikita ng staff sa AI ANALYZE: walang pangalan at walang phone, kaya hindi ito maiuugnay sa customer.
             // Isinusulat lang kapag may flag, para hindi magalaw ang column sa ibang order.
-            + (trim($fbName) === '' && $namePhone === '' ? ['AI ANALYZE' => OrderIdentity::NO_NAME_NO_PHONE] : []));
+            + (PlaceholderName::is($fbName) && $namePhone === '' ? ['AI ANALYZE' => OrderIdentity::NO_NAME_NO_PHONE] : []));
 
         // Shadow encode ng bagong order (dispatch lang; hindi kailanman nagpapabagsak ng import).
         $this->shadow ??= app(\App\Services\OrderEncode\ImportShadow::class);
