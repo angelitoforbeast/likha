@@ -1,0 +1,38 @@
+# 308 result: Chat alerts when Likha is closed (web push)
+
+Base: live main 0d70b29f. Branch `feat/308-chat-web-push`.
+
+## Plan
+
+Base 0d70b29f: `composer install` (with `--ignore-platform-req=ext-pcntl --ignore-platform-req=ext-posix`), full suite once with `vendor/bin/phpunit` under Herd PHP (no `.env`; phpunit.xml uses sqlite `:memory:`), with no edits to code while it runs (300's base run was spoiled by edits during the run). Base failures listed under Evidence.
+
+Read first: specs 296, 299, 300, 304 and their results; `ChatController`, `ChatMessengerController`, `AiPost`, `ChatMessenger` (`preview`, `alerts`, `notMuted`), `ChatPresenter` (`sender`, `unreadTotal`), `ChatPeople` (active rule), the chat models, `config/chat.php`, `config/queue.php`, `deploy/supervisor/*`, `components/chat-unread.blade.php`, the Alerts popover in `chat/index.blade.php`, the layout head, `ChatTestCase`.
+
+**Data (one migration, additive).** `2026_12_01_308000_add_chat_push_to_users`: `users.chat_push` json null, like `users.nav_pins`. A list of this person's devices: `{endpoint, p256dh, auth, added_at, ua}` (at most 10 per person; the oldest drops). No table, because:
+- writes are rare (turn on, turn off, a gone endpoint), and every write runs in a transaction with the user row locked (`lockForUpdate`), so a 410 cleanup and a new device saved at the same time do not lose each other;
+- the same browser saved by a second person (shared office PC) moves to that person: saving an endpoint removes it from any other user's list (staff table is small; done in PHP in the same transaction).
+
+**Library.** `minishlink/web-push` via `composer require`. Before use I check its `composer.json` and its JWT/maths dependencies for `ext-gmp`, then run the push tests (real encryption + VAPID headers, no network) under `php -n` with only the needed extensions and no `gmp`.
+
+**Server.**
+- `config/chat.php` (appended): `push` → `public_key`, `private_key`, `subject` (`VAPID_*`, subject defaults to `mailto:` + `MAIL_FROM_ADDRESS`), the allowed push hosts, `ttl`, `max_devices`, `retries` (2).
+- `App\Services\Chat\ChatPush`: `enabled()` (both keys set), `validEndpoint()` (https, port 443 or none, no user info, host on the allowlist, not an IP or localhost, ≤ 2048 chars; keys base64url of 65 / 16 bytes), `save()`, `remove()`, `devices()`, `forget()` (gone endpoint), `queue(ChatMessage)` and `payloadFor()`.
+- `App\Services\Chat\PushSender` (bound in the container): wraps `Minishlink\WebPush`; returns per endpoint `ok`, `gone` (404/410) or `failed`. Tests swap in a fake.
+- `App\Jobs\SendChatPush` (queued on the default connection and queue, `afterCommit`): loads the message (skip if removed, edited, system, or gone), recipients = active members of the conversation except the sender, not muted, not deactivated (profile status inactive/resigned/terminated), with devices. One payload per person. `gone` → `forget`. `failed` → one warning log line (host + status, never keys) and a new `SendChatPush` for just those devices, attempt + 1, at most 2 retries, delayed.
+- Hook: `ChatMessage::booted()` `created` → `ChatPush::queue($m)` (no-op without keys or for system lines). That covers `ChatController::send`, voice and `AiPost::post` without touching them. Edits and removals are updates, so they never push.
+- Routes (inside the `/chat` block, `auth`, own subscriptions only, throttled): `GET /chat/push` (this person's devices, as a short hash of the endpoint, the service and the date; never the endpoint or keys), `POST /chat/push` (save this device, 422 off the allowlist), `DELETE /chat/push` (remove this device by endpoint, only from your own list). 404 for all three when push is off.
+- `chat:push-keys`: reads the `.env` file itself; when both keys are missing it writes `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` (and `VAPID_SUBJECT` if missing) and prints `created`; when both are present prints `already set`; one present and one missing → refuses with a message and changes nothing. Never prints a key.
+
+**Payload** (JSON, encrypted by Web Push): `{c, title, body, url: "/chat?c=<id>", tag: "likha-chat-<id>", unread, id}`; title "Ana Cruz" (direct), "Ana Cruz in Packing team" (group, same as 300), "Mira" for AI; body ≤ 80 characters, or "Sent a photo" / "Sent a voice message" / "Sent a file". Headers: TTL 12 h, urgency high, `Topic: c<id>` (the push service also keeps only the newest undelivered one per conversation).
+
+**Browser.**
+- `public/sw.js` (scope `/`, no fetch handler, no secret): `push` → if any Likha window is visible, show nothing (300's in-page alert does it); else one notification per conversation (`tag`), the newest text, with "N new messages" when it replaces an earlier one; sets the app badge from `unread` where supported. `notificationclick` → focus an open Likha tab and send it to `/chat?c=<id>`, else open a window.
+- `public/manifest.webmanifest` ("Likha", `#2563eb`, `start_url` `/chat`, standalone, icons 192 / 512 + maskable) and `public/icons/` made from the sidebar's "L" tile; `apple-touch-icon` 180 for iPhone. Linked from the layout head (manifest, theme-color, apple-touch-icon, `apple-mobile-web-app-capable`).
+- Chat page Alerts popover: with keys, the 300 "Allow notifications" button becomes "Turn on alerts" → permission → register `/sw.js` → subscribe with the public key → `POST /chat/push`. State for this device: "Alerts on for this device" + "Turn off" (unsubscribe + `DELETE`). Never asks on load. iPhone outside the installed app: the button is replaced by "To get alerts on iPhone: Share → Add to Home Screen, then open Likha from the Home Screen". Blocked / unsupported states keep a short line. Without keys the popover is exactly 300's.
+- `components/chat-unread.blade.php`: `navigator.setAppBadge(n)` / `clearAppBadge()` where supported, beside the existing count (WP-4).
+
+**Tests first** (`tests/Feature/Chat/`): `PushSubscriptionTest` (save, list, remove, several devices, another user cannot remove yours, the same endpoint moves between people, guests 401, off → 404), `PushEndpointTest` (allowlist: http, unknown host, IP v4/v6, localhost, port, user info, bad keys → 422; each known service → ok), `PushSendTest` (other members' devices only, not sender, muted, removed, edited, system, owner not a member, deactivated, Mira as sender, group title, attachments' text, 80 characters, payload shape), `PushRetryTest` (404/410 removes, other failures retried at most twice, logged), `PushOffTest` (no keys → no button, no job, no error, page as 300), `PushKeysCommandTest` (writes when missing, `already set`, partial refuses, never prints the private key), `PushCryptoTest` (real VAPID headers + payload encryption with the library, no network), `PushPageTest` (manifest, sw.js has no fetch handler / no secret, layout links, button text, iPhone line, badge code).
+
+**Design**: impeccable brief in `docs/design/308-chat-web-push/brief.md` before the view; screenshots at 390 (off, on, iPhone line) and 1280 (alerts on) from `artisan serve` on 127.0.0.1 with a local seeded sqlite file; critique and audit; fixes.
+
+**Files**: new `ChatPush.php`, `PushSender.php`, `SendChatPush.php`, the command, the migration, `public/sw.js`, `public/manifest.webmanifest`, `public/icons/*`, tests, design folder; changed `ChatMessage.php` (the hook), `User.php` (cast), `config/chat.php` (appended), `routes/web.php` (3 lines in the chat block), `ChatController::index` (boot: push key flag), `chat/index.blade.php` (Alerts popover + its JS), `components/chat-unread.blade.php` (badge), `components/layout.blade.php` (head links), `ChatTestCase.php` (migration line), `composer.json` / `composer.lock`.
