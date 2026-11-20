@@ -107,6 +107,9 @@ class NavLink extends Model
     {
         // Each row's section is its url's place in the sidebar (NavSections, spec 295).
         return array_map(fn (array $d) => $d + ['section' => \App\Support\NavSections::forUrl($d['route_url'])], [
+            // Chat first (spec 309, where the 299 migration put it): the first link of Home, so Reset numbers it 1, above Checklist.
+            // No pattern: the link covers /chat and below by its url (see the narrow_chat_nav_link_pattern migration).
+            ['key'=>'chat',                  'label'=>'Chat',               'route_url'=>'/chat',                                 'icon'=>'fa-solid fa-comment-dots',     'active_pattern'=>null,                             'visible'=>['CEO','Marketing - OIC','Marketing','Data Encoder - OIC','Data Encoder']],
             ['key'=>'ads_payment',           'label'=>'Ad Payment',         'route_url'=>'/ads_manager/payment/upload',           'icon'=>'fa-solid fa-credit-card',     'active_pattern'=>'ads_manager/payment*',           'visible'=>['Marketing','Marketing - OIC','CEO']],
             ['key'=>'ads',                   'label'=>'Ads',                'route_url'=>'/ads_manager/report',                   'icon'=>'fa-solid fa-bullhorn',         'active_pattern'=>'ads_manager/report*',            'visible'=>['Marketing','Marketing - OIC','CEO']],
             ['key'=>'marketing_summary',     'label'=>'Marketing Summary',  'route_url'=>'/owner/private',                        'icon'=>'fa-solid fa-chart-pie',        'active_pattern'=>'owner/private*',                 'visible'=>['Marketing','Marketing - OIC','CEO']],
@@ -160,8 +163,6 @@ class NavLink extends Model
             ['key'=>'encoding_timetable',    'label'=>'Encoding Timetable', 'route_url'=>'/encoder/timetable',                    'icon'=>'fa-solid fa-clock',            'active_pattern'=>'encoder/timetable*',             'visible'=>['CEO','Marketing','Marketing - OIC']],
             ['key'=>'ads_daily_output',      'label'=>'Ads Daily Output',   'route_url'=>'/ads_manager/daily-output',             'icon'=>'fa-solid fa-calendar-day',     'active_pattern'=>'ads_manager/daily-output*',      'visible'=>['CEO','Marketing','Marketing - OIC']],
             ['key'=>'checklist_ai_followups','label'=>'Marketing Head',     'route_url'=>'/checklist/ai-followups',               'icon'=>'fa-solid fa-wand-magic-sparkles', 'active_pattern'=>'checklist/ai-followups*',     'visible'=>['CEO']],
-            // No pattern: the link covers /chat and below by its url (see the narrow_chat_nav_link_pattern migration).
-            ['key'=>'chat',                  'label'=>'Chat',               'route_url'=>'/chat',                                 'icon'=>'fa-solid fa-comment-dots',     'active_pattern'=>null,                             'visible'=>['CEO','Marketing - OIC','Marketing','Data Encoder - OIC','Data Encoder']],
             ['key'=>'accounts_create',       'label'=>'New Account',        'route_url'=>'/accounts/create',                      'icon'=>'fa-solid fa-user-plus',        'active_pattern'=>'accounts*',                      'visible'=>['CEO','Marketing - OIC']],
         ]);
     }

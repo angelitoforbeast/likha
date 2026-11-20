@@ -28,7 +28,7 @@ class NavSections
 
     /** The spec's inventory, route_url => section. The migration 2026_11_27_100000 froze a copy of it. */
     public const BY_URL = [
-        '/checklist' => 'Home',
+        '/chat' => 'Home', '/checklist' => 'Home', // Chat first, above Checklist (spec 299; the defaults since spec 309)
         '/likha_order_import' => 'Orders', '/macro/gsheet/import' => 'Orders', '/encoder/summary' => 'Orders',
         '/encoder/checker_1' => 'Orders', '/encoder/pending-rate' => 'Orders', '/encoder/timetable' => 'Orders',
         '/data_encoder/mes-segregator' => 'Orders', '/jnt/address' => 'Orders',
@@ -40,7 +40,7 @@ class NavSections
         '/conversation/tracker' => 'Marketing', '/owner/private' => 'Marketing', '/playbook' => 'Marketing',
         '/prompt-generator' => 'Marketing',
         '/chatbot' => 'Chat', '/chatblast' => 'Chat', '/chatblast/page-settings' => 'Chat', '/page-settings' => 'Chat',
-        '/chatbot/botcake-accounts' => 'Chat', '/pancake/page-id-mapping' => 'Chat', '/chat' => 'Chat',
+        '/chatbot/botcake-accounts' => 'Chat', '/pancake/page-id-mapping' => 'Chat',
         '/checklist/ai-followups' => 'AI', '/astra' => 'AI', '/boardroom' => 'AI',
         '/finance' => 'Money', '/finance/supply' => 'Money',
         '/assign-roles' => 'Settings', '/owner/users' => 'Settings', '/owner/nav-settings' => 'Settings',

@@ -97,7 +97,7 @@ class ChatLinkTest extends NavTestCase
     {
         $chat = collect(NavLink::defaultData())->firstWhere('key', 'chat');
         $this->assertNull($chat['active_pattern']);
-        $this->assertSame('Chat', $chat['section']);
+        $this->assertSame('Home', $chat['section']); // spec 309: first in Home, where the 299 migration put it
 
         $this->actingAs($this->user('CEO'))->post('/owner/nav-settings/reset')->assertRedirect('/owner/nav-settings');
         $this->assertSame(1, DB::table('nav_links')->where('route_url', '/chat')->count());
