@@ -307,8 +307,9 @@
   /* Spec 308: this device's alerts (web push) */
   .lc-pop .lc-push-on { display: flex; align-items: center; gap: 7px; margin: 0 0 4px; color: var(--lc-text); font-size: 14px; font-weight: 600; }
   .lc-push-on i { color: var(--lc-online); }
-  .lc-pop #lc-push-ios { color: var(--lc-text); line-height: 1.45; }
+  .lc-pop #lc-push-ios { line-height: 1.45; }
   .lc-push-btn { width: 100%; justify-content: center; }
+  .lc-push-btn[aria-disabled="true"] { opacity: .6; cursor: progress; }
   .lc-pop .lc-push-err { margin: 8px 0 0; color: var(--lc-danger); }
   .lc-mute-menu { right: 8px; width: 260px; padding: 4px; }
   .lc-mute-menu button { display: flex; width: 100%; gap: 10px; align-items: center; border: 0; background: transparent; padding: 9px 10px; border-radius: 8px; font-size: 14px; text-align: left; }
@@ -322,6 +323,10 @@
     .lc-rbar button { width: 44px; height: 44px; }
     .lc-reacts { min-height: 30px; }
     .lc-mute-menu button { min-height: 44px; }
+    /* Spec 308: the alert buttons and the Sound switch get a 44 px touch area on phones. */
+    .lc-push-btn { min-height: 44px; }
+    .lc-switch { min-height: 44px; }
+    .lc-switch button::before { content: ""; position: absolute; inset: -9px -4px; }
     .lc-tools { opacity: 1; }
     .lc-msg:not(.show) .lc-tools:not(:focus-within) { opacity: 0; pointer-events: none; }
     .lc-tools .lc-icon-btn { width: 40px; height: 40px; }
@@ -351,11 +356,14 @@
         <div class="lc-pop" id="lc-alerts" role="dialog" aria-label="Alerts" hidden>
           <h3>Alerts</h3>
           @if (!empty($boot['push_key']))
-            <p class="lc-push-on" id="lc-push-status" hidden><i class="fa-solid fa-circle-check" aria-hidden="true"></i> Alerts on for this device</p>
-            <p id="lc-notif-text" aria-live="polite">Get alerts on this device for new messages, even when Likha is closed.</p>
-            <p id="lc-push-ios" hidden>To get alerts on iPhone: Share <i class="fa-solid fa-arrow-up-from-bracket" aria-hidden="true"></i> → Add to Home Screen, then open Likha from the Home Screen</p>
+            {{-- One live region: the state, its line and the iPhone steps are announced together. --}}
+            <div aria-live="polite">
+              <p class="lc-push-on" id="lc-push-status" hidden><i class="fa-solid fa-circle-check" aria-hidden="true"></i> Alerts on for this device</p>
+              <p id="lc-notif-text">Get alerts on this device for new messages, even when Likha is closed.</p>
+              <p id="lc-push-ios" hidden>To get alerts on iPhone: Share <i class="fa-solid fa-arrow-up-from-bracket" aria-hidden="true"></i> <span aria-hidden="true">→</span><span class="lc-sr">, then</span> Add to Home Screen, then open Likha from the Home Screen.</p>
+            </div>
             <button type="button" class="lc-btn primary lc-push-btn" id="lc-notif-allow">Turn on alerts</button>
-            <button type="button" class="lc-btn lc-push-btn" id="lc-push-off" hidden>Turn off</button>
+            <button type="button" class="lc-btn lc-push-btn" id="lc-push-off" aria-describedby="lc-push-status" hidden>Turn off</button>
             <p class="lc-push-err" id="lc-push-err" role="alert" hidden></p>
           @else
             <p id="lc-notif-text">Get a notification when a message arrives in a chat that is not open.</p>
@@ -878,7 +886,7 @@
         await api('POST', '/chat/push', sub.toJSON());
       }
       pushFlag.set(true); P.state = 'on';
-    } catch (e) { P.state = 'off'; }
+    } catch (e) { P.state = pushFlag.get() ? 'on' : 'off'; } // offline: keep what this device last knew
   }
   async function subscribe() {
     const reg = await pushReg();
@@ -896,12 +904,12 @@
     P.busy = true; P.error = ''; renderAlerts();
     try {
       const perm = await Notification.requestPermission();
-      if (perm !== 'granted') { P.state = perm === 'denied' ? 'blocked' : 'off'; return; }
+      if (perm !== 'granted') { P.state = perm === 'denied' ? 'blocked' : 'off'; if (perm !== 'denied') P.error = 'Alerts were not turned on. Tap Turn on alerts, then Allow.'; return; }
       const sub = await subscribe();
       await api('POST', '/chat/push', sub.toJSON());
       pushFlag.set(true); P.state = 'on';
     } catch (e) {
-      P.error = 'Could not turn on alerts. Try again.';
+      P.error = navigator.onLine === false ? 'No connection. Check your internet and try again.' : 'Could not turn on alerts. Try again.';
     } finally { P.busy = false; renderAlerts(); focusPush(); }
   }
   async function turnOff() {
@@ -911,7 +919,7 @@
       if (sub) { await api('DELETE', '/chat/push', { endpoint: sub.endpoint }); await sub.unsubscribe(); }
       pushFlag.set(false); P.state = 'off';
     } catch (e) {
-      P.error = 'Could not turn off alerts. Try again.';
+      P.error = navigator.onLine === false ? 'No connection. Check your internet and try again.' : 'Could not turn off alerts. Try again.';
     } finally { P.busy = false; renderAlerts(); focusPush(); }
   }
   function focusPush() {
@@ -921,7 +929,7 @@
   const PUSH_TEXT = {
     off: 'Get alerts on this device for new messages, even when Likha is closed.',
     on: 'New messages show here even when Likha is closed. Muted chats stay quiet.',
-    blocked: 'Alerts are blocked for Likha in this browser. Allow notifications in the site settings, then try again.',
+    blocked: 'Alerts are blocked for Likha in this browser. Tap the icon left of the address, open Permissions or Notifications, choose Allow, then open this again.',
     unsupported: 'This browser cannot get alerts when Likha is closed. Likha plays the sound while it is open.',
   };
   function renderPush() {
@@ -932,11 +940,11 @@
     $('lc-notif-text').textContent = PUSH_TEXT[s] || '';
     const allow = $('lc-notif-allow');
     allow.hidden = s !== 'off';
-    allow.disabled = P.busy;
+    allow.setAttribute('aria-disabled', String(P.busy)); // not disabled: focus stays on the button
     allow.textContent = P.busy && s === 'off' ? 'Turning on…' : 'Turn on alerts';
     const off = $('lc-push-off');
     off.hidden = s !== 'on';
-    off.disabled = P.busy;
+    off.setAttribute('aria-disabled', String(P.busy));
     off.textContent = P.busy && s === 'on' ? 'Turning off…' : 'Turn off';
     $('lc-push-err').hidden = !P.error;
     $('lc-push-err').textContent = P.error;
@@ -958,7 +966,16 @@
     closePops();
     if (!opening) return;
     renderAlerts(); $('lc-alerts').hidden = false; $('lc-alerts-btn').setAttribute('aria-expanded', 'true');
-    if (PUSH_KEY) { focusPush(); if (!P.busy) pushRefresh().then(() => { if (!$('lc-alerts').hidden) renderAlerts(); }); return; }
+    if (PUSH_KEY) {
+      focusPush();
+      // The state can change on refresh (e.g. off → on): keep focus on the control that is shown now.
+      if (!P.busy) pushRefresh().then(() => {
+        if ($('lc-alerts').hidden || P.busy) return;
+        const here = $('lc-alerts').contains(document.activeElement) || document.activeElement === document.body;
+        renderAlerts(); if (here) focusPush();
+      });
+      return;
+    }
     ($('lc-notif-allow').hidden ? $('lc-sound') : $('lc-notif-allow')).focus();
   });
   // Asks the browser once, only on this click (never on load).
