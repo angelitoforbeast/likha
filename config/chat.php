@@ -7,6 +7,10 @@ return [
         'mira' => 'Mira',
         'marketing_head' => 'Marketing Head',
     ],
+    // Ang trabaho ng AI, ang subtitle ng thread header para sa tao (spec 309). Ang wala rito ay walang subtitle.
+    'ai_roles' => [
+        'mira' => 'AI marketing head',
+    ],
 
     'max_body' => 4000,
     'max_files' => 5,

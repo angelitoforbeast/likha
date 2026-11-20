@@ -13,7 +13,7 @@
     --lc-bg: #f9fafb; --lc-panel: #ffffff; --lc-line: #e5e7eb; --lc-line-strong: #d1d5db;
     --lc-text: #111827; --lc-muted: #4b5563; --lc-faint: #5b6270; --lc-hover: #f3f4f6; --lc-selected: #eef2ff;
     --lc-accent: #2563eb; --lc-accent-hover: #1d4ed8; --lc-accent-soft: #dbeafe; --lc-on-accent: #ffffff;
-    --lc-other: #f3f4f6; --lc-danger: #b91c1c; --lc-ai-bg: #fffbeb; --lc-ai-text: #92400e;
+    --lc-other: #f3f4f6; --lc-danger: #b91c1c; --lc-ai-bg: #f5f3ff; --lc-ai-text: #5b21b6; --lc-ai-edge: #ddd6fe;
     --lc-field-edge: #868e9a;
     --lc-top: 64px;
     position: fixed; top: var(--lc-top); left: 0; right: 0; bottom: 0; z-index: 40;
@@ -82,8 +82,8 @@
   .lc-av.t2 { background: #fef3c7; color: #78350f; } .lc-av.t3 { background: #fce7f3; color: #831843; }
   .lc-av.t4 { background: #e0e7ff; color: #312e81; } .lc-av.t5 { background: #ccfbf1; color: #134e4a; }
   .lc-av.tn { background: #e5e7eb; color: #374151; }
-  .lc-av.ai { background: var(--lc-ai-bg); color: var(--lc-ai-text); box-shadow: inset 0 0 0 1px #fde68a; }
-  .lc-ai { display: inline-block; margin-left: 5px; padding: 0 5px; border-radius: 5px; background: var(--lc-ai-bg); color: var(--lc-ai-text); font-size: 11px; font-weight: 800; letter-spacing: .05em; line-height: 16px; vertical-align: 1px; box-shadow: inset 0 0 0 1px #fde68a; }
+  .lc-av.ai { background: var(--lc-ai-bg); color: var(--lc-ai-text); box-shadow: inset 0 0 0 1px var(--lc-ai-edge); }
+  .lc-ai { display: inline-block; margin-left: 5px; padding: 0 5px; border-radius: 5px; background: var(--lc-ai-bg); color: var(--lc-ai-text); font-size: 11px; font-weight: 800; letter-spacing: .05em; line-height: 16px; vertical-align: 1px; box-shadow: inset 0 0 0 1px var(--lc-ai-edge); }
 
   /* ── main: thread ── */
   .lc-main { flex: 1; min-width: 0; display: flex; position: relative; }
@@ -796,7 +796,7 @@
       sub = `${c.members.length} member${c.members.length === 1 ? '' : 's'}`;
       if (c.members.some((m) => m.id !== BOOT.me.id && activeText(m.active_at) === 'Active now')) sub += ' · Active now';
     }
-    else sub = (other && activeText(other.active_at)) || (other && other.role ? other.role : 'Direct chat');
+    else sub = c.subtitle || (other && activeText(other.active_at)) || (other && other.role ? other.role : 'Direct chat');
     if (c.me.muted) sub += c.me.muted_until ? ` · Muted until ${clock(new Date(c.me.muted_until))}` : ' · Muted';
     $('lc-thread-sub').textContent = sub;
     $('lc-info-btn').hidden = c.kind !== 'group' || c.me.left;

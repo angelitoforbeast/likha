@@ -40,6 +40,12 @@ class AiPost
         return (string) (config("chat.ai_members.$ai") ?: Str::headline($ai));
     }
 
+    /** Ang trabaho ng AI (config chat.ai_roles, spec 309), o null kapag wala. */
+    public static function role(string $ai): ?string
+    {
+        return config("chat.ai_roles.$ai") ?: null;
+    }
+
     /** Ang iisang conversation ng AI at ng tao; ginagawa kapag wala pa. */
     public static function conversation(string $ai, int $userId): ChatConversation
     {

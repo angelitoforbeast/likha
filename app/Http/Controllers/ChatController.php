@@ -6,6 +6,7 @@ use App\Models\ChatConversation;
 use App\Models\ChatMember;
 use App\Models\ChatMessage;
 use App\Models\User;
+use App\Services\Chat\AiPost;
 use App\Services\Chat\ChatAccess;
 use App\Services\Chat\ChatLive;
 use App\Services\Chat\ChatMessenger;
@@ -367,12 +368,17 @@ class ChatController extends Controller
         $people = ChatPeople::lookup($all);
         [$title, $avatar] = ChatPresenter::titleAndAvatar($c, $me, $all, $people);
         $active = $member?->isActive() ?? false;
+        // Spec 309: sa conversation ng AI, ang trabaho ng AI ang subtitle para sa tao (ang tanging miyembro). Ang CEO na
+        // nagbabasa at ang ibang conversation ay null, kaya ang dati ang ipinapakita ng header.
+        $ai = AiPost::aiOf($c);
+        $subtitle = $ai !== null && array_map('intval', $all) === [$me->id] ? AiPost::role($ai) : null;
 
         return [
             'id' => $c->id,
             'kind' => $c->kind,
             'title' => $title,
             'avatar' => $avatar,
+            'subtitle' => $subtitle,
             'members' => $members->map(fn (ChatMember $mb) => ($people->get((int) $mb->user_id) ?? ChatPeople::card((int) $mb->user_id, 'Unknown'))
                 + ['admin' => $mb->role === ChatMember::ADMIN])->values()->all(),
             'me' => [
