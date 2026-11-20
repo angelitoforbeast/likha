@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\AiFollowups;
 use App\Services\ChecklistDueToday;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
@@ -132,6 +133,8 @@ class StaffFeedController extends Controller
             ],
             // ilang (tao, task) sa checklist_late_today ang wala pang submission
             'checklist_late_not_submitted' => $rows->sum(fn ($r) => count(array_filter($r['checklist_late_today'], fn ($e) => !$e['submitted']))),
+            // ang trabaho ng Marketing head (AI follow-ups) sa araw na iyon: bilang at ang pinakahuli, walang text
+            'ai_followups' => AiFollowups::dayActivity($day),
         ]);
     }
 

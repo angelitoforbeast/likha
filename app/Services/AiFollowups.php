@@ -641,6 +641,85 @@ class AiFollowups
         return $mine->reject(fn ($f) => isset($done[(int) $f->id]))->values();
     }
 
+    // ── Staff feed ───────────────────────────────────────────────────────────
+
+    /**
+     * Ang ai_followups block ng /api/staff-status (spec 310): ang mga follow-up ng araw na iyon (follows_date, kung wala
+     * ay ang araw ng paggawa sa Manila), hindi kasama ang na-delete. Mga bilang, ang pinakahuling oras na may nangyari
+     * (ginawa, na-review o naipadala sa chat) at ang follow-up na iyon: oras, unang pangalan ng tao at state. Walang text.
+     *
+     * @return array{drafted:int, approved:int, auto_approved:int, rejected:int, waiting:int, sent:int, failed:int, last_at:?string, last:?array{at:string, person:?string, state:string}}
+     */
+    public static function dayActivity(Carbon $day): array
+    {
+        $out = ['drafted' => 0, 'approved' => 0, 'auto_approved' => 0, 'rejected' => 0, 'waiting' => 0,
+                'sent' => 0, 'failed' => 0, 'last_at' => null, 'last' => null];
+        if (!Schema::hasColumn('checklist_tasks', 'origin') || !Schema::hasColumn('checklist_tasks', 'chat_message_id')) {
+            return $out;
+        }
+        $day = $day->copy()->setTimezone(self::TZ)->startOfDay();
+        $next = $day->copy()->addDay();
+        $chat = Schema::hasTable('chat_messages');
+
+        $rows = DB::table('checklist_tasks as f')
+            ->when($chat, fn ($q) => $q->leftJoin('chat_messages as m', 'm.id', '=', 'f.chat_message_id'))
+            ->where('f.origin', 'ai')
+            ->whereNull('f.deleted_at')
+            ->where(function ($q) use ($day, $next) {
+                // < kinabukasan: tama rin kahit may oras ang naka-store na date
+                $q->where(fn ($q) => $q->where('f.follows_date', '>=', $day->toDateString())->where('f.follows_date', '<', $next->toDateString()))
+                    ->orWhere(fn ($q) => $q->whereNull('f.follows_date')
+                        ->where('f.created_at', '>=', $day->format('Y-m-d H:i:s'))
+                        ->where('f.created_at', '<', $next->format('Y-m-d H:i:s')));
+            })
+            ->get([
+                'f.id', 'f.review_status', 'f.reviewed_by', 'f.created_at', 'f.reviewed_at', 'f.chat_message_id', 'f.chat_failed_at',
+                $chat ? 'm.created_at as sent_at' : DB::raw('NULL as sent_at'),
+            ]);
+
+        $newest = null;
+        foreach ($rows as $r) {
+            $approved = $r->review_status === 'approved';
+            $sent = $r->chat_message_id !== null;
+            $failed = $approved && !$sent && $r->chat_failed_at !== null;
+            $out['drafted']++;
+            $out['approved'] += (int) $approved;
+            $out['auto_approved'] += (int) ($approved && $r->reviewed_by === null);
+            $out['rejected'] += (int) ($r->review_status === 'rejected');
+            $out['waiting'] += (int) ($r->review_status === 'draft');
+            $out['sent'] += (int) $sent;
+            $out['failed'] += (int) $failed;
+
+            $at = collect([$r->created_at, $r->reviewed_at, $r->sent_at])->filter()
+                ->map(fn ($v) => Carbon::parse($v, self::TZ))->max();
+            if ($at && (!$newest || [$at->getTimestamp(), (int) $r->id] > [$newest['at']->getTimestamp(), $newest['id']])) {
+                $state = $sent ? 'sent' : ($failed ? 'failed' : (string) $r->review_status);
+                $newest = ['at' => $at, 'id' => (int) $r->id, 'state' => $state];
+            }
+        }
+        if (!$newest) {
+            return $out;
+        }
+
+        // ang iisang assignee: pangalan sa employee profile, kung wala ang pangalan ng user (gaya ng displayName)
+        $person = DB::table('checklist_task_users as tu')
+            ->join('users as u', 'u.id', '=', 'tu.user_id')
+            ->leftJoin('employee_profiles as ep', 'ep.user_id', '=', 'u.id')
+            ->where('tu.checklist_task_id', $newest['id'])
+            ->orderBy('tu.id')
+            ->first(['u.name as user_name', 'ep.name']);
+        $name = trim((string) ($person?->name ?: $person?->user_name ?: ''));
+
+        $out['last_at'] = $newest['at']->toIso8601String();
+        $out['last'] = [
+            'at'     => $out['last_at'],
+            'person' => $name === '' ? null : (string) preg_split('/\s+/', $name)[0],
+            'state'  => $newest['state'],
+        ];
+
+        return $out;
+    }
+
     // ── Pangalan ─────────────────────────────────────────────────────────────
 
     /** Pangalan sa employee profile, kung wala ang pangalan ng user. */
