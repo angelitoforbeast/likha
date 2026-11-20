@@ -47,7 +47,8 @@ class AiFollowupCountsTest extends AiFollowupTestCase
         Cache::flush();
         $day = now()->startOfDay();
         $feed = $this->withHeader('X-STAFF-FEED-KEY', 'feed-key')->getJson('/api/staff-status')->assertOk()->json();
-        unset($feed['generated_at']);
+        // ai_followups (spec 310) ay binibilang mismo ang mga follow-up; ang iba ay dapat pareho
+        unset($feed['generated_at'], $feed['ai_followups']);
 
         $index = $this->actingAs($this->joy)->get('/checklist')->assertOk();
         $report = $this->actingAs($this->ceo)->get('/checklist/report?date=2026-11-18')->assertOk();

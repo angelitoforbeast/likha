@@ -144,7 +144,7 @@ class StaffFeedApiTest extends StaffActivityTestCase
 
         $response = $this->feed('/api/staff-status')->assertOk();
 
-        $this->assertSame(['date', 'generated_at', 'staff', 'totals', 'checklist_late_not_submitted'], array_keys($response->json()));
+        $this->assertSame(['date', 'generated_at', 'staff', 'totals', 'checklist_late_not_submitted', 'ai_followups'], array_keys($response->json()));
         $this->assertSame('2026-10-16', $response->json('date'));
         $this->assertCount(1, $response->json('staff'));
         $row = $response->json('staff.0');
