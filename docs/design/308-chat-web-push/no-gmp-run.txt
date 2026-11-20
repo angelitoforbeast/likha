@@ -1,0 +1,18 @@
+# php -n (no php.ini) with only: openssl mbstring curl pdo_sqlite sqlite3 fileinfo gd (gd: the tests' fake photo) + compiled-in core and bcmath
+PHP 8.4.16  gmp loaded: false  bcmath loaded: true
+## PushCryptoTest
+OK (3 tests, 16 assertions)
+## PushKeysCommandTest
+OK (6 tests, 23 assertions)
+## PushSendTest
+OK (13 tests, 63 assertions)
+## PushRetryTest
+OK (4 tests, 17 assertions)
+## PushSubscriptionTest
+OK (8 tests, 50 assertions)
+## PushEndpointTest
+OK (20 tests, 74 assertions)
+## PushOffTest
+OK (3 tests, 14 assertions)
+## PushPageTest
+OK (5 tests, 48 assertions)
