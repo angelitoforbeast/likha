@@ -35,4 +35,22 @@ return [
     'typing_seconds' => 6,
     // "Active": ang huling paggamit ng Likha (cache), ipinapakita hanggang isang oras.
     'active_minutes' => 60,
+
+    // Spec 308: web push kapag sarado ang Likha. Walang keys = sarado (walang button, walang padala).
+    // Ang keys ay ginagawa ng `php artisan chat:push-keys` sa .env; hindi kailanman sa database o sa repo.
+    'push' => [
+        'public_key' => env('VAPID_PUBLIC_KEY'),
+        'private_key' => env('VAPID_PRIVATE_KEY'),
+        'subject' => env('VAPID_SUBJECT', 'mailto:' . env('MAIL_FROM_ADDRESS', 'hello@example.com')),
+        // Ang mga push service lang na ito ang pinapadalhan (walang SSRF). "*." = anumang subdomain.
+        'hosts' => [
+            'fcm.googleapis.com' => 'Google',              // Chrome, Android, Edge (Chromium), Samsung Internet, Opera
+            '*.push.services.mozilla.com' => 'Mozilla',    // Firefox
+            'web.push.apple.com' => 'Apple',               // Safari (Mac) at iPhone na naka-install sa Home Screen
+            '*.notify.windows.com' => 'Microsoft',         // Edge na luma (WNS)
+        ],
+        'ttl' => 43200,       // 12 oras sa push service kapag naka-off ang phone
+        'max_devices' => 10,  // bawat tao; ang pinakaluma ang natatanggal
+        'retries' => 2,       // ang palya (hindi 404 / 410) ay sinusubukan ulit hanggang dalawang beses
+    ],
 ];

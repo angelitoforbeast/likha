@@ -1626,4 +1626,10 @@ Route::middleware(['web', 'auth'])->prefix('chat')->name('chat.')->group(functio
     Route::post  ('/{conversation}/mute',                      [$msgr, 'mute'])         ->whereNumber('conversation')->middleware('throttle:30,1')->name('mute');
     Route::post  ('/{conversation}/voice',                     [$msgr, 'voice'])        ->whereNumber('conversation')->middleware('throttle:30,1')->name('voice.store');
     Route::get   ('/{conversation}/messages/{message}/voice',  [$msgr, 'voiceFile'])    ->whereNumber(['conversation', 'message'])->name('voice');
+
+    // Spec 308: alerts sa device na ito kahit sarado ang Likha (web push). Sariling mga device lang.
+    $push = \App\Http\Controllers\ChatPushController::class;
+    Route::get   ('/push',                                     [$push, 'index'])        ->middleware('throttle:60,1')->name('push.index');
+    Route::post  ('/push',                                     [$push, 'store'])        ->middleware('throttle:20,1')->name('push.store');
+    Route::delete('/push',                                     [$push, 'destroy'])      ->middleware('throttle:20,1')->name('push.destroy');
 });

@@ -36,6 +36,9 @@
         <env name="FORBEAST_SITE_KEY" value=""/>
         <!-- Isang address lang ng gateway at walang IPv4-only sa tests: ang test ang nagse-set (config). -->
         <env name="GATEWAY_URLS" value=""/>
+        <!-- Spec 308: walang web push sa tests kahit may VAPID keys ang .env; ang push test ang nagbubukas nito (config). -->
+        <env name="VAPID_PUBLIC_KEY" value=""/>
+        <env name="VAPID_PRIVATE_KEY" value=""/>
         <env name="GATEWAY_FORCE_IPV4" value="false"/>
     </php>
 </phpunit>

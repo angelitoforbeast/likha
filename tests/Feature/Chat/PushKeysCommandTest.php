@@ -13,6 +13,7 @@ class PushKeysCommandTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        PushCryptoTest::needsEcKeys($this);
         $this->dir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'likha-push-keys-' . bin2hex(random_bytes(6));
         mkdir($this->dir);
         $this->app->useEnvironmentPath($this->dir);
@@ -21,8 +22,10 @@ class PushKeysCommandTest extends TestCase
 
     protected function tearDown(): void
     {
-        @unlink($this->dir . '/.env');
-        @rmdir($this->dir);
+        if (isset($this->dir)) {
+            @unlink($this->dir . '/.env');
+            @rmdir($this->dir);
+        }
         parent::tearDown();
     }
 

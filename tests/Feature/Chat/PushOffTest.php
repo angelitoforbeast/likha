@@ -43,7 +43,7 @@ class PushOffTest extends PushTestCase
         $m = $this->message($c, $ana, 'hi');
         $this->pushOff();
 
-        (new SendChatPush($m->id))->handle(app(\App\Services\Chat\PushSender::class));
+        (new SendChatPush($m->id))->handle();
         $this->assertSame([], $this->sender->sent);
     }
 

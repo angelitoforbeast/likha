@@ -20,6 +20,22 @@ class PushCryptoTest extends TestCase
 {
     private array $history = [];
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+        self::needsEcKeys($this);
+    }
+
+    /** Windows PHP without OPENSSL_CONF cannot make EC keys (no openssl.cnf); Linux (the server) can. */
+    public static function needsEcKeys(TestCase $test): void
+    {
+        if (! @openssl_pkey_new(['curve_name' => 'prime256v1', 'private_key_type' => OPENSSL_KEYTYPE_EC])) {
+            while (openssl_error_string()) {
+            }
+            $test->markTestSkipped('openssl cannot make EC keys on this machine: set OPENSSL_CONF to an openssl.cnf (Windows) and run again.');
+        }
+    }
+
     private function subscriber(): array
     {
         $key = openssl_pkey_new(['curve_name' => 'prime256v1', 'private_key_type' => OPENSSL_KEYTYPE_EC]);
@@ -88,8 +104,8 @@ class PushCryptoTest extends TestCase
         $this->assertCount(0, $this->history);
     }
 
-    public function test_the_container_gives_the_real_sender(): void
+    public function test_without_a_fake_the_real_sender_is_used(): void
     {
-        $this->assertInstanceOf(WebPushSender::class, app(PushSender::class));
+        $this->assertInstanceOf(WebPushSender::class, \App\Services\Chat\ChatPush::sender());
     }
 }

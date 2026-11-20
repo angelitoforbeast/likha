@@ -126,7 +126,7 @@ class PushSendTest extends PushTestCase
         Queue::assertPushed(SendChatPush::class, 1);
 
         $m->delete();
-        (new SendChatPush($m->id))->handle(app(\App\Services\Chat\PushSender::class));
+        (new SendChatPush($m->id))->handle();
         $this->assertSame([], $this->sender->sent);
     }
 

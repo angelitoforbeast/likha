@@ -3,6 +3,7 @@
 namespace Tests\Feature\Chat;
 
 use App\Models\User;
+use PHPUnit\Framework\Attributes\DataProvider;
 
 /** WP-1, no SSRF: only https endpoints on the known push services are saved; everything else is 422. */
 class PushEndpointTest extends PushTestCase

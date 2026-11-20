@@ -20,6 +20,7 @@ class User extends Authenticatable
     protected $hidden = [
         'password',
         'remember_token',
+        'chat_push', // spec 308: push endpoints and keys never leave in a serialized user
     ];
 
     protected function casts(): array
@@ -28,6 +29,7 @@ class User extends Authenticatable
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
             'nav_pins' => 'array', // sidebar pins, spec 295
+            'chat_push' => 'array', // chat alert devices (web push), spec 308
         ];
     }
 

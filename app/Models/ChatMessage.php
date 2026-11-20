@@ -22,6 +22,12 @@ class ChatMessage extends Model
         return ['attachments' => 'array', 'reactions' => 'array', 'edit_history' => 'array', 'edited_at' => 'datetime'];
     }
 
+    protected static function booted(): void
+    {
+        // Spec 308: bawat bagong message (tao o AI) ay naka-queue na web push; ang edit at remove ay update, kaya hindi.
+        static::created(fn (ChatMessage $m) => \App\Services\Chat\ChatPush::queue($m));
+    }
+
     public function conversation(): BelongsTo
     {
         return $this->belongsTo(ChatConversation::class, 'conversation_id');
