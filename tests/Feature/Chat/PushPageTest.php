@@ -9,7 +9,7 @@ class PushPageTest extends PushTestCase
     {
         $html = $this->actingAs($this->person())->get('/chat')->assertOk()->getContent();
 
-        $this->assertStringContainsString('Turn on alerts', $html);
+        $this->assertStringContainsString('id="lc-notif-allow">Turn on alerts</button>', $html);
         $this->assertStringContainsString('Alerts on for this device', $html);
         $this->assertStringContainsString('Turn off', $html);
         $this->assertStringContainsString('"push_key":"' . config('chat.push.public_key') . '"', $html);

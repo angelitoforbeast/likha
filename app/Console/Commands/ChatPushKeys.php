@@ -40,7 +40,14 @@ class ChatPushKeys extends Command
             return self::FAILURE;
         }
 
-        $keys = VAPID::createVapidKeys();
+        try {
+            $keys = VAPID::createVapidKeys();
+        } catch (\Throwable $e) {
+            // Hal. Windows PHP na walang openssl.cnf (OPENSSL_CONF). Walang key sa mensahe.
+            $this->error('Could not create the keys (openssl cannot make P-256 keys here). Nothing was changed.');
+
+            return self::FAILURE;
+        }
         $env = $this->put($env, 'VAPID_PUBLIC_KEY', $keys['publicKey']);
         $env = $this->put($env, 'VAPID_PRIVATE_KEY', $keys['privateKey']);
         if ($this->value($env, 'VAPID_SUBJECT') === '') {

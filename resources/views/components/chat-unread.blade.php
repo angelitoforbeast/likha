@@ -55,6 +55,10 @@
       }
     });
     document.title = (n ? `(${label}) ` : '') + plain();
+    // Spec 308 (WP-4): the installed app's icon shows the count where the browser supports it; elsewhere nothing.
+    if ('setAppBadge' in navigator) {
+      try { (n ? navigator.setAppBadge(n) : navigator.clearAppBadge()).catch(() => {}); } catch (e) { /* not allowed here */ }
+    }
   }
 
   const soundOn = () => store.get(KEY_SOUND) !== '0';
@@ -130,6 +134,15 @@
       busy = false;
       schedule();
     }
+  }
+  // Spec 308: a tap on a push notification focused this tab (public/sw.js); open that chat here.
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.addEventListener('message', (e) => {
+      const d = e.data || {};
+      const c = Number(d.c);
+      if (d.type !== 'likha-chat-open' || !Number.isInteger(c) || c < 1) return;
+      open({ conversation_id: c, url: `/chat?c=${c}` });
+    });
   }
   document.addEventListener('visibilitychange', () => { if (document.hidden) clearTimeout(timer); else poll(true); });
 

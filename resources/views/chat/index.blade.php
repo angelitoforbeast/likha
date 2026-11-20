@@ -304,6 +304,12 @@
   .lc-switch button[aria-checked="true"] { background: var(--lc-accent); }
   .lc-switch button[aria-checked="true"]::after { left: 21px; }
   @media (prefers-reduced-motion: no-preference) { .lc-switch button::after { transition: left 140ms cubic-bezier(.16, 1, .3, 1); } }
+  /* Spec 308: this device's alerts (web push) */
+  .lc-pop .lc-push-on { display: flex; align-items: center; gap: 7px; margin: 0 0 4px; color: var(--lc-text); font-size: 14px; font-weight: 600; }
+  .lc-push-on i { color: var(--lc-online); }
+  .lc-pop #lc-push-ios { color: var(--lc-text); line-height: 1.45; }
+  .lc-push-btn { width: 100%; justify-content: center; }
+  .lc-pop .lc-push-err { margin: 8px 0 0; color: var(--lc-danger); }
   .lc-mute-menu { right: 8px; width: 260px; padding: 4px; }
   .lc-mute-menu button { display: flex; width: 100%; gap: 10px; align-items: center; border: 0; background: transparent; padding: 9px 10px; border-radius: 8px; font-size: 14px; text-align: left; }
   .lc-mute-menu button:hover { background: var(--lc-hover); }
@@ -340,11 +346,21 @@
       <div class="lc-side-tools">
         <button type="button" class="lc-icon-btn" id="lc-alerts-btn" aria-label="Alerts and sound" title="Alerts and sound" aria-haspopup="dialog" aria-expanded="false" aria-controls="lc-alerts"><i class="fa-solid fa-sliders" aria-hidden="true"></i></button>
         <button type="button" class="lc-btn primary" id="lc-new-btn"><i class="fa-solid fa-pen-to-square" aria-hidden="true"></i> New chat</button>
-        {{-- Alerts: asks the browser for notifications only on this button, never on load (spec 300, MP-2). --}}
+        {{-- Alerts: asks the browser for notifications only on this button, never on load (spec 300, MP-2).
+             Spec 308: with the server's push key the button turns on alerts for this device even when Likha is closed. --}}
         <div class="lc-pop" id="lc-alerts" role="dialog" aria-label="Alerts" hidden>
           <h3>Alerts</h3>
-          <p id="lc-notif-text">Get a notification when a message arrives in a chat that is not open.</p>
-          <button type="button" class="lc-btn primary" id="lc-notif-allow">Allow notifications</button>
+          @if (!empty($boot['push_key']))
+            <p class="lc-push-on" id="lc-push-status" hidden><i class="fa-solid fa-circle-check" aria-hidden="true"></i> Alerts on for this device</p>
+            <p id="lc-notif-text" aria-live="polite">Get alerts on this device for new messages, even when Likha is closed.</p>
+            <p id="lc-push-ios" hidden>To get alerts on iPhone: Share <i class="fa-solid fa-arrow-up-from-bracket" aria-hidden="true"></i> → Add to Home Screen, then open Likha from the Home Screen</p>
+            <button type="button" class="lc-btn primary lc-push-btn" id="lc-notif-allow">Turn on alerts</button>
+            <button type="button" class="lc-btn lc-push-btn" id="lc-push-off" hidden>Turn off</button>
+            <p class="lc-push-err" id="lc-push-err" role="alert" hidden></p>
+          @else
+            <p id="lc-notif-text">Get a notification when a message arrives in a chat that is not open.</p>
+            <button type="button" class="lc-btn primary" id="lc-notif-allow">Allow notifications</button>
+          @endif
           <div class="lc-switch">
             <span id="lc-sound-label">Sound for new messages</span>
             <button type="button" id="lc-sound" role="switch" aria-checked="true" aria-labelledby="lc-sound-label"></button>
@@ -820,10 +836,116 @@
     } catch (e) { $('lc-err').textContent = e.message; }
   }
 
+  // ── Spec 308: alerts on this device, even when Likha is closed (web push). Without the server's key: 300's box. ──
+  const PUSH_KEY = BOOT.push_key || null;
+  const KEY_PUSH = `likha.chat.push.${BOOT.me.id}`;
+  const isIos = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const installed = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
+  const pushSupported = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window && window.isSecureContext;
+  const P = { state: 'off', busy: false, error: '' }; // off | on | ios | blocked | unsupported
+  const pushFlag = {
+    get() { try { return localStorage.getItem(KEY_PUSH) === '1'; } catch (e) { return false; } },
+    set(on) { try { on ? localStorage.setItem(KEY_PUSH, '1') : localStorage.removeItem(KEY_PUSH); } catch (e) { /* private mode */ } },
+  };
+  function keyBytes(b64) {
+    const s = (b64 + '='.repeat((4 - (b64.length % 4)) % 4)).replace(/-/g, '+').replace(/_/g, '/');
+    return Uint8Array.from(atob(s), (ch) => ch.charCodeAt(0));
+  }
+  async function shortHash(text) {
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+    return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('').slice(0, 16);
+  }
+  const pushReg = () => navigator.serviceWorker.register('/sw.js', { scope: '/' });
+  async function currentSub() {
+    const reg = await navigator.serviceWorker.getRegistration('/');
+    return reg ? reg.pushManager.getSubscription() : null;
+  }
+  // Works out this device's state; never asks the browser for permission.
+  async function pushRefresh() {
+    if (isIos && !installed && !pushSupported) { P.state = 'ios'; return; }
+    if (!pushSupported) { P.state = 'unsupported'; return; }
+    if (Notification.permission === 'denied') { P.state = 'blocked'; return; }
+    try {
+      let sub = await currentSub();
+      // This device had alerts on but the browser dropped or rotated the subscription: subscribe again quietly
+      // (permission is already granted, so the browser asks nothing).
+      if (!sub && pushFlag.get() && Notification.permission === 'granted') sub = await subscribe();
+      if (!sub) { P.state = 'off'; return; }
+      const { devices } = await api('GET', '/chat/push');
+      const mine = await shortHash(sub.endpoint);
+      if (!devices.some((d) => d.key === mine)) {
+        if (!pushFlag.get()) { P.state = 'off'; return; }
+        await api('POST', '/chat/push', sub.toJSON());
+      }
+      pushFlag.set(true); P.state = 'on';
+    } catch (e) { P.state = 'off'; }
+  }
+  async function subscribe() {
+    const reg = await pushReg();
+    await navigator.serviceWorker.ready;
+    const opts = { userVisibleOnly: true, applicationServerKey: keyBytes(PUSH_KEY) };
+    try { return await reg.pushManager.subscribe(opts); } catch (e) {
+      // A subscription made with an older server key: drop it and subscribe with the current one.
+      const old = await reg.pushManager.getSubscription();
+      if (!old) throw e;
+      await old.unsubscribe();
+      return reg.pushManager.subscribe(opts);
+    }
+  }
+  async function turnOn() {
+    P.busy = true; P.error = ''; renderAlerts();
+    try {
+      const perm = await Notification.requestPermission();
+      if (perm !== 'granted') { P.state = perm === 'denied' ? 'blocked' : 'off'; return; }
+      const sub = await subscribe();
+      await api('POST', '/chat/push', sub.toJSON());
+      pushFlag.set(true); P.state = 'on';
+    } catch (e) {
+      P.error = 'Could not turn on alerts. Try again.';
+    } finally { P.busy = false; renderAlerts(); focusPush(); }
+  }
+  async function turnOff() {
+    P.busy = true; P.error = ''; renderAlerts();
+    try {
+      const sub = await currentSub();
+      if (sub) { await api('DELETE', '/chat/push', { endpoint: sub.endpoint }); await sub.unsubscribe(); }
+      pushFlag.set(false); P.state = 'off';
+    } catch (e) {
+      P.error = 'Could not turn off alerts. Try again.';
+    } finally { P.busy = false; renderAlerts(); focusPush(); }
+  }
+  function focusPush() {
+    const on = $('lc-push-off'); const off = $('lc-notif-allow');
+    (!on.hidden ? on : (!off.hidden ? off : $('lc-sound'))).focus();
+  }
+  const PUSH_TEXT = {
+    off: 'Get alerts on this device for new messages, even when Likha is closed.',
+    on: 'New messages show here even when Likha is closed. Muted chats stay quiet.',
+    blocked: 'Alerts are blocked for Likha in this browser. Allow notifications in the site settings, then try again.',
+    unsupported: 'This browser cannot get alerts when Likha is closed. Likha plays the sound while it is open.',
+  };
+  function renderPush() {
+    const s = P.state;
+    $('lc-push-status').hidden = s !== 'on';
+    $('lc-push-ios').hidden = s !== 'ios';
+    $('lc-notif-text').hidden = s === 'ios';
+    $('lc-notif-text').textContent = PUSH_TEXT[s] || '';
+    const allow = $('lc-notif-allow');
+    allow.hidden = s !== 'off';
+    allow.disabled = P.busy;
+    allow.textContent = P.busy && s === 'off' ? 'Turning on…' : 'Turn on alerts';
+    const off = $('lc-push-off');
+    off.hidden = s !== 'on';
+    off.disabled = P.busy;
+    off.textContent = P.busy && s === 'on' ? 'Turning off…' : 'Turn off';
+    $('lc-push-err').hidden = !P.error;
+    $('lc-push-err').textContent = P.error;
+  }
   const notifSupported = 'Notification' in window;
   function renderAlerts() {
     const allow = $('lc-notif-allow'); const text = $('lc-notif-text');
-    if (!notifSupported) { allow.hidden = true; text.textContent = 'This browser cannot show notifications. Likha plays the sound instead.'; }
+    if (PUSH_KEY) renderPush();
+    else if (!notifSupported) { allow.hidden = true; text.textContent = 'This browser cannot show notifications. Likha plays the sound instead.'; }
     else if (Notification.permission === 'granted' && window.likhaChatUnread && !window.likhaChatUnread.notifWorks()) { allow.hidden = true; text.textContent = 'This browser shows Likha alerts as a sound only. Keep Likha open on screen to hear them.'; }
     else if (Notification.permission === 'granted') { allow.hidden = true; text.textContent = 'Notifications are on. They come while Likha is open on screen in a tab, for chats that are not open.'; }
     else if (Notification.permission === 'denied') { allow.hidden = true; text.textContent = 'Notifications are blocked. Allow them for Likha in this browser’s site settings.'; }
@@ -836,13 +958,20 @@
     closePops();
     if (!opening) return;
     renderAlerts(); $('lc-alerts').hidden = false; $('lc-alerts-btn').setAttribute('aria-expanded', 'true');
+    if (PUSH_KEY) { focusPush(); if (!P.busy) pushRefresh().then(() => { if (!$('lc-alerts').hidden) renderAlerts(); }); return; }
     ($('lc-notif-allow').hidden ? $('lc-sound') : $('lc-notif-allow')).focus();
   });
   // Asks the browser once, only on this click (never on load).
   $('lc-notif-allow').addEventListener('click', async () => {
+    if (PUSH_KEY) { if (!P.busy) turnOn(); return; }
     try { await Notification.requestPermission(); } catch (e) { /* old Safari: callback form only */ }
     renderAlerts(); $('lc-sound').focus();
   });
+  if (PUSH_KEY) {
+    $('lc-push-off').addEventListener('click', () => { if (!P.busy) turnOff(); });
+    // This device's state at load, without asking anything (also saves a rotated subscription again).
+    pushRefresh().then(() => { if (!$('lc-alerts').hidden) renderAlerts(); });
+  }
   $('lc-sound').addEventListener('click', () => {
     const on = $('lc-sound').getAttribute('aria-checked') !== 'true';
     if (window.likhaChatUnread) { window.likhaChatUnread.setSound(on); if (on) window.likhaChatUnread.chime(); }

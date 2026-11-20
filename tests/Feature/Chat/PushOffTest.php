@@ -21,10 +21,11 @@ class PushOffTest extends PushTestCase
         Queue::fake();
 
         $html = $this->actingAs($ana)->get('/chat')->assertOk()->getContent();
-        $this->assertStringNotContainsString('Turn on alerts', $html);
+        $this->assertStringNotContainsString('id="lc-notif-allow">Turn on alerts', $html);
         $this->assertStringNotContainsString('"push_key"', $html);
         // 300's box as it was.
-        $this->assertStringContainsString('Allow notifications', $html);
+        $this->assertStringContainsString('id="lc-notif-allow">Allow notifications</button>', $html);
+        $this->assertStringNotContainsString('id="lc-push-off"', $html);
 
         $this->actingAs($ana)->postJson("/chat/{$c->id}/messages", ['body' => 'hi'])->assertCreated();
         AiPost::post('mira', $ben->id, 'Follow-up');
@@ -51,6 +52,6 @@ class PushOffTest extends PushTestCase
     {
         config(['chat.push.private_key' => '']);
         $this->actingAs($this->person())->getJson('/chat/push')->assertNotFound();
-        $this->assertStringNotContainsString('Turn on alerts', $this->actingAs($this->person())->get('/chat')->getContent());
+        $this->assertStringNotContainsString('id="lc-notif-allow">Turn on alerts', $this->actingAs($this->person())->get('/chat')->getContent());
     }
 }

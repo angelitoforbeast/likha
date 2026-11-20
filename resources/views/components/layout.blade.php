@@ -6,6 +6,11 @@
   <meta http-equiv="X-UA-Compatible" content="ie=edge">
   <meta name="csrf-token" content="{{ csrf_token() }}">
   <title>{{ $title ?? ($heading ?? 'Likha') }}</title>
+  {{-- Spec 308: Likha can be installed on a phone (opens at /chat); iPhone gets web push only from the Home Screen app. --}}
+  <link rel="manifest" href="/manifest.webmanifest">
+  <meta name="theme-color" content="#2563eb">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-title" content="Likha">
 
   {{-- Sidebar state before paint (spec 295): rail and closed sections remembered in this browser. --}}
   <script>

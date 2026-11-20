@@ -57,7 +57,10 @@ class ChatController extends Controller
                 'reactions' => config('chat.reactions'),
                 'voice_max_seconds' => (int) config('chat.voice_max_seconds'),
                 'voice_max_kb' => (int) config('chat.voice_max_kb'),
-            ],
+            ] + array_filter([
+                // Spec 308: ang public key ng web push; wala ito kapag sarado (ang Alerts ay gaya ng 300).
+                'push_key' => \App\Services\Chat\ChatPush::publicKey(),
+            ]),
         ]);
     }
 
