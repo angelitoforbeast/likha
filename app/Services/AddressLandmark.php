@@ -38,6 +38,42 @@ final class AddressLandmark
     }
 
     /**
+     * Ang mga placeholder ng address (spec 311), dagdag sa PLACEHOLDERS ng landmark: ang tala ng AI o ng bot na walang
+     * address ("no address line 1 or landmark provided.", "no address line found", "address not provided", "missing").
+     */
+    private const ADDRESS_PLACEHOLDERS = [
+        '/^(no|none|without|walang?|wla)(\s+(po|pong))?\s+(complete\s+|exact\s+|specific\s+|full\s+)?(address|addr|street|house\s*(number|no)?|purok|sitio)(\s+(line|details|info|information))?(\s*(1|one))?((\s+(or|and|&)\s+|\s*\/\s*)(landmark|street|purok|sitio|house\s*number|address))*(\s+(was|is|po|pong))?(\s+(explicitly|yet|specifically))?(\s+(provided|found|mentioned|specified|given|available|stated|indicated|detected|extracted|nabanggit|na-?mention|binigay|ibinigay|nakalagay))?(\s+po)?$/u',
+        '/^(address|addr|address\s+line(\s*1)?|street|purok|purok\s*\/\s*sitio)\s*:?\s*((is|was)\s+)?(not\s+)?(provided|found|mentioned|specified|given|available|stated|indicated|missing|unknown|none|n\s?\/?\s?a)$/u',
+        '/^(missing|not\s+found|not\s+available|not\s+applicable|to\s+follow|tbd|tba)(\s+po)?$/u',
+    ];
+
+    /** Ang salitang nagsasabing walang laman ang nasa loob ng ( ) o [ ] ("[customer did not give one]", "(Wala pong namention)"). */
+    private const EMPTY_WORD = '/\b(not|no(?![\.\s]*\d)|none|wala|walang|wla|hindi|missing|unknown|n\/a|didn\'t|wasn\'t|isn\'t)\b/u';
+
+    /**
+     * Ang iisang panuntunan ng placeholder sa ADDRESS ng encode: blangko, ang mga placeholder ng landmark at ang
+     * ADDRESS_PLACEHOLDERS. Ang buong value sa ( ) o [ ] ay placeholder lang kapag ang laman nito ay placeholder o nagsasabing
+     * wala ("(Purok 7)" at "(P7) Pido St." ay tunay na address).
+     */
+    public static function isPlaceholderAddress(?string $address): bool
+    {
+        $check = rtrim(self::norm((string) $address), '.! ');
+        if (preg_match('/^[\[\(](.*)[\]\)]$/su', $check, $m)) {
+            $inner = rtrim(trim($m[1]), '.! ');
+
+            return preg_match(self::EMPTY_WORD, $inner) === 1 || self::isPlaceholderAddress($inner);
+        }
+        foreach (self::PLACEHOLDERS as $re) {
+            if (preg_match($re, $check)) return true;
+        }
+        foreach (self::ADDRESS_PLACEHOLDERS as $re) {
+            if (preg_match($re, $check)) return true;
+        }
+
+        return false;
+    }
+
+    /**
      * Ang address mula sa mga bahagi (Astra: house number, purok/sitio, address) at ang landmark: ang bahaging nasa loob na
      * ng iba ay tinatanggal, saka "near <landmark>" kapag wala pa ang landmark sa alinmang bahagi.
      * @param array<int, mixed> $parts

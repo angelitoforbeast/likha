@@ -33,18 +33,31 @@ final class Encoder
         $cell = ['J' => $parts['name'], 'K' => $parts['phone'], 'L' => '', 'M' => $parts['province'], 'N' => $parts['city'], 'O' => $parts['barangay']];
         $this->steps->add('parse_parts', 'OK', ['name' => $parts['name'] !== '', 'phone' => $parts['phone'] !== '', 'province' => $parts['province'],
             'city' => $parts['city'], 'barangay' => $parts['barangay']]);
+        // Ang mga bahagi ng address ng form (spec 311): ang ADDRESS mula sa code kapag may tunay na bahagi; '' = ang AI, gaya ng dati.
+        $form = FormAddress::read($cxd);
+        $fromForm = $form['shape'] === 'parts' ? FormAddress::compose($form) : '';
 
         $error = null;
         try {
             // STEP 3: extractAddressLine1WithLandmark
             $raw = Text::jsTrim($cxd);
-            if ($raw === '' || !$this->gpt->hasKey()) {
+            if ($fromForm !== '') {
+                // Spec 311: ang form ay may House Number / Purok/Sitio, kaya binubuo sa code gaya ng Astra; ang AI ay tinatanggal ang purok.
+                $cell['L'] = $fromForm;
+                $this->steps->add('address_line1', 'FORM_PARTS', ['shape' => $form['shape']]);
+            } elseif ($raw === '' || !$this->gpt->hasKey()) {
                 $this->steps->add('address_line1', 'SKIP:' . ($raw === '' ? 'H_EMPTY' : 'NO_KEY'));
             } else {
                 $prompt = "Extract Address Line 1 including landmark. Remove name, phone number, barangay, city, province, zip code, and instructions. Do not explain. Return only the address line.\n\nInput:\n" . $raw;
                 try {
                     $cell['L'] = $this->gpt->extract('You are a helpful assistant that extracts Address Line 1 including the landmark only.', $prompt);
-                    $this->steps->add('address_line1', $cell['L'] !== '' ? 'WROTE_ADDRESS_LINE1' : 'EMPTY_RESPONSE', $this->gpt->meta() + $this->rawIfEmpty($cell['L']));
+                    // Ang placeholder ("n/a", "no address line provided.") ay walang address: blangko, para subukan pa ng fill_missing at ng checker.
+                    if ($cell['L'] !== '' && AddressLandmark::isPlaceholderAddress($cell['L'])) {
+                        $this->steps->add('address_line1', 'PLACEHOLDER', $this->gpt->meta() + ['raw' => $cell['L']]);
+                        $cell['L'] = '';
+                    } else {
+                        $this->steps->add('address_line1', $cell['L'] !== '' ? 'WROTE_ADDRESS_LINE1' : 'EMPTY_RESPONSE', $this->gpt->meta() + $this->rawIfEmpty($cell['L']));
+                    }
                 } catch (Throwable $e) {
                     $this->steps->add('address_line1', 'ERR_ADDRESS_LINE1:' . $e->getMessage(), $this->gpt->meta());
                 }
@@ -93,9 +106,17 @@ final class Encoder
             $error ??= $this->steps->redact($e->getMessage());
         }
         $db = $checker->cells;
+        // Walang placeholder sa ADDRESS kailanman: hinaharangan nito ang checker at umaabot ito sa J&T label (spec 311).
+        if (Text::jsTrim($db['D']) !== '' && AddressLandmark::isPlaceholderAddress($db['D'])) {
+            $this->steps->add('address_placeholder', 'CLEARED', ['raw' => $db['D']]);
+            $db['D'] = '';
+        }
+        $composed = $fromForm !== '' && Text::jsTrim($db['D']) === Text::sheetValue($fromForm);
+        // Ang address line ng AI: ang tunay na Purok/Sitio ng form na wala rito ay idinudugtong sa code.
+        if (!$composed) $this->purok($db, $form);
         // Ang landmark ng form ay idinudugtong sa address line ng AI ayon sa panuntunan (hindi iniaasa sa prompt). Pagkatapos ng
         // checker, para ang lugar na sinuri nito ay ang dati pa rin.
-        $this->landmark($db, $cxd);
+        $this->landmark($db, $cxd, $composed ? $form : null);
 
         $w = Text::jsTrim($db['W']);
         $s = Text::jsTrim($db['S']);
@@ -161,8 +182,10 @@ PHONE NUMBER: " . $in->get('phone') . "
             $prompt = "\"{$conversation}\"\n\nExtract only the {$label}. Answer with the exact {$label} only. No explanation.";
             try {
                 $out = $this->gpt->extract('You are a helpful assistant that extracts missing shipping details only.', $prompt);
-                $cell[$c] = $out;
-                $this->steps->add('fill_' . strtolower(str_replace(' ', '_', $label)), $out !== '' ? 'WROTE_' . strtoupper(str_replace(' ', '_', $label)) : 'EMPTY_RESPONSE',
+                // Ang placeholder na address line ay blangko (spec 311), para ang checker ang kumuha nito sa usapan.
+                $placeholder = $c === 'L' && $out !== '' && AddressLandmark::isPlaceholderAddress($out);
+                $cell[$c] = $placeholder ? '' : $out;
+                $this->steps->add('fill_' . strtolower(str_replace(' ', '_', $label)), $placeholder ? 'PLACEHOLDER' : ($out !== '' ? 'WROTE_' . strtoupper(str_replace(' ', '_', $label)) : 'EMPTY_RESPONSE'),
                     $this->gpt->meta() + ['raw' => $out !== '' ? $out : ($this->gpt->last['raw'] ?? '')]);
             } catch (Throwable $e) {
                 $this->steps->add('fill_' . strtolower(str_replace(' ', '_', $label)), 'ERR:' . $e->getMessage(), $this->gpt->meta());
@@ -173,9 +196,10 @@ PHONE NUMBER: " . $in->get('phone') . "
     /**
      * Ang "Landmark:" ng extracted details sa address line (D): landmark_added, landmark_kept (nasa address na),
      * landmark_no_room (halos nasa limit na ang address line), no_landmark (wala o placeholder), o no_address (walang address
-     * line: hindi ginagawang landmark lang ang address).
+     * line: hindi ginagawang landmark lang ang address). $form: ang address ay binuo mula sa mga bahagi ng form, kaya ang
+     * landmark ay idinadagdag gaya ng Astra (AddressLandmark::compose ng mga bahagi at ng landmark).
      */
-    private function landmark(array &$db, string $cxd): void
+    private function landmark(array &$db, string $cxd, ?array $form = null): void
     {
         $landmark = Parse::landmark($cxd);
         if (AddressLandmark::clean($landmark) === '') {
@@ -184,15 +208,28 @@ PHONE NUMBER: " . $in->get('phone') . "
             return;
         }
         $address = Text::jsTrim($db['D']);
-        // "unknown" ay walang address line, gaya ng finalize ng checker.
-        if ($address === '' || Text::lower($address) === 'unknown') {
+        // Ang placeholder ("unknown", "n/a"…) ay walang address line, gaya ng finalize ng checker.
+        if (AddressLandmark::isPlaceholderAddress($address)) {
             $this->steps->add('landmark', 'no_address', ['landmark' => $landmark]);
 
             return;
         }
         $r = AddressLandmark::apply($address, $landmark);
-        if ($r['result'] === 'added') $db['D'] = Text::sheetValue($r['address']);
+        if ($r['result'] === 'added') $db['D'] = Text::sheetValue($form !== null ? FormAddress::compose($form, $landmark) : $r['address']);
         $this->steps->add('landmark', 'landmark_' . $r['result'], ['landmark' => $landmark]);
+    }
+
+    /**
+     * Ang tunay na Purok/Sitio ng form sa address line ng AI (D): purok_added, purok_kept (nasa line na), purok_none (walang
+     * address line). Walang step kapag walang tunay na Purok/Sitio ang form, kaya ang ibang order ay gaya ng dati.
+     */
+    private function purok(array &$db, array $form): void
+    {
+        $purok = FormAddress::purok($form);
+        if ($purok === '') return;
+        $r = FormAddress::keepPurok($db['D'], $purok);
+        if ($r['result'] === 'added') $db['D'] = Text::sheetValue($r['address']);
+        $this->steps->add('purok', 'purok_' . $r['result']);
     }
 
     /** @return array<string, string> ang sagot ng OpenAI kapag walang nakuhang text (para makita kung bakit). */
