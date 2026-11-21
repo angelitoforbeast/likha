@@ -27,8 +27,8 @@
 
 ## What shipped
 
-Commits on `feat/311-purok-in-address` (base a466e1bd): 828e862d (spec + plan), 73820374 (tests, red: 87 errors, 41 failures
-of 144), c71e97f8 (code), then this result.
+Commits on `feat/311-purok-in-address` (base a466e1bd): a3a258e5 (spec + plan), 3ae84fb8 (tests, red: 87 errors, 41 failures
+of 144), 7f589627 (code), ee517f51 (this result), then this sha update. The shas changed once when the commit trailers were stripped.
 
 | Where | Change |
 |---|---|
@@ -99,7 +99,7 @@ existing rows; it is not the encode — see Open).
 ## Evidence per done-when item
 
 1. **A test for every H, N and E case passes.** 3 new files, 23 test methods, 144 tests with data sets, 258 assertions, all OK
-   (`vendor/bin/phpunit` on the three files). Red before the code (73820374): 87 errors, 41 failures.
+   (`vendor/bin/phpunit` on the three files). Red before the code (3ae84fb8): 87 errors, 41 failures.
 
    | Case | Test |
    |---|---|
@@ -122,7 +122,7 @@ existing rows; it is not the encode — see Open).
    | Run | Tests | Errors | Failures | Skipped |
    |---|---|---|---|---|
    | Base a466e1bd | 5985 | 0 | 3 | 15 |
-   | Tip c71e97f8 | 6129 | 0 | 3 | 15 |
+   | Tip 7f589627 | 6129 | 0 | 3 | 15 |
 
    - +144 tests are the three new files (23 methods with their data sets). No new failures.
    - The 3 failures are the same on both runs, all known: `ExampleTest::test_the_application_returns_a_successful_response`,
@@ -192,7 +192,7 @@ None. PA-1, PA-2 and PA-3 shipped as written.
   `tests/Feature/OrderEncode/FormAddressTest.php`, `PurokInAddressTest.php`, `PlaceholderAddressCheckerTest.php` (new; they
   use `LiveRowTestCase`, `Fixtures` and `Steps::requests()`, which must exist on Incepxion's line), plus the two docs.
   No migration, no config, no route.
-- **Incepxion:** cherry-pick 73820374 and c71e97f8 (and the docs). Conflicts can come only if Incepxion's `Encoder.php`
+- **Incepxion:** cherry-pick 3ae84fb8 and 7f589627 (and the docs). Conflicts can come only if Incepxion's `Encoder.php`
   STEP 3 / fill_missing / landmark blocks or `AddressLandmark.php` differ from Likha's (spec 187 must be there: `AddressLandmark`,
   `Parse::landmark`, `Encoder::landmark`). Run the three new test files and `tests/Feature/OrderEncode` there.
 - **Effect when live (both sites):** every new order whose extracted details have a House Number or Purok/Sitio line gets its
@@ -200,7 +200,7 @@ None. PA-1, PA-2 and PA-3 shipped as written.
   checker or left empty. Existing rows are not touched; a re-encode of an open row writes the new value unless staff edited
   ADDRESS (the edited_* and HISTORICAL LOGS guards are unchanged), and an empty result never overwrites a filled ADDRESS
   (`encodeRow` keeps the old value).
-- **Revert:** `git revert c71e97f8` (code only; the tests then fail, so revert 73820374 too) on each site's line. No data to
+- **Revert:** `git revert 7f589627` (code only; the tests then fail, so revert 3ae84fb8 too) on each site's line. No data to
   undo: rows written in between keep their composed address, which is a valid address line.
 
 ## Open
