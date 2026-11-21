@@ -2,6 +2,7 @@
 
 namespace App\Services\OrderEncode;
 
+use App\Services\AddressLandmark;
 use RuntimeException;
 use Throwable;
 
@@ -558,7 +559,8 @@ final class Checker
             $nameOld = $this->get('B');
             $addrOld = $this->get('D');
             $nameFilled = $nameOld !== '' && Text::lower($nameOld) !== 'unknown';
-            $addrFilled = $addrOld !== '' && Text::lower($addrOld) !== 'unknown';
+            // Ang placeholder ("n/a", "no address line provided.") ay hindi address (spec 311), kaya kinukuha pa rin sa usapan.
+            $addrFilled = !AddressLandmark::isPlaceholderAddress($addrOld);
             if ($nameFilled && $addrFilled) {
                 $this->steps->add('name_addr', 'SKIP:ALREADY_FILLED');
 
@@ -619,7 +621,7 @@ final class Checker
                 $this->put('B', $newName);
                 $wrote = true;
             }
-            if (!$addrFilled && $newAddr !== '' && Text::lower($newAddr) !== 'unknown' && $newAddr !== $addrOld) {
+            if (!$addrFilled && !AddressLandmark::isPlaceholderAddress($newAddr) && $newAddr !== $addrOld) {
                 $this->put('D', $newAddr);
                 $wrote = true;
             }
